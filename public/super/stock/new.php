@@ -1,12 +1,7 @@
 <?php
-// public/super/stock/new.php — record a delivery: a supplier brings a batch
-// of books (new titles, or a restock of ones already on the shelf), in the
-// same shape as the shop's paper stock ledger: Category, Book Title,
-// Variant, Brand, Supplier SKU / maker, Model / size, Opening Stock, Unit Price, Total,
-// Balance, Remark. Every text field below is free entry with live
-// suggestions — picking a suggestion (or typing an exact match) reuses the
-// existing Category/Grade/Brand/Supplier SKU / maker/Model / size/Supplier; anything new is
-// created automatically on save. No dropdowns.
+// public/super/stock/new.php — bulk product intake for a general shop:
+// product name, category, brand, colors, unit (kg/bale/carton…), good qty,
+// faulty/broken qty, prices, barcode. Same UI card styles as before.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::STOCK_ENTER);
 
@@ -18,8 +13,8 @@ $SI  = new Models\StockIntakeModel($pdo);
 
 $base = public_url('super/stock/new.php');
 $apiBase = public_url('api/inventory/');
+$units = Models\ProductModel::UNITS;
 
-/** Validate + store a row's uploaded image. Same rules as the products page. */
 function stock_row_image_file(int $i): array
 {
     if (!isset($_FILES['items']['name'][$i]['image']) || $_FILES['items']['name'][$i]['image'] === '') {
@@ -53,35 +48,48 @@ function stock_handle_image(array $file): array
     }
     $dir = ROOT_PATH . '/public/assets/uploads/products';
     if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
-    $name = 'book_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
+    $name = 'prod_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
         return ['ok' => false, 'error' => 'Could not save the image. Check folder permissions.'];
     }
     return ['ok' => true, 'path' => public_url('assets/uploads/products/' . $name)];
 }
 
+function stock_split_colors(string $csv): array
+{
+    return array_values(array_filter(array_map('trim', explode(',', $csv))));
+}
+
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $supplierName = trim($_POST['supplier'] ?? '');
     $supplierId = $supplierName !== '' ? (int) $SUP->findOrCreate($supplierName) : 0;
-
     $rows = $_POST['items'] ?? [];
 
     if (!$error) {
         $items = [];
         foreach ($rows as $i => $row) {
             $qty = (float) ($row['quantity'] ?? 0);
-            if ($qty <= 0) { continue; } // skip rows the owner didn't fill in
+            $faulty = max(0, (float) ($row['faulty_quantity'] ?? 0));
+            if ($qty <= 0 && $faulty <= 0) { continue; }
+            if ($qty <= 0 && $faulty > 0) { $qty = 0; } // allow recording only damaged goods on restock path via remark
+            if ($qty <= 0) { continue; } // sellable qty still required for new/restock stock bump
+
             $remark = trim($row['remark'] ?? '');
             $productChoice = trim($row['product_choice'] ?? '');
+            $unit = in_array($row['unit'] ?? '', $units, true) ? $row['unit'] : 'piece';
+            $colors = stock_split_colors($row['colors'] ?? '');
 
             if ($productChoice !== '') {
                 $items[] = [
-                    'mode'         => 'restock',
-                    'product_id'   => (int) $productChoice,
-                    'quantity'     => $qty,
-                    'buying_price' => (float) ($row['buying_price'] ?? 0),
-                    'remark'       => $remark,
+                    'mode'            => 'restock',
+                    'product_id'      => (int) $productChoice,
+                    'quantity'        => $qty,
+                    'faulty_quantity' => $faulty,
+                    'unit'            => $unit,
+                    'colors'          => $colors,
+                    'buying_price'    => (float) ($row['buying_price'] ?? 0),
+                    'remark'          => $remark,
                 ];
                 continue;
             }
@@ -94,28 +102,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $items[] = [
                 'mode'            => 'new',
-                'name'            => $title,
-                'category_id'     => (int) $C->findOrCreate($row['subject'] ?? '', 'product'),
                 'product_type'    => 'product',
-                'grade_id'        => (int) $BA->findOrCreate('grade', $row['grade'] ?? ''),
-                'publisher_id'    => (int) $BA->findOrCreate('publisher', $row['publisher'] ?? ''),
-                'author_id'       => (int) $BA->findOrCreate('author', $row['author'] ?? ''),
-                'edition_id'      => (int) $BA->findOrCreate('edition', $row['edition'] ?? ''),
+                'name'            => $title,
+                'category_id'     => (int) $C->findOrCreate($row['category'] ?? '', 'product'),
+                'brand_id'        => (int) $BA->findOrCreate('brand', $row['brand'] ?? ''),
                 'barcode'         => trim($row['barcode'] ?? ''),
+                'unit'            => $unit,
+                'colors'          => $colors,
                 'quantity'        => $qty,
+                'faulty_quantity' => $faulty,
                 'buying_price'    => (float) ($row['buying_price'] ?? 0),
                 'selling_price'   => $row['selling_price'] ?? 0,
                 'wholesale_price' => $row['wholesale_price'] ?? '',
-                'offer_price'     => $row['offer_price'] ?? '',
-                'offer_starts_at' => $row['offer_starts_at'] ?? '',
-                'offer_ends_at'   => $row['offer_ends_at'] ?? '',
                 'image_path'      => $img['path'] ?? '',
                 'remark'          => $remark,
             ];
         }
 
         if (!$error && !$items) {
-            $error = 'Add at least one product with a quantity.';
+            $error = 'Add at least one product with a good (sellable) quantity.';
         }
 
         if (!$error) {
@@ -145,9 +150,9 @@ ob_start();
       <h2 class="h5 mb-3">This delivery</h2>
       <div class="row g-3">
         <div class="col-12 col-md-6">
-          <label class="form-label">Supplier <span class="text-muted">(optional — who delivered it)</span></label>
+          <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
           <div class="ta-wrap">
-            <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" placeholder="e.g. Coca-Cola Distributors" autocomplete="off">
+            <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" placeholder="e.g. Nairobi Distributors" autocomplete="off">
             <div class="ta-menu"></div>
           </div>
         </div>
@@ -167,12 +172,12 @@ ob_start();
       </div>
       <div id="rows"></div>
       <div class="d-flex justify-content-end pt-2 border-top mt-2">
-        <div class="text-muted small">Grand total: <strong id="grandTotal">KES 0</strong></div>
+        <div class="text-muted small">Grand total (good stock cost): <strong id="grandTotal">KES 0</strong></div>
       </div>
     </div>
   </div>
 
-  <button class="btn btn-primary btn-lg"><i class="fas fa-truck-loading me-1"></i>Record products in bulk</button>
+  <button class="btn btn-primary btn-lg"><i class="fas fa-boxes-stacked me-1"></i>Record products in bulk</button>
 </form>
 
 <template id="rowTpl">
@@ -185,7 +190,7 @@ ob_start();
       <div class="col-12 col-sm-6">
         <label class="form-label small mb-1">Product name</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][title]" class="form-control form-control-sm ta-input bookTitle" data-field="title" placeholder="e.g. Soft drink 500ml" autocomplete="off">
+          <input type="text" name="items[__I__][title]" class="form-control form-control-sm ta-input productTitle" data-field="title" placeholder="e.g. Yellow beans, Soft drink 500ml" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
         <input type="hidden" name="items[__I__][product_choice]" class="productChoice" value="">
@@ -197,7 +202,7 @@ ob_start();
         <div class="barcodeNote small mt-1" style="display:none;"></div>
       </div>
       <div class="col-12 col-sm-6 photoCol newProductFields">
-        <label class="form-label small mb-1">Product photo <span class="text-muted">(optional)</span></label>
+        <label class="form-label small mb-1">Photo <span class="text-muted">(optional)</span></label>
         <div class="d-flex align-items-center gap-2">
           <input type="file" name="items[__I__][image]" accept="image/*" class="form-control form-control-sm photoInput">
           <img class="photoPreview" style="display:none;width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;">
@@ -207,45 +212,40 @@ ob_start();
       <div class="col-6 col-sm-3 mt-2 newProductFields">
         <label class="form-label small mb-1">Category</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][subject]" class="form-control form-control-sm ta-input" data-field="subject" placeholder="e.g. Beverages" autocomplete="off">
+          <input type="text" name="items[__I__][category]" class="form-control form-control-sm ta-input" data-field="category" placeholder="e.g. Cereals, Drinks" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Variant</label>
+        <label class="form-label small mb-1">Brand <span class="text-muted">(optional)</span></label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][grade]" class="form-control form-control-sm ta-input" data-field="grade" placeholder="e.g. Large / 500ml" autocomplete="off">
+          <input type="text" name="items[__I__][brand]" class="form-control form-control-sm ta-input" data-field="brand" placeholder="e.g. Coca-Cola" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Brand</label>
-        <div class="ta-wrap">
-          <input type="text" name="items[__I__][publisher]" class="form-control form-control-sm ta-input" data-field="publisher" placeholder="e.g. Coca-Cola" autocomplete="off">
-          <div class="ta-menu"></div>
-        </div>
+        <label class="form-label small mb-1">Colors <span class="text-muted">(comma-separated)</span></label>
+        <input type="text" name="items[__I__][colors]" class="form-control form-control-sm" placeholder="e.g. Red, Blue, White">
       </div>
-      <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Supplier SKU / maker</label>
-        <div class="ta-wrap">
-          <input type="text" name="items[__I__][author]" class="form-control form-control-sm ta-input" data-field="author" placeholder="optional" autocomplete="off">
-          <div class="ta-menu"></div>
-        </div>
-      </div>
-      <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Model / size</label>
-        <div class="ta-wrap">
-          <input type="text" name="items[__I__][edition]" class="form-control form-control-sm ta-input" data-field="edition" placeholder="optional" autocomplete="off">
-          <div class="ta-menu"></div>
-        </div>
+      <div class="col-6 col-sm-3 mt-2">
+        <label class="form-label small mb-1">Unit</label>
+        <select name="items[__I__][unit]" class="form-select form-select-sm unitSelect">
+          <?php foreach ($units as $u): ?>
+            <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
+          <?php endforeach; ?>
+        </select>
       </div>
 
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1 qtyLabel">Opening stock</label>
+        <label class="form-label small mb-1 qtyLabel">Good qty received</label>
         <input type="number" step="0.01" min="0" name="items[__I__][quantity]" class="form-control form-control-sm qty" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Unit price (KES)</label>
+        <label class="form-label small mb-1">Faulty / broken</label>
+        <input type="number" step="0.01" min="0" name="items[__I__][faulty_quantity]" class="form-control form-control-sm" placeholder="0">
+      </div>
+      <div class="col-6 col-sm-3 mt-2">
+        <label class="form-label small mb-1">Buying price (KES)</label>
         <input type="number" step="0.01" min="0" name="items[__I__][buying_price]" class="form-control form-control-sm buyingPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
@@ -258,33 +258,12 @@ ob_start();
       </div>
 
       <div class="col-6 col-sm-4 mt-2">
-        <label class="form-label small mb-1">Total</label>
+        <label class="form-label small mb-1">Line total (good stock)</label>
         <div class="form-control form-control-sm bg-light rowTotal" data-value="0">KES 0</div>
       </div>
       <div class="col-6 col-sm-8 mt-2">
         <label class="form-label small mb-1">Remark <span class="text-muted">(optional)</span></label>
-        <input type="text" name="items[__I__][remark]" class="form-control form-control-sm" placeholder="e.g. torn cover, invoice #2201">
-      </div>
-
-      <div class="col-12 mt-2 newProductFields">
-        <div class="form-check">
-          <input class="form-check-input offerToggle" type="checkbox" id="offerToggle__I__">
-          <label class="form-check-label small" for="offerToggle__I__"><i class="fas fa-tag me-1"></i>Put this product on offer</label>
-        </div>
-        <div class="row g-2 mt-1 offerFields" style="display:none;">
-          <div class="col-6 col-sm-4">
-            <label class="form-label small mb-1">Offer price (KES)</label>
-            <input type="number" step="0.01" min="0" name="items[__I__][offer_price]" class="form-control form-control-sm" placeholder="0">
-          </div>
-          <div class="col-6 col-sm-4">
-            <label class="form-label small mb-1">Starts <span class="text-muted">(optional)</span></label>
-            <input type="datetime-local" name="items[__I__][offer_starts_at]" class="form-control form-control-sm">
-          </div>
-          <div class="col-12 col-sm-4">
-            <label class="form-label small mb-1">Ends</label>
-            <input type="datetime-local" name="items[__I__][offer_ends_at]" class="form-control form-control-sm offerEnds">
-          </div>
-        </div>
+        <input type="text" name="items[__I__][remark]" class="form-control form-control-sm" placeholder="e.g. torn packaging, wet carton">
       </div>
     </div>
   </div>
@@ -305,7 +284,6 @@ ob_start();
     padding: .4rem .65rem; font-size: .85rem; cursor: pointer;
   }
   .ta-menu button:hover, .ta-menu button.active { background: #f1f5f9; }
-  .ta-menu .ta-empty { padding: .4rem .65rem; font-size: .8rem; color: #94a3b8; }
   .matchNote { color: #0d6efd; }
 </style>
 <script>
@@ -327,24 +305,19 @@ ob_start();
     idx++;
   }
 
-  // --- generic type-ahead: free text, suggestions only, no forced choice ---
   function attachTypeahead(input, field, onPick) {
     var wrap = input.closest('.ta-wrap');
     var menu = wrap.querySelector('.ta-menu');
     var timer = null;
-
     function render(items) {
       menu.innerHTML = '';
-      if (!items.length) {
-        menu.classList.remove('show');
-        return;
-      }
+      if (!items.length) { menu.classList.remove('show'); return; }
       items.forEach(function (item) {
         var b = document.createElement('button');
         b.type = 'button';
         b.textContent = item.name;
         b.addEventListener('mousedown', function (e) {
-          e.preventDefault(); // fire before input blur closes the menu
+          e.preventDefault();
           input.value = item.name;
           menu.classList.remove('show');
           if (onPick) onPick(item);
@@ -353,9 +326,8 @@ ob_start();
       });
       menu.classList.add('show');
     }
-
     input.addEventListener('input', function () {
-      if (onPick) onPick(null); // typing invalidates any earlier pick (e.g. restock match)
+      if (onPick) onPick(null);
       clearTimeout(timer);
       var q = input.value.trim();
       if (!q) { menu.classList.remove('show'); return; }
@@ -369,190 +341,106 @@ ob_start();
     input.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); }, 150); });
   }
 
-  // --- Shared: a matched product (by title or by barcode) switches the row to restock ---
-  function makeRestockControls(row) {
-    var titleInput = row.querySelector('.bookTitle');
-    var barcodeInput = row.querySelector('.barcodeInput');
-    var productChoice = row.querySelector('.productChoice');
+  function setRestock(row, product) {
+    var choice = row.querySelector('.productChoice');
     var note = row.querySelector('.matchNote');
-    var lastMatchedId = null;
-
-    function setRestock(item) {
-      productChoice.value = item.id;
-      lastMatchedId = item.id;
+    if (product && product.id) {
+      choice.value = product.id;
       row.classList.add('is-restock');
-      titleInput.value = item.name;
-      if (item.barcode) { barcodeInput.value = item.barcode; }
-      row.querySelector('.buyingPrice').value = item.buying_price || '';
-      row.querySelector('.qtyLabel').textContent = 'Additional stock';
-      var bits = [item.subject_name, item.grade_name, item.publisher_name, item.author_name, item.edition_name].filter(Boolean);
       note.style.display = 'block';
-      note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already on the shelf' + (bits.length ? ' — ' + bits.join(' · ') : '') +
-        '. Current balance: <strong>' + item.balance + '</strong>. This adds to it.';
-    }
-
-    function clearRestock() {
-      productChoice.value = '';
-      lastMatchedId = null;
+      note.textContent = 'Restocking existing product (balance ' + product.balance + ').';
+      row.querySelector('.qtyLabel').textContent = 'Qty to add';
+    } else {
+      choice.value = '';
       row.classList.remove('is-restock');
-      row.querySelector('.qtyLabel').textContent = 'Opening stock';
       note.style.display = 'none';
-      note.innerHTML = '';
+      row.querySelector('.qtyLabel').textContent = 'Good qty received';
     }
-
-    return { setRestock: setRestock, clearRestock: clearRestock, isMatched: function () { return lastMatchedId !== null; } };
-  }
-
-  // --- Book Title: matches an existing product -> switches the row to restock ---
-  function wireTitleField(row, restock) {
-    var input = row.querySelector('.bookTitle');
-    var wrap = input.closest('.ta-wrap');
-    var menu = wrap.querySelector('.ta-menu');
-    var timer = null;
-    var lastMatchedName = null;
-
-    function render(items) {
-      menu.innerHTML = '';
-      if (!items.length) { menu.classList.remove('show'); return; }
-      items.forEach(function (item) {
-        var b = document.createElement('button');
-        b.type = 'button';
-        var bits = [item.grade_name, item.publisher_name].filter(Boolean);
-        b.innerHTML = '<span class="fw-semibold">' + item.name + '</span>' +
-          (bits.length ? ' <span class="text-muted">— ' + bits.join(' · ') + '</span>' : '') +
-          ' <span class="text-muted">(balance ' + item.balance + ')</span>';
-        b.addEventListener('mousedown', function (e) {
-          e.preventDefault();
-          lastMatchedName = item.name;
-          menu.classList.remove('show');
-          restock.setRestock(item);
-        });
-        menu.appendChild(b);
-      });
-      menu.classList.add('show');
-    }
-
-    input.addEventListener('input', function () {
-      if (lastMatchedName !== null && input.value !== lastMatchedName) { lastMatchedName = null; restock.clearRestock(); }
-      clearTimeout(timer);
-      var q = input.value.trim();
-      if (!q) { menu.classList.remove('show'); return; }
-      timer = setTimeout(function () {
-        fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
-          .then(function (r) { return r.json(); })
-          .then(function (data) { render(data.items || []); })
-          .catch(function () {});
-      }, 180);
-    });
-    input.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); }, 150); });
-  }
-
-  // --- Barcode: an exact match (scanner types fast + hits Enter) -> restock;
-  //     no match just keeps the code to save on the new book. ---
-  function wireBarcodeField(row, restock) {
-    var input = row.querySelector('.barcodeInput');
-    var note = row.querySelector('.barcodeNote');
-    var lastChecked = null;
-
-    function lookup() {
-      var code = input.value.trim();
-      if (!code || code === lastChecked) { return; }
-      lastChecked = code;
-      fetch(API + 'find_barcode.php?code=' + encodeURIComponent(code))
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (input.value.trim() !== code) { return; } // stale response, input changed since
-          if (data.item) {
-            restock.setRestock(data.item);
-            note.style.display = 'none';
-          } else {
-            note.style.display = 'block';
-            note.className = 'barcodeNote small mt-1 text-muted';
-            note.innerHTML = '<i class="fas fa-circle-plus me-1"></i>New barcode — will be saved on this book.';
-          }
-        })
-        .catch(function () {});
-    }
-
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); lookup(); }
-    });
-    input.addEventListener('blur', lookup);
-    input.addEventListener('input', function () {
-      if (restock.isMatched() && input.value.trim() === '') { /* leave restock state alone; title field owns it */ }
-      note.style.display = 'none';
-    });
-  }
-
-  function recalcRow(row) {
-    var qty = parseFloat(row.querySelector('.qty').value) || 0;
-    var price = parseFloat(row.querySelector('.buyingPrice').value) || 0;
-    var total = qty * price;
-    var box = row.querySelector('.rowTotal');
-    box.textContent = money(total);
-    box.dataset.value = total;
-    recalcGrandTotal();
-  }
-
-  function recalcGrandTotal() {
-    var sum = 0;
-    document.querySelectorAll('.rowTotal').forEach(function (b) { sum += parseFloat(b.dataset.value) || 0; });
-    document.getElementById('grandTotal').textContent = money(sum);
+    recalc();
   }
 
   function wireRow(row) {
-    row.querySelector('.removeRow').addEventListener('click', function () { row.remove(); recalcGrandTotal(); });
-
-    var restock = makeRestockControls(row);
-    wireTitleField(row, restock);
-    wireBarcodeField(row, restock);
-    ['subject', 'grade', 'publisher', 'author', 'edition'].forEach(function (field) {
-      var el = row.querySelector('[data-field="' + field + '"]');
-      if (el) attachTypeahead(el, field);
+    row.querySelector('.removeRow').addEventListener('click', function () {
+      row.remove(); recalc();
     });
-
-    row.querySelector('.qty').addEventListener('input', function () { recalcRow(row); });
-    row.querySelector('.buyingPrice').addEventListener('input', function () { recalcRow(row); });
-
-    var photoInput = row.querySelector('.photoInput');
-    var preview = row.querySelector('.photoPreview');
-    if (photoInput) {
-      photoInput.addEventListener('change', function () {
-        var file = photoInput.files && photoInput.files[0];
-        if (!file) { preview.style.display = 'none'; return; }
-        preview.src = URL.createObjectURL(file);
-        preview.style.display = 'block';
-      });
-    }
-
-    var offerToggle = row.querySelector('.offerToggle');
-    var offerFields = row.querySelector('.offerFields');
-    var offerEnds = row.querySelector('.offerEnds');
-    if (offerToggle) {
-      offerToggle.addEventListener('change', function () {
-        offerFields.style.display = offerToggle.checked ? 'flex' : 'none';
-        if (offerToggle.checked && !offerEnds.value) {
-          var d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-          d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-          offerEnds.value = d.toISOString().slice(0, 16);
+    row.querySelectorAll('.qty, .buyingPrice').forEach(function (el) {
+      el.addEventListener('input', recalc);
+    });
+    var photo = row.querySelector('.photoInput');
+    if (photo) {
+      photo.addEventListener('change', function () {
+        var prev = row.querySelector('.photoPreview');
+        if (photo.files && photo.files[0]) {
+          prev.src = URL.createObjectURL(photo.files[0]);
+          prev.style.display = 'block';
         }
       });
     }
+    row.querySelectorAll('.ta-input').forEach(function (input) {
+      var field = input.dataset.field;
+      if (field === 'title') {
+        attachTypeahead(input, 'title', function () {});
+        var timer = null;
+        input.addEventListener('input', function () {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          if (!q) { setRestock(row, null); return; }
+          timer = setTimeout(function () {
+            fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
+              .then(function (r) { return r.json(); })
+              .then(function (data) {
+                var exact = (data.items || []).find(function (it) { return (it.name || '').toLowerCase() === q.toLowerCase(); });
+                setRestock(row, exact || null);
+              }).catch(function () {});
+          }, 200);
+        });
+      } else {
+        attachTypeahead(input, field);
+      }
+    });
+    var barcode = row.querySelector('.barcodeInput');
+    var barcodeNote = row.querySelector('.barcodeNote');
+    barcode.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var code = barcode.value.trim();
+      if (!code) return;
+      fetch(API + 'find_barcode.php?code=' + encodeURIComponent(code))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.item) {
+            row.querySelector('.productTitle').value = data.item.name;
+            setRestock(row, { id: data.item.id, balance: data.item.balance || data.item.quantity || 0 });
+            barcodeNote.style.display = 'block';
+            barcodeNote.style.color = '#15803d';
+            barcodeNote.textContent = 'Matched existing product.';
+          } else {
+            barcodeNote.style.display = 'block';
+            barcodeNote.style.color = '#64748b';
+            barcodeNote.textContent = 'New barcode — will be saved with this product.';
+          }
+        });
+    });
+  }
+
+  function recalc() {
+    var grand = 0;
+    document.querySelectorAll('.stock-row').forEach(function (row) {
+      var qty = parseFloat(row.querySelector('.qty').value) || 0;
+      var buy = parseFloat(row.querySelector('.buyingPrice').value) || 0;
+      var total = qty * buy;
+      var el = row.querySelector('.rowTotal');
+      el.dataset.value = total;
+      el.textContent = money(total);
+      grand += total;
+    });
+    document.getElementById('grandTotal').textContent = money(grand);
   }
 
   document.getElementById('addRowBtn').addEventListener('click', addRow);
-  addRow(); // start with one row
-
-  var supplierInput = document.querySelector('.ta-input[data-field="supplier"]');
-  attachTypeahead(supplierInput, 'supplier');
-
-  document.getElementById('stockForm').addEventListener('submit', function (e) {
-    if (!rowsWrap.children.length) { e.preventDefault(); alert('Add at least one book.'); }
-  });
+  addRow();
 })();
 </script>
-
 <?php
 $content = ob_get_clean();
-$__layout = TenantContext::role() === 'staff' ? 'staff' : 'tenants';
-include __DIR__ . '/../../templates/' . $__layout . '/layout.php';
+include __DIR__ . '/../../templates/tenants/layout.php';

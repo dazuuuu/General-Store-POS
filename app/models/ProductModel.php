@@ -12,9 +12,9 @@ class ProductModel extends Model
         $this->ensureSchema();
     }
 
-    public const UNITS = ['piece', 'g', 'kg', 'tonne', 'ml', 'litre', 'pack', 'dozen', 'box', 'carton'];
+    public const UNITS = ['piece', 'kg', 'g', 'bale', 'carton', 'pack', 'dozen', 'box', 'ml', 'litre', 'tonne'];
     public const SIZE_UNITS = ['ml', 'l'];
-    public const PRODUCT_TYPES = ['product', 'book', 'stationery'];
+    public const PRODUCT_TYPES = ['product', 'book', 'stationery']; // legacy book/stationery kept for old rows
 
     /**
      * @param array $in name, category_id, subcategory_id, supplier_id, description,
@@ -44,10 +44,7 @@ class ProductModel extends Model
         return ['ok' => true, 'errors' => []];
     }
 
-    /** Assign a system-generated barcode to a book that doesn't have one yet
-     *  (for titles with no printed barcode to scan). Leaves an existing
-     *  barcode untouched. Returns the barcode (new or already-set), or null
-     *  if the product doesn't belong to this tenant. */
+    /** Assign a system-generated barcode when the product has none yet. */
     public function assignBarcode(int $id): ?string
     {
         $tid = \TenantContext::tenantId();
@@ -120,7 +117,7 @@ class ProductModel extends Model
         ];
     }
 
-    /** Products grouped by subject (category) for the inventory overview. */
+    /** Products grouped by category for the inventory overview. */
     public function listGroupedByCategory(): array
     {
         $rows = $this->listWithMeta();
@@ -133,36 +130,48 @@ class ProductModel extends Model
         return $grouped;
     }
 
-    /** Books grouped by grade/class for the inventory overview. */
+    /** Products grouped by brand. */
+    public function listGroupedByBrand(): array
+    {
+        $rows = $this->listWithMeta();
+        $grouped = [];
+        foreach ($rows as $p) {
+            $key = $p['brand_name'] ?: ($p['publisher_name'] ?: 'No brand');
+            $grouped[$key][] = $p;
+        }
+        ksort($grouped);
+        return $grouped;
+    }
+
+    /** Products grouped by receive/sell unit (kg, carton, bale…). */
+    public function listGroupedByUnit(): array
+    {
+        $rows = $this->listWithMeta();
+        $grouped = [];
+        foreach ($rows as $p) {
+            $key = strtoupper((string) ($p['unit'] ?? 'piece'));
+            $grouped[$key][] = $p;
+        }
+        ksort($grouped);
+        return $grouped;
+    }
+
+    /** Legacy alias → category grouping. */
     public function listGroupedByGrade(): array
     {
-        $rows = $this->listWithMeta(false, 'book');
-        $grouped = [];
-        foreach ($rows as $p) {
-            $key = $p['grade_name'] ?: 'Ungraded';
-            $grouped[$key][] = $p;
-        }
-        ksort($grouped);
-        return $grouped;
+        return $this->listGroupedByCategory();
     }
 
-    /** Books grouped by publisher for the inventory overview. */
+    /** Legacy alias → brand grouping. */
     public function listGroupedByPublisher(): array
     {
-        $rows = $this->listWithMeta(false, 'book');
-        $grouped = [];
-        foreach ($rows as $p) {
-            $key = $p['publisher_name'] ?: 'No publisher';
-            $grouped[$key][] = $p;
-        }
-        ksort($grouped);
-        return $grouped;
+        return $this->listGroupedByBrand();
     }
 
-    /** Books grouped by supplier for the inventory overview. */
+    /** Products grouped by supplier for the inventory overview. */
     public function listGroupedBySupplier(): array
     {
-        $rows = $this->listWithMeta(false, 'book');
+        $rows = $this->listWithMeta();
         $grouped = [];
         foreach ($rows as $p) {
             $key = $p['supplier_name'] ?: 'No supplier';
@@ -172,18 +181,10 @@ class ProductModel extends Model
         return $grouped;
     }
 
-    /** Stationery items grouped by their own category (Pens, Geometry sets…)
-     *  for the inventory overview. */
+    /** Legacy stationery grouping → category grouping. */
     public function listGroupedByStationeryCategory(): array
     {
-        $rows = $this->listWithMeta(false, 'stationery');
-        $grouped = [];
-        foreach ($rows as $p) {
-            $key = $p['category_name'] ?: 'Uncategorized';
-            $grouped[$key][] = $p;
-        }
-        ksort($grouped);
-        return $grouped;
+        return $this->listGroupedByCategory();
     }
 
     /** Active products at or below their restock threshold (for alerts). */
@@ -205,31 +206,21 @@ class ProductModel extends Model
         return $st->fetchAll();
     }
 
-    /** Active or archived, in-stock books for the till — carries Subject/Grade/
-     *  Publisher plus offer/archive flags so the selling screen can browse by
-     *  whichever the staff member picks, including the Offers and Archive tabs.
-     *  Archived books are included (staff can still pull one to sell) but the
-     *  UI hides them outside the Archive tab. `retail_price` here is already
-     *  the effective (offer-aware) price — everything downstream (the cart,
-     *  the pre-submit total check) just reads it. */
+    /** Sellable stock for the till — category/brand, colors, unit, faulty qty,
+     *  and offer/archive flags. Archived items stay sellable from the Archive tab. */
     public function sellable(): array
     {
         $tid = \TenantContext::tenantId();
-        // Columns this reads (offer_*, barcode, product_type…) are guaranteed
-        // to exist by ensureSchema() above, run fresh on every construction —
-        // no "unknown column" fallback needed here.
         $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at,
-                       p.quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price,
+                       p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price,
                        p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,
                        p.category_id, c.name AS category_name,
-                       p.grade_id, g.name AS grade_name,
                        p.publisher_id, pu.name AS publisher_name,
                        p.brand_id, br.name AS brand_name
                   FROM products p
              LEFT JOIN categories c ON c.id = p.category_id
-             LEFT JOIN book_attributes g  ON g.id  = p.grade_id
              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
              LEFT JOIN book_attributes br ON br.id = p.brand_id
                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
@@ -238,19 +229,16 @@ class ProductModel extends Model
         try {
             $stmt->execute([$tid]);
         } catch (\PDOException $e) {
-            // Older DBs missing bulk/credit columns — fall back.
             $stmt = $this->db->prepare(
                 "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
                         p.offer_price, p.offer_starts_at, p.offer_ends_at,
                         p.quantity, p.unit, p.status, p.barcode, p.colors, p.sizes,
                         p.image_path, p.size_value, p.size_unit,
                         p.category_id, c.name AS category_name,
-                        p.grade_id, g.name AS grade_name,
                         p.publisher_id, pu.name AS publisher_name,
                         p.brand_id, br.name AS brand_name
                    FROM products p
               LEFT JOIN categories c ON c.id = p.category_id
-              LEFT JOIN book_attributes g  ON g.id  = p.grade_id
               LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
               LEFT JOIN book_attributes br ON br.id = p.brand_id
                   WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
@@ -273,9 +261,7 @@ class ProductModel extends Model
         return $rows;
     }
 
-    /** Active books (or, with $productType='stationery', stationery items)
-     *  whose name matches $q — powers the title type-ahead / restock lookup
-     *  on both Record Stock and Record Stationery. */
+    /** Product name type-ahead / restock lookup. */
     public function searchByName(string $q, int $limit = 8, string $productType = 'product'): array
     {
         $tid = \TenantContext::tenantId();
@@ -283,37 +269,47 @@ class ProductModel extends Model
         if ($q === '') {
             return [];
         }
-        // Treat legacy 'book' rows as products when searching the general catalogue.
         $types = [$productType];
         if ($productType === 'product') {
             $types[] = 'book';
+            $types[] = 'stationery';
         }
         $productType = in_array($productType, self::PRODUCT_TYPES, true) ? $productType : 'product';
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $stmt = $this->db->prepare(
-            "SELECT p.id, p.name, p.quantity, p.buying_price, p.image_path, p.barcode,
-                    c.name AS subject_name, g.name AS grade_name, pu.name AS publisher_name,
-                    au.name AS author_name, ed.name AS edition_name, br.name AS brand_name
+            "SELECT p.id, p.name, p.quantity, p.faulty_quantity, p.unit, p.colors, p.buying_price, p.image_path, p.barcode,
+                    c.name AS category_name, c.name AS subject_name,
+                    pu.name AS publisher_name, br.name AS brand_name
                FROM products p
           LEFT JOIN categories c ON c.id = p.category_id
-          LEFT JOIN book_attributes g  ON g.id  = p.grade_id
           LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
-          LEFT JOIN book_attributes au ON au.id = p.author_id
-          LEFT JOIN book_attributes ed ON ed.id = p.edition_id
           LEFT JOIN book_attributes br ON br.id = p.brand_id
               WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
            ORDER BY (p.name LIKE ?) DESC, p.name ASC
               LIMIT " . (int) $limit
         );
         $params = array_merge([$tid], $types, ['active', '%' . $q . '%', $q . '%']);
-        $stmt->execute($params);
+        try {
+            $stmt->execute($params);
+        } catch (\PDOException $e) {
+            $stmt = $this->db->prepare(
+                "SELECT p.id, p.name, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                        c.name AS category_name, c.name AS subject_name,
+                        pu.name AS publisher_name, br.name AS brand_name
+                   FROM products p
+              LEFT JOIN categories c ON c.id = p.category_id
+              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
+              LEFT JOIN book_attributes br ON br.id = p.brand_id
+                  WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
+               ORDER BY (p.name LIKE ?) DESC, p.name ASC
+                  LIMIT " . (int) $limit
+            );
+            $stmt->execute($params);
+        }
         return $stmt->fetchAll();
     }
 
-    /** Active book with this exact barcode (any status other than archived) —
-     *  powers "scan to restock" on Record Stock. Same row shape as
-     *  searchByName() so the stock-entry JS can treat a barcode hit exactly
-     *  like a title match. */
+    /** Exact barcode match for scan-to-restock. */
     public function findByBarcode(string $barcode): ?array
     {
         $tid = \TenantContext::tenantId();
@@ -321,21 +317,33 @@ class ProductModel extends Model
         if ($barcode === '') {
             return null;
         }
-        $stmt = $this->db->prepare(
-            'SELECT p.id, p.name, p.product_type, p.quantity, p.buying_price, p.image_path, p.barcode,
-                    c.name AS subject_name, g.name AS grade_name, pu.name AS publisher_name,
-                    au.name AS author_name, ed.name AS edition_name, br.name AS brand_name
-               FROM products p
-          LEFT JOIN categories c ON c.id = p.category_id
-          LEFT JOIN book_attributes g  ON g.id  = p.grade_id
-          LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
-          LEFT JOIN book_attributes au ON au.id = p.author_id
-          LEFT JOIN book_attributes ed ON ed.id = p.edition_id
-          LEFT JOIN book_attributes br ON br.id = p.brand_id
-              WHERE p.tenant_id = ? AND p.barcode = ? AND p.status <> ?
-              LIMIT 1'
-        );
-        $stmt->execute([$tid, $barcode, 'archived']);
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT p.id, p.name, p.product_type, p.quantity, p.faulty_quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                        c.name AS category_name, c.name AS subject_name,
+                        pu.name AS publisher_name, br.name AS brand_name
+                   FROM products p
+              LEFT JOIN categories c ON c.id = p.category_id
+              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
+              LEFT JOIN book_attributes br ON br.id = p.brand_id
+                  WHERE p.tenant_id = ? AND p.barcode = ? AND p.status <> ?
+                  LIMIT 1'
+            );
+            $stmt->execute([$tid, $barcode, 'archived']);
+        } catch (\PDOException $e) {
+            $stmt = $this->db->prepare(
+                'SELECT p.id, p.name, p.product_type, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                        c.name AS category_name, c.name AS subject_name,
+                        pu.name AS publisher_name, br.name AS brand_name
+                   FROM products p
+              LEFT JOIN categories c ON c.id = p.category_id
+              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
+              LEFT JOIN book_attributes br ON br.id = p.brand_id
+                  WHERE p.tenant_id = ? AND p.barcode = ? AND p.status <> ?
+                  LIMIT 1'
+            );
+            $stmt->execute([$tid, $barcode, 'archived']);
+        }
         $row = $stmt->fetch();
         return $row ?: null;
     }
@@ -358,7 +366,7 @@ class ProductModel extends Model
         return $stmt->fetchAll();
     }
 
-    /** Shared JOINs for pulling a book's Subject/Grade/Publisher/Author/Edition/Supplier names. */
+    /** Shared JOINs for category / brand / supplier (legacy publisher kept for old rows). */
     private const META_JOIN_SQL = "
                FROM products p
           LEFT JOIN categories c ON c.id = p.category_id
@@ -374,11 +382,7 @@ class ProductModel extends Model
                     sup.name AS supplier_name, g.name AS grade_name, pu.name AS publisher_name,
                     au.name AS author_name, ed.name AS edition_name, br.name AS brand_name";
 
-    /** Products with subject/grade/publisher/author/edition/brand/supplier
-     *  names for listing. Archived titles are left out by default — the
-     *  inventory overview's day-to-day view — pass true (or use
-     *  listArchived()) to see them. Pass a product type ('book'/'stationery')
-     *  to see only that kind; null (default) returns both. */
+    /** Products with category/brand/supplier names for inventory listing. */
     public function listWithMeta(bool $includeArchived = false, ?string $productType = null): array
     {
         $tid = \TenantContext::tenantId();
@@ -451,6 +455,7 @@ class ProductModel extends Model
             'units_per_pack' => "ALTER TABLE `products` ADD COLUMN `units_per_pack` DECIMAL(12,2) NOT NULL DEFAULT 1.00 AFTER `unit`",
             'pack_unit' => "ALTER TABLE `products` ADD COLUMN `pack_unit` VARCHAR(20) NULL AFTER `units_per_pack`",
             'pack_price' => "ALTER TABLE `products` ADD COLUMN `pack_price` DECIMAL(12,2) NULL AFTER `pack_unit`",
+            'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
         ];
 
         foreach ($checks as $column => $sql) {
@@ -519,6 +524,9 @@ class ProductModel extends Model
         }
         if (isset($in['units_per_pack']) && $in['units_per_pack'] !== '' && (!is_numeric($in['units_per_pack']) || (float) $in['units_per_pack'] <= 0)) {
             $errors['units_per_pack'] = 'Enter a valid pack size.';
+        }
+        if (isset($in['faulty_quantity']) && $in['faulty_quantity'] !== '' && (!is_numeric($in['faulty_quantity']) || (float) $in['faulty_quantity'] < 0)) {
+            $errors['faulty_quantity'] = 'Enter a valid faulty quantity.';
         }
         $sizeValue = $in['size_value'] ?? '';
         if ($sizeValue !== '' && (!is_numeric($sizeValue) || (float) $sizeValue <= 0)) {
@@ -603,6 +611,7 @@ class ProductModel extends Model
             'name'                => trim($in['name']),
             'description'         => ($in['description'] ?? '') !== '' ? trim($in['description']) : null,
             'quantity'            => (float) ($in['quantity'] ?? 0),
+            'faulty_quantity'     => max(0, (float) ($in['faulty_quantity'] ?? 0)),
             'unit'                => $in['unit'] ?? 'piece',
             'units_per_pack'      => $unitsPerPack,
             'pack_unit'           => $packUnit,

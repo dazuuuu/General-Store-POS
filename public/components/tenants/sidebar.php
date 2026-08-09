@@ -77,14 +77,9 @@ $isOn = function (string $needle) use ($uri): string {
             <i class="fas fa-warehouse"></i><span>Inventory</span>
         </a>
         <?php endif; ?>
-        <?php if (TenantContext::can(Capabilities::INVENTORY_EDIT)):
-            $onStationeryCats = strpos($uri, '/super/categories') !== false && (($_GET['type'] ?? '') === 'stationery');
-        ?>
-        <a class="t-link <?php echo (strpos($uri, '/super/categories') !== false && !$onStationeryCats) ? 'active' : ''; ?>" href="<?php echo public_url('super/categories/'); ?>">
+        <?php if (TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
+        <a class="t-link <?php echo $isOn('/super/categories'); ?>" href="<?php echo public_url('super/categories/'); ?>">
             <i class="fas fa-tags"></i><span>Categories</span>
-        </a>
-        <a class="t-link <?php echo $isOn('/super/grades'); ?>" href="<?php echo public_url('super/grades/'); ?>">
-            <i class="fas fa-layer-group"></i><span>Variants</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/publishers'); ?>" href="<?php echo public_url('super/publishers/'); ?>">
             <i class="fas fa-building"></i><span>Brands</span>
@@ -108,11 +103,6 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <a class="t-link <?php echo $isOn('/super/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">
             <i class="fas fa-boxes-stacked"></i><span>Record products in bulk</span>
-        </a>
-        <?php endif; ?>
-        <?php if (TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
-        <a class="t-link <?php echo $onStationeryCats ? 'active' : ''; ?>" href="<?php echo public_url('super/categories/') . '?type=stationery'; ?>">
-            <i class="fas fa-shapes"></i><span>Extra categories</span>
         </a>
         <?php endif; ?>
 

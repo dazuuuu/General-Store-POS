@@ -13,10 +13,10 @@ $C  = new Models\CategoryModel($pdo);
 $BA = new Models\BookAttributeModel($pdo);
 $HO = new Models\HeldOrderModel($pdo);
 $products   = $P->sellable();
-$subjects   = $C->all(['type' => 'subject'], 'name ASC');
-$grades     = $BA->all(['type' => 'grade'], 'name ASC');
-$publishers = $BA->all(['type' => 'publisher'], 'name ASC');
-$stationeryCats = $C->all(['type' => 'stationery'], 'name ASC');
+$categories = $C->all(['type' => 'product'], 'name ASC');
+if (!$categories) { $categories = $C->all(['type' => 'subject'], 'name ASC'); }
+$brands     = $BA->all(['type' => 'brand'], 'name ASC');
+if (!$brands) { $brands = $BA->all(['type' => 'publisher'], 'name ASC'); }
 
 $error   = '';
 $cartJson = '[]';
@@ -123,25 +123,23 @@ ob_start();
     <?php $offerCount = count(array_filter($products, fn($p) => !empty($p['on_offer']))); ?>
     <?php if ($offerCount > 0): ?>
       <button type="button" class="pos-offer-banner" id="offerBanner">
-        <i class="fas fa-tag me-1"></i><?php echo $offerCount; ?> book<?php echo $offerCount === 1 ? '' : 's'; ?> on offer right now — tap to see them
+        <i class="fas fa-tag me-1"></i><?php echo $offerCount; ?> product<?php echo $offerCount === 1 ? '' : 's'; ?> on offer right now — tap to see them
       </button>
     <?php endif; ?>
 
     <div class="pos-dim-tabs" id="dimTabs">
-      <button type="button" class="pos-dim active" data-dim="subject">By subject</button>
-      <button type="button" class="pos-dim" data-dim="grade">By grade</button>
-      <button type="button" class="pos-dim" data-dim="publisher">By publisher</button>
-      <button type="button" class="pos-dim" data-dim="stationery">Stationery</button>
+      <button type="button" class="pos-dim active" data-dim="category">By category</button>
+      <button type="button" class="pos-dim" data-dim="brand">By brand</button>
       <button type="button" class="pos-dim" data-dim="offers">Offers</button>
       <button type="button" class="pos-dim" data-dim="archive">Archive</button>
     </div>
 
-    <div class="pos-cats" id="catRow-subject" data-dim-row="subject">
+    <div class="pos-cats" id="catRow-category" data-dim-row="category">
       <button type="button" class="pos-cat active" data-cat="">
         <span class="pos-cat-img pos-cat-all"><i class="fas fa-border-all"></i></span>
         <span>All</span>
       </button>
-      <?php foreach ($subjects as $c): ?>
+      <?php foreach ($categories as $c): ?>
         <button type="button" class="pos-cat" data-cat="<?php echo (int) $c['id']; ?>">
           <span class="pos-cat-img">
             <?php if (!empty($c['image_path'])): ?>
@@ -154,63 +152,37 @@ ob_start();
         </button>
       <?php endforeach; ?>
     </div>
-    <div class="pos-cats" id="catRow-grade" data-dim-row="grade" style="display:none;">
+    <div class="pos-cats" id="catRow-brand" data-dim-row="brand" style="display:none;">
       <button type="button" class="pos-cat active" data-cat="">
         <span class="pos-cat-img pos-cat-all"><i class="fas fa-border-all"></i></span>
         <span>All</span>
       </button>
-      <?php foreach ($grades as $g): ?>
-        <button type="button" class="pos-cat" data-cat="<?php echo (int) $g['id']; ?>">
-          <span class="pos-cat-img"><i class="fas fa-graduation-cap"></i></span>
-          <span><?php echo htmlspecialchars($g['name']); ?></span>
-        </button>
-      <?php endforeach; ?>
-    </div>
-    <div class="pos-cats" id="catRow-publisher" data-dim-row="publisher" style="display:none;">
-      <button type="button" class="pos-cat active" data-cat="">
-        <span class="pos-cat-img pos-cat-all"><i class="fas fa-border-all"></i></span>
-        <span>All</span>
-      </button>
-      <?php foreach ($publishers as $pub): ?>
+      <?php foreach ($brands as $pub): ?>
         <button type="button" class="pos-cat" data-cat="<?php echo (int) $pub['id']; ?>">
           <span class="pos-cat-img"><i class="fas fa-building"></i></span>
           <span><?php echo htmlspecialchars($pub['name']); ?></span>
         </button>
       <?php endforeach; ?>
     </div>
-    <div class="pos-cats" id="catRow-stationery" data-dim-row="stationery" style="display:none;">
-      <button type="button" class="pos-cat active" data-cat="">
-        <span class="pos-cat-img pos-cat-all"><i class="fas fa-border-all"></i></span>
-        <span>All</span>
-      </button>
-      <?php foreach ($stationeryCats as $sc): ?>
-        <button type="button" class="pos-cat" data-cat="<?php echo (int) $sc['id']; ?>">
-          <span class="pos-cat-img">
-            <?php if (!empty($sc['image_path'])): ?>
-              <img src="<?php echo htmlspecialchars($sc['image_path']); ?>" alt="">
-            <?php else: ?>
-              <i class="fas fa-pen-ruler"></i>
-            <?php endif; ?>
-          </span>
-          <span><?php echo htmlspecialchars($sc['name']); ?></span>
-        </button>
-      <?php endforeach; ?>
-    </div>
 
     <div class="pos-prod-grid" id="productList">
       <?php foreach ($products as $p):
-          $isStationery = ($p['product_type'] ?? 'book') === 'stationery';
           $price = (float) ($p['retail_price'] ?: $p['selling_price']);
-          $sz = Models\ProductModel::sizeLabel($p);
-          $sub = $isStationery ? implode(' · ', array_filter([$p['brand_name'] ?? null, !empty($p['colors']) ? implode('/', $p['colors']) : null])) : $sz;
+          $colorBits = !empty($p['colors']) ? (is_array($p['colors']) ? $p['colors'] : []) : [];
+          $faulty = (float) ($p['faulty_quantity'] ?? 0);
+          $sub = implode(' · ', array_filter([
+              $p['brand_name'] ?? null,
+              $colorBits ? implode('/', $colorBits) : null,
+              !empty($p['unit']) && $p['unit'] !== 'piece' ? $p['unit'] : null,
+              $faulty > 0 ? ('faulty ' . rtrim(rtrim(number_format($faulty, 2), '0'), '.')) : null,
+          ]));
           $label = $p['name'] . ($sub ? " ({$sub})" : '');
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
              data-price="<?php echo $price; ?>" data-stock="<?php echo (float) $p['quantity']; ?>"
-             data-type="<?php echo $isStationery ? 'stationery' : 'book'; ?>"
-             data-subject="<?php echo (int) ($p['category_id'] ?? 0); ?>"
-             data-grade="<?php echo (int) ($p['grade_id'] ?? 0); ?>"
-             data-publisher="<?php echo (int) ($p['publisher_id'] ?? 0); ?>"
+             data-type="product"
+             data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
+             data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
              data-on-offer="<?php echo !empty($p['on_offer']) ? '1' : '0'; ?>"
              data-archived="<?php echo !empty($p['is_archived']) ? '1' : '0'; ?>"
              data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? '', ENT_QUOTES); ?>">
@@ -220,7 +192,7 @@ ob_start();
             <?php if (!empty($p['image_path'])): ?>
               <img src="<?php echo htmlspecialchars($p['image_path']); ?>" alt="">
             <?php else: ?>
-              <i class="fas fa-<?php echo $isStationery ? 'pen-ruler' : 'book'; ?>"></i>
+              <i class="fas fa-box"></i>
             <?php endif; ?>
           </div>
           <div class="pos-card-name"><?php echo htmlspecialchars($p['name']); ?><?php echo $sub ? '<br><small>' . htmlspecialchars($sub) . '</small>' : ''; ?></div>
@@ -235,7 +207,7 @@ ob_start();
           <button type="button" class="pos-add"><i class="fas fa-cart-plus me-1"></i>Add</button>
         </div>
       <?php endforeach; ?>
-      <div id="noMatch" class="text-muted small text-center py-4" style="display:none;grid-column:1/-1;"><i class="fas fa-search me-1"></i>No books match.</div>
+      <div id="noMatch" class="text-muted small text-center py-4" style="display:none;grid-column:1/-1;"><i class="fas fa-search me-1"></i>No products match.</div>
     </div>
   </div>
 
@@ -260,7 +232,7 @@ ob_start();
     </div>
 
     <div class="pos-cart" id="cartRows">
-      <div class="text-muted small text-center py-4" id="cartEmpty">Tap a book to add it.</div>
+      <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it.</div>
     </div>
 
     <div class="pos-totals">
@@ -385,13 +357,13 @@ function updateTotals() {
 function render() {
     var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
     wrap.innerHTML = '';
-    if (!ids.length) { wrap.innerHTML = '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a book to add it.</div>'; }
+    if (!ids.length) { wrap.innerHTML = '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it.</div>'; }
     ids.forEach(function (id) {
         var p = PRODUCTS[id], qty = cart[id];
         var line = document.createElement('div');
         line.className = 'pos-cart-line';
         line.innerHTML =
-            (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-book"></i></div>')
+            (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
           + '<div class="flex-grow-1">'
           +   '<div class="pos-cart-name">' + p.name + '</div>'
           +   '<div class="pos-cart-price">' + money(p.price) + '</div>'
@@ -426,7 +398,7 @@ document.getElementById('cartRows').addEventListener('click', function (e) {
 });
 
 var searchInput = document.getElementById('search');
-var activeDim = 'subject';
+var activeDim = 'category';
 function activeCatFor(dim) {
     var row = document.querySelector('.pos-cats[data-dim-row="' + dim + '"]');
     var btn = row && row.querySelector('.pos-cat.active');
@@ -442,12 +414,9 @@ function applyFilters() {
             matchesDim = el.dataset.onOffer === '1';
         } else if (activeDim === 'archive') {
             matchesDim = el.dataset.archived === '1';
-        } else if (activeDim === 'stationery') {
-            var stationeryCat = activeCatFor('stationery');
-            matchesDim = el.dataset.archived !== '1' && el.dataset.type === 'stationery' && (stationeryCat === '' || el.dataset.subject === stationeryCat);
         } else {
             var activeCat = activeCatFor(activeDim);
-            matchesDim = el.dataset.archived !== '1' && el.dataset.type !== 'stationery' && (activeCat === '' || el.dataset[activeDim] === activeCat);
+            matchesDim = el.dataset.archived !== '1' && (activeCat === '' || el.dataset[activeDim] === activeCat);
         }
         var show = matchesText && matchesDim;
         el.style.display = show ? '' : 'none';
@@ -506,7 +475,7 @@ if (barcodeScan) {
         barcodeScan.value = '';
         if (!code) { return; }
         var id = BARCODES[code];
-        if (!id) { flashScan('No book with that barcode.', false); return; }
+        if (!id) { flashScan('No product with that barcode.', false); return; }
         var p = PRODUCTS[id];
         if (p && p.stock <= (cart[id] || 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
         add(id);

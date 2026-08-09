@@ -17,10 +17,9 @@ class StockIntakeModel extends Model
     /**
      * @param array $header supplier_id (optional), staff_id, notes
      * @param array $items  list of either:
-     *   new book:  ['mode'=>'new', 'name', 'category_id', 'grade_id', 'publisher_id',
-     *               'author_id', 'edition_id', 'quantity', 'buying_price', 'selling_price',
-     *               'wholesale_price', 'image_path', 'remark']
-     *   restock:   ['mode'=>'restock', 'product_id', 'quantity', 'buying_price', 'remark']
+     *   new:     ['mode'=>'new', 'name', 'category_id', 'brand_id', 'unit', 'colors',
+     *             'quantity', 'faulty_quantity', 'buying_price', 'selling_price', ...]
+     *   restock: ['mode'=>'restock', 'product_id', 'quantity', 'faulty_quantity', 'buying_price', 'remark']
      * @return array ['ok'=>bool, 'intake_id'=>?int, 'errors'=>array]
      */
     public function create(array $header, array $items): array
@@ -60,10 +59,6 @@ class StockIntakeModel extends Model
             ]);
             $intakeId = (int) $db->lastInsertId();
 
-            $insItem = $db->prepare(
-                'INSERT INTO stock_intake_items (tenant_id, stock_intake_id, product_id, product_name, quantity, buying_price, remark)
-                 VALUES (?,?,?,?,?,?,?)'
-            );
             $bump = $db->prepare(
                 'UPDATE products SET quantity = quantity + ?, buying_price = ? WHERE id = ? AND tenant_id = ?'
             );
@@ -85,6 +80,13 @@ class StockIntakeModel extends Model
                     }
                     $bump->execute([$qty, $buying, $productId, $tid]);
                     $productName = $prod['name'];
+                    $faulty = max(0, (float) ($i['faulty_quantity'] ?? 0));
+                    if ($faulty > 0) {
+                        try {
+                            $db->prepare('UPDATE products SET faulty_quantity = faulty_quantity + ? WHERE id = ? AND tenant_id = ?')
+                               ->execute([$faulty, $productId, $tid]);
+                        } catch (\PDOException $ignored) {}
+                    }
                 } else {
                     $name = trim((string) ($i['name'] ?? ''));
                     if ($name === '') {
@@ -95,19 +97,16 @@ class StockIntakeModel extends Model
                         'product_type'    => $i['product_type'] ?? 'product',
                         'name'            => $name,
                         'category_id'     => (int) ($i['category_id'] ?? 0),
-                        'grade_id'        => (int) ($i['grade_id'] ?? 0),
-                        'publisher_id'    => (int) ($i['publisher_id'] ?? 0),
-                        'author_id'       => (int) ($i['author_id'] ?? 0),
-                        'edition_id'      => (int) ($i['edition_id'] ?? 0),
                         'brand_id'        => (int) ($i['brand_id'] ?? 0),
                         'barcode'         => $i['barcode'] ?? '',
                         'supplier_id'     => $supplierId,
-                        'unit'            => 'piece',
+                        'unit'            => $i['unit'] ?? 'piece',
                         'size_value'      => $i['size_value'] ?? '',
                         'size_unit'       => $i['size_unit'] ?? '',
                         'colors'          => $i['colors'] ?? [],
                         'sizes'           => $i['sizes'] ?? [],
                         'quantity'        => $qty,
+                        'faulty_quantity' => (float) ($i['faulty_quantity'] ?? 0),
                         'buying_price'    => $buying,
                         'retail_price'    => $i['selling_price'] ?? 0,
                         'wholesale_price' => $i['wholesale_price'] ?? '',
@@ -126,7 +125,26 @@ class StockIntakeModel extends Model
                 }
 
                 $remark = trim((string) ($i['remark'] ?? ''));
-                $insItem->execute([$tid, $intakeId, $productId, $productName, $qty, $buying, $remark !== '' ? $remark : null]);
+                try {
+                    $insItem = $db->prepare(
+                        'INSERT INTO stock_intake_items (tenant_id, stock_intake_id, product_id, product_name, quantity, faulty_quantity, unit, colors, buying_price, remark)
+                         VALUES (?,?,?,?,?,?,?,?,?,?)'
+                    );
+                    $insItem->execute([
+                        $tid, $intakeId, $productId, $productName, $qty,
+                        max(0, (float) ($i['faulty_quantity'] ?? 0)),
+                        $i['unit'] ?? null,
+                        is_array($i['colors'] ?? null) ? implode(', ', $i['colors']) : ($i['colors'] ?? null),
+                        $buying,
+                        $remark !== '' ? $remark : null,
+                    ]);
+                } catch (\PDOException $e) {
+                    $insItem = $db->prepare(
+                        'INSERT INTO stock_intake_items (tenant_id, stock_intake_id, product_id, product_name, quantity, buying_price, remark)
+                         VALUES (?,?,?,?,?,?,?)'
+                    );
+                    $insItem->execute([$tid, $intakeId, $productId, $productName, $qty, $buying, $remark !== '' ? $remark : null]);
+                }
             }
 
             $db->commit();
@@ -199,6 +217,9 @@ class StockIntakeModel extends Model
         $this->ensureColumn('stock_intakes', 'supplier_id', "ALTER TABLE stock_intakes MODIFY supplier_id INT NULL");
         $this->ensureColumn('stock_intakes', 'notes', "ALTER TABLE stock_intakes ADD COLUMN notes VARCHAR(255) NULL AFTER staff_id");
         $this->ensureColumn('stock_intake_items', 'remark', "ALTER TABLE stock_intake_items ADD COLUMN remark VARCHAR(255) NULL AFTER buying_price");
+        $this->ensureColumn('stock_intake_items', 'faulty_quantity', "ALTER TABLE stock_intake_items ADD COLUMN faulty_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER quantity");
+        $this->ensureColumn('stock_intake_items', 'unit', "ALTER TABLE stock_intake_items ADD COLUMN unit VARCHAR(20) NULL AFTER faulty_quantity");
+        $this->ensureColumn('stock_intake_items', 'colors', "ALTER TABLE stock_intake_items ADD COLUMN colors VARCHAR(255) NULL AFTER unit");
     }
 
     private function ensureTable(string $table, string $sql): void

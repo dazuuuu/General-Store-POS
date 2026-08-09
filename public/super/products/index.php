@@ -19,12 +19,12 @@ $apiBase = public_url('api/inventory/');
 
 // id => name maps so the activity log shows names, not raw ids.
 $catName = []; foreach ($C->all([], 'name ASC') as $c) { $catName[(int)$c['id']] = $c['name']; }
-$attrNames = ['grade' => [], 'publisher' => [], 'author' => [], 'edition' => []];
+$attrNames = ['brand' => []];
 foreach (array_keys($attrNames) as $type) {
     foreach ($BA->all(['type' => $type]) as $a) { $attrNames[$type][(int) $a['id']] = $a['name']; }
 }
 
-$editId  = (int) ($_GET['edit'] ?? $_POST['id'] ?? 0);
+$editId  = (int) ($_GET['edit'] ?? $_GET['id'] ?? $_POST['id'] ?? 0);
 $editRow = $editId > 0 ? $P->findWithMeta($editId) : null;
 
 // This page only edits an existing product — nothing to do without one.
@@ -47,13 +47,12 @@ function audit_product_view(array $r, array $catName, array $attrNames): array
     return [
         'name'                => $r['name'] ?? null,
         'category_id'         => $cid > 0 ? ($catName[$cid] ?? ('#' . $cid)) : null,
-        'grade_id'            => $idName('grade', $r['grade_id'] ?? 0),
-        'publisher_id'        => $idName('publisher', $r['publisher_id'] ?? 0),
-        'author_id'           => $idName('author', $r['author_id'] ?? 0),
-        'edition_id'          => $idName('edition', $r['edition_id'] ?? 0),
+        'brand_id'            => $idName('brand', $r['brand_id'] ?? 0),
+        'colors'              => is_array($r['colors'] ?? null) ? implode(', ', $r['colors']) : (($r['colors'] ?? '') !== '' ? $r['colors'] : null),
         'barcode'             => ($r['barcode'] ?? '') !== '' ? $r['barcode'] : null,
         'description'         => ($r['description'] ?? '') !== '' ? $r['description'] : null,
         'quantity'            => $r['quantity'] ?? null,
+        'faulty_quantity'     => $r['faulty_quantity'] ?? null,
         'unit'                => $r['unit'] ?? null,
         'buying_price'        => $r['buying_price'] ?? null,
         'wholesale_price'     => $r['wholesale_price'] ?? null,
@@ -95,28 +94,18 @@ function product_handle_image(array $file): array
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $supplierName = trim($_POST['supplier'] ?? '');
-    // This page's form only ever edits the book fields — product_type isn't
-    // a form field, so keep whatever the row already was (never silently
-    // flip a stationery item back to 'book' just by saving an edit).
-    $productType = in_array($editRow['product_type'] ?? 'product', ['book', 'stationery', 'product'], true) ? ($editRow['product_type'] === 'book' ? 'product' : $editRow['product_type']) : 'product';
     $in = [
-        'product_type'        => $productType,
+        'product_type'        => 'product',
         'name'                => trim($_POST['name'] ?? ''),
-        'category_id'         => (int) $C->findOrCreate($_POST['subject'] ?? '', $productType === 'stationery' ? 'stationery' : 'subject'),
-        'grade_id'            => (int) $BA->findOrCreate('grade', $_POST['grade'] ?? ''),
-        'publisher_id'        => (int) $BA->findOrCreate('publisher', $_POST['publisher'] ?? ''),
-        'author_id'           => (int) $BA->findOrCreate('author', $_POST['author'] ?? ''),
-        'edition_id'          => (int) $BA->findOrCreate('edition', $_POST['edition'] ?? ''),
-        // This form has no Brand/Colors/Variants fields (those live on the
-        // Stationery pages) — preserve them as-is rather than wiping a
-        // stationery item's brand/colors/variants just by saving here.
-        'brand_id'            => (int) ($editRow['brand_id'] ?? 0),
-        'colors'              => $editRow['colors'] ? (json_decode($editRow['colors'], true) ?: []) : [],
+        'category_id'         => (int) $C->findOrCreate($_POST['category'] ?? '', 'product'),
+        'brand_id'            => (int) $BA->findOrCreate('brand', $_POST['brand'] ?? ''),
+        'colors'              => array_values(array_filter(array_map('trim', explode(',', $_POST['colors'] ?? '')))),
         'sizes'               => $editRow['sizes'] ? (json_decode($editRow['sizes'], true) ?: []) : [],
         'barcode'             => trim($_POST['barcode'] ?? ''),
         'supplier_id'         => $supplierName !== '' ? (int) $SUP->findOrCreate($supplierName) : 0,
         'description'         => trim($_POST['description'] ?? ''),
         'quantity'            => $_POST['quantity'] ?? '',
+        'faulty_quantity'     => $_POST['faulty_quantity'] ?? 0,
         'unit'                => $_POST['unit'] ?? 'piece',
         'buying_price'        => $_POST['buying_price'] ?? '',
         'wholesale_price'     => $_POST['wholesale_price'] ?? '',
@@ -129,14 +118,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'units_per_pack'      => $_POST['units_per_pack'] ?? 1,
         'pack_unit'           => $_POST['pack_unit'] ?? '',
         'pack_price'          => $_POST['pack_price'] ?? '',
-        // Draft always wins; otherwise keep an archived book archived instead
-        // of silently reactivating it just because its price was edited.
         'status'              => ($_POST['action'] ?? '') === 'draft' ? 'draft' : ($editRow['status'] === 'archived' ? 'archived' : 'active'),
     ];
     $old = $in;
-    $old['subject'] = $_POST['subject'] ?? ''; $old['grade'] = $_POST['grade'] ?? '';
-    $old['publisher'] = $_POST['publisher'] ?? ''; $old['author'] = $_POST['author'] ?? '';
-    $old['edition'] = $_POST['edition'] ?? ''; $old['supplier'] = $supplierName;
+    $old['category'] = $_POST['category'] ?? '';
+    $old['brand'] = $_POST['brand'] ?? '';
+    $old['supplier'] = $supplierName;
+    $old['colors'] = $_POST['colors'] ?? '';
 
     // Image: keep existing unless a new one is uploaded.
     $img = product_handle_image($_FILES['image'] ?? []);
@@ -198,7 +186,7 @@ $activity = $AL->recent('product', 20);
 $page_title = 'Edit product';
 
 ob_start();
-$unitLabels = ['piece' => 'Piece(s)', 'g' => 'Grams (g)', 'kg' => 'Kilograms (kg)', 'tonne' => 'Tonnes', 'ml' => 'Millilitres (ml)', 'litre' => 'Litres'];
+$unitLabels = ['piece'=>'Piece(s)','kg'=>'Kilograms (kg)','g'=>'Grams (g)','bale'=>'Bale(s)','carton'=>'Carton(s)','pack'=>'Pack(s)','dozen'=>'Dozen','box'=>'Box(es)','ml'=>'Millilitres (ml)','litre'=>'Litres','tonne'=>'Tonnes'];
 
 $actionBadge = function (string $a): string {
     $map = [
@@ -221,7 +209,7 @@ $actionBadge = function (string $a): string {
   <div class="col-12 col-lg-6">
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-4">
-        <p class="text-muted small mb-3">Stock value = buying price &times; quantity. To add new stock or a new product, use <a href="<?php echo public_url('super/stock/new.php'); ?>">Record stock</a>.</p>
+        <p class="text-muted small mb-3">Stock value = buying price &times; quantity. To add new stock or a new product, use <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products</a>.</p>
 
         <?php if (!empty($errors['_'])): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($errors['_']); ?></div><?php endif; ?>
         <?php if (!empty($errors['image'])): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($errors['image']); ?></div><?php endif; ?>
@@ -231,23 +219,23 @@ $actionBadge = function (string $a): string {
 
           <div class="mb-3">
             <label class="form-label">Product name</label>
-            <input name="name" class="form-control" value="<?php echo htmlspecialchars($val('name')); ?>" placeholder="e.g. Growing in Christ" required>
+            <input name="name" class="form-control" value="<?php echo htmlspecialchars($val('name')); ?>" placeholder="e.g. Yellow beans / Soft drink 500ml" required>
             <?php if (!empty($errors['name'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['name']); ?></small><?php endif; ?>
           </div>
 
           <div class="row g-2">
             <div class="col-6 mb-3">
-              <label class="form-label">Subject <span class="text-muted">(optional)</span></label>
+              <label class="form-label">Category <span class="text-muted">(optional)</span></label>
               <div class="ta-wrap">
-                <input type="text" name="subject" class="form-control ta-input" data-field="subject" value="<?php echo htmlspecialchars($textVal('subject', 'category_name')); ?>" placeholder="e.g. Mathematics" autocomplete="off">
+                <input type="text" name="category" class="form-control ta-input" data-field="category" value="<?php echo htmlspecialchars($textVal('category', 'category_name')); ?>" placeholder="e.g. Cereals" autocomplete="off">
                 <div class="ta-menu"></div>
               </div>
               <?php if (!empty($errors['category_id'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['category_id']); ?></small><?php endif; ?>
             </div>
             <div class="col-6 mb-3">
-              <label class="form-label">Grade/Class <span class="text-muted">(optional)</span></label>
+              <label class="form-label">Brand <span class="text-muted">(optional)</span></label>
               <div class="ta-wrap">
-                <input type="text" name="grade" class="form-control ta-input" data-field="grade" value="<?php echo htmlspecialchars($textVal('grade', 'grade_name')); ?>" placeholder="e.g. Grade Three" autocomplete="off">
+                <input type="text" name="brand" class="form-control ta-input" data-field="brand" value="<?php echo htmlspecialchars($textVal('brand', 'brand_name')); ?>" placeholder="e.g. Coca-Cola" autocomplete="off">
                 <div class="ta-menu"></div>
               </div>
             </div>
@@ -255,33 +243,22 @@ $actionBadge = function (string $a): string {
 
           <div class="row g-2">
             <div class="col-6 mb-3">
-              <label class="form-label">Publisher <span class="text-muted">(optional)</span></label>
-              <div class="ta-wrap">
-                <input type="text" name="publisher" class="form-control ta-input" data-field="publisher" value="<?php echo htmlspecialchars($textVal('publisher', 'publisher_name')); ?>" placeholder="e.g. Longhorn" autocomplete="off">
-                <div class="ta-menu"></div>
-              </div>
-            </div>
-            <div class="col-6 mb-3">
-              <label class="form-label">Author <span class="text-muted">(optional)</span></label>
-              <div class="ta-wrap">
-                <input type="text" name="author" class="form-control ta-input" data-field="author" value="<?php echo htmlspecialchars($textVal('author', 'author_name')); ?>" placeholder="e.g. Kefa Masita" autocomplete="off">
-                <div class="ta-menu"></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="row g-2">
-            <div class="col-6 mb-3">
-              <label class="form-label">Edition <span class="text-muted">(optional)</span></label>
-              <div class="ta-wrap">
-                <input type="text" name="edition" class="form-control ta-input" data-field="edition" value="<?php echo htmlspecialchars($textVal('edition', 'edition_name')); ?>" placeholder="e.g. First" autocomplete="off">
-                <div class="ta-menu"></div>
-              </div>
+              <label class="form-label">Colors <span class="text-muted">(comma-separated)</span></label>
+              <?php
+                $colorVal = $val('colors');
+                if (is_array($colorVal)) { $colorVal = implode(', ', $colorVal); }
+                elseif ($colorVal === '' || $colorVal === null) {
+                  $raw = $editRow['colors'] ?? '';
+                  $decoded = $raw ? (json_decode($raw, true) ?: []) : [];
+                  $colorVal = is_array($decoded) ? implode(', ', $decoded) : (string)$raw;
+                }
+              ?>
+              <input type="text" name="colors" class="form-control" value="<?php echo htmlspecialchars((string)$colorVal); ?>" placeholder="e.g. Red, Blue, White">
             </div>
             <div class="col-6 mb-3">
               <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
               <div class="ta-wrap">
-                <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" value="<?php echo htmlspecialchars($textVal('supplier', 'supplier_name')); ?>" placeholder="e.g. Longhorn Distributors" autocomplete="off">
+                <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" value="<?php echo htmlspecialchars($textVal('supplier', 'supplier_name')); ?>" placeholder="e.g. Nairobi Distributors" autocomplete="off">
                 <div class="ta-menu"></div>
               </div>
             </div>
@@ -298,14 +275,19 @@ $actionBadge = function (string $a): string {
 
           <div class="mb-3">
             <label class="form-label">Description <span class="text-muted">(optional)</span></label>
-            <textarea name="description" class="form-control" rows="2" placeholder="Short note about the book"><?php echo htmlspecialchars($val('description')); ?></textarea>
+            <textarea name="description" class="form-control" rows="2" placeholder="Short note about the product"><?php echo htmlspecialchars($val('description')); ?></textarea>
           </div>
 
           <div class="row g-2">
             <div class="col-6 mb-3">
-              <label class="form-label">Balance (current stock)</label>
+              <label class="form-label">Good qty (sellable stock)</label>
               <input name="quantity" id="qtyP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars($val('quantity')); ?>" placeholder="0">
               <?php if (!empty($errors['quantity'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['quantity']); ?></small><?php endif; ?>
+            </div>
+            <div class="col-6 mb-3">
+              <label class="form-label">Faulty / broken qty</label>
+              <input name="faulty_quantity" type="number" step="0.01" min="0" class="form-control" placeholder="0" value="<?php echo htmlspecialchars((string)$val('faulty_quantity', $editRow['faulty_quantity'] ?? 0)); ?>">
+              <?php if (!empty($errors['faulty_quantity'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['faulty_quantity']); ?></small><?php endif; ?>
             </div>
             <div class="col-6 mb-3">
               <label class="form-label">Unit</label>
@@ -483,9 +465,7 @@ $actionBadge = function (string $a): string {
   .ta-menu button:hover, .ta-menu button.active { background: #f1f5f9; }
 </style>
 <script>
-  // Free-text type-ahead for Subject/Grade/Publisher/Author/Edition/Supplier —
-  // suggests existing values as you type; an exact match on save reuses it,
-  // anything new is created automatically (no dropdown pickers).
+  // Type-ahead for Category / Brand / Supplier.
   (function () {
     var API = <?php echo json_encode($apiBase); ?>;
     document.querySelectorAll('.ta-input').forEach(function (input) {

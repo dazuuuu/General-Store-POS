@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <div class="brand">
         <div class="brand-icon">
           <?php if ($shopLogo): ?><img src="<?php echo htmlspecialchars($shopLogo); ?>" alt="">
-          <?php else: ?><i class="fas fa-book-open"></i><?php endif; ?>
+          <?php else: ?><i class="fas fa-store"></i><?php endif; ?>
         </div>
         <h1><?php echo htmlspecialchars($shopName); ?></h1>
         <p>Staff terminal</p>

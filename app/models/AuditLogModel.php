@@ -16,15 +16,14 @@ class AuditLogModel extends Model
 
     /** Fields we diff on a product edit, with human labels + how to display them. */
     public const PRODUCT_FIELDS = [
-        'name'                => 'Book title',
-        'category_id'         => 'Subject',
-        'grade_id'            => 'Grade/Class',
-        'publisher_id'        => 'Publisher',
-        'author_id'           => 'Author',
-        'edition_id'          => 'Edition',
+        'name'                => 'Product name',
+        'category_id'         => 'Category',
+        'brand_id'            => 'Brand',
+        'colors'              => 'Colors',
         'barcode'             => 'Barcode',
         'description'         => 'Description',
-        'quantity'            => 'Balance',
+        'quantity'            => 'Good qty',
+        'faulty_quantity'     => 'Faulty / broken',
         'unit'                => 'Unit',
         'buying_price'        => 'Unit price (cost)',
         'wholesale_price'     => 'Wholesale price',
@@ -33,7 +32,7 @@ class AuditLogModel extends Model
         'offer_ends_at'       => 'Offer ends',
         'low_stock_threshold' => 'Restock alert',
         'status'              => 'Status',
-        'image_path'          => 'Cover photo',
+        'image_path'          => 'Photo',
     ];
 
     /**

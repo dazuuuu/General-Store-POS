@@ -144,7 +144,7 @@ ob_start();
   <div class="col-12 col-lg-5">
     <div class="card border-0 shadow-sm" style="border-radius:14px;">
       <div class="card-body p-4">
-        <h2 class="h6 fw-bold mb-3"><i class="fas fa-book me-2 text-primary"></i>Products bought</h2>
+        <h2 class="h6 fw-bold mb-3"><i class="fas fa-box me-2 text-primary"></i>Products bought</h2>
         <?php if (!$productAgg): ?>
           <div class="text-muted small">No line items recorded.</div>
         <?php else: ?>

@@ -1,7 +1,6 @@
 <?php
-// public/api/inventory/generate_barcode.php — for books with no printed
-// barcode: assigns one on demand so it can be written on a sticker and
-// scanned like any other from then on. Leaves an existing barcode alone.
+// public/api/inventory/generate_barcode.php — assign a system barcode when
+// the product has none printed to scan.
 require_once __DIR__ . '/../../../app/app.php';
 
 header('Content-Type: application/json; charset=utf-8');

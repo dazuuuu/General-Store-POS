@@ -1,21 +1,17 @@
 <?php
-// public/super/categories/index.php — manage Subjects (Mathematics, English,
-// Kiswahili…) or, with ?type=stationery, Stationery categories (Pens,
-// Geometry sets…). One-time setup: add it here (or just type it fresh on
-// Record stock / Record stationery — either way it's remembered), then
-// assign it to books/items.
+// public/super/categories/index.php — manage product categories for a general shop.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::auth();
 
 $pdo = Database::pdo();
 $C = new Models\CategoryModel($pdo);
 
-$type = (($_GET['type'] ?? $_POST['type'] ?? '') === 'stationery') ? 'stationery' : 'product';
+$type = 'product';
 $noun = 'category';
 $nounCap = 'Category';
 $countLabel = 'Products';
-$recordUrl = $type === 'stationery' ? public_url('super/stationery/new.php') : public_url('super/stock/new.php');
-$recordLabel = $type === 'stationery' ? 'Record product' : 'Record products in bulk';
+$recordUrl = public_url('super/stock/new.php');
+$recordLabel = 'Record products in bulk';
 
 $error = ''; $old = '';
 
@@ -50,9 +46,8 @@ $editId  = (int) ($_GET['edit'] ?? 0);
 $editRow = $editId > 0 ? $C->find($editId) : null;
 if (!$editRow || $editRow['type'] !== $type) { $editId = 0; $editRow = null; }
 
-$qs      = $type === 'stationery' ? '?type=stationery' : '';
-$base    = public_url('super/categories/') . $qs;
-$editUrl = public_url('super/categories/') . '?' . ($type === 'stationery' ? 'type=stationery&' : '') . 'edit=';
+$base    = public_url('super/categories/');
+$editUrl = public_url('super/categories/') . '?edit=';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -93,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $categories = $C->listWithCounts($type);
-$page_title = $type === 'stationery' ? 'Extra categories' : 'Categories';
+$page_title = 'Categories';
 ob_start();
 ?>
 <div class="row g-4">
@@ -103,9 +98,7 @@ ob_start();
       <div class="card-body p-4">
         <h2 class="h5 mb-1">Add a <?php echo $noun; ?></h2>
         <p class="text-muted small mb-3">
-          <?php echo $type === 'stationery'
-              ? 'Groups your stationery — Pens, Geometry sets, Erasers… Shown as a browsing card on the selling screen.'
-              : 'Groups your books — Mathematics, English, Kiswahili… Shown as a browsing card on the selling screen.'; ?>
+          Groups your products — Cereals, Drinks, Hardware… Shown as browsing cards on the till.
         </p>
         <?php if ($error): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
         <form method="post" enctype="multipart/form-data" novalidate>
@@ -113,7 +106,7 @@ ob_start();
           <input type="hidden" name="type" value="<?php echo $type; ?>">
           <div class="mb-3">
             <label class="form-label"><?php echo $nounCap; ?> name</label>
-            <input name="name" class="form-control" placeholder="<?php echo $type === 'stationery' ? 'e.g. Pens' : 'e.g. Mathematics'; ?>" value="<?php echo htmlspecialchars($old); ?>" required autofocus>
+            <input name="name" class="form-control" placeholder="e.g. Cereals" value="<?php echo htmlspecialchars($old); ?>" required autofocus>
           </div>
           <div class="mb-3">
             <label class="form-label">Image <span class="text-muted">(optional — shown as a card on the selling screen)</span></label>
@@ -156,11 +149,11 @@ ob_start();
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-4">
         <div class="d-flex align-items-center justify-content-between mb-3">
-          <h2 class="h5 mb-0">Your <?php echo $type === 'stationery' ? 'stationery categories' : 'subjects'; ?> <span class="badge bg-light text-dark"><?php echo count($categories); ?></span></h2>
-          <a class="btn btn-sm btn-primary" href="<?php echo $recordUrl; ?>"><i class="fas fa-<?php echo $type === 'stationery' ? 'pen-ruler' : 'truck-loading'; ?> me-1"></i><?php echo $recordLabel; ?></a>
+          <h2 class="h5 mb-0">Your categories <span class="badge bg-light text-dark"><?php echo count($categories); ?></span></h2>
+          <a class="btn btn-sm btn-primary" href="<?php echo $recordUrl; ?>"><i class="fas fa-boxes-stacked me-1"></i><?php echo $recordLabel; ?></a>
         </div>
         <?php if (!$categories): ?>
-          <div class="text-muted">No <?php echo $type === 'stationery' ? 'stationery categories' : 'subjects'; ?> yet. Add your first one on the left.</div>
+          <div class="text-muted">No categories yet. Add your first one on the left.</div>
         <?php else: ?>
           <div class="table-responsive">
             <table class="table align-middle mb-0">
@@ -172,7 +165,7 @@ ob_start();
                     <?php if (!empty($c['image_path'])): ?>
                       <img src="<?php echo htmlspecialchars($c['image_path']); ?>" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;">
                     <?php else: ?>
-                      <span class="d-inline-flex align-items-center justify-content-center text-muted" style="width:36px;height:36px;border-radius:8px;background:#f1f5f9;"><i class="fas fa-<?php echo $type === 'stationery' ? 'pen-ruler' : 'book'; ?>"></i></span>
+                      <span class="d-inline-flex align-items-center justify-content-center text-muted" style="width:36px;height:36px;border-radius:8px;background:#f1f5f9;"><i class="fas fa-tag"></i></span>
                     <?php endif; ?>
                   </td>
                   <td class="fw-semibold"><?php echo htmlspecialchars($c['name']); ?></td>

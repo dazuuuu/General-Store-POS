@@ -22,8 +22,8 @@ $toggles = [
     // two switches only gate the ability to change stock. Split into two so
     // a staff member can be trusted to log deliveries without also being
     // able to edit/delete the catalogue, put items on offer, or archive them.
-    ['key' => 'record_stock',     'label' => 'Record stock',      'desc' => 'Record stock deliveries — new titles and restocks.',           'caps' => [Capabilities::STOCK_ENTER]],
-    ['key' => 'edit_inventory',   'label' => 'Edit inventory',    'desc' => 'Edit books, put items on offer or archive them, and manage suppliers/subjects/grades/publishers.', 'caps' => [Capabilities::INVENTORY_EDIT]],
+    ['key' => 'record_stock',     'label' => 'Record stock',      'desc' => 'Record stock deliveries — new products and restocks.',           'caps' => [Capabilities::STOCK_ENTER]],
+    ['key' => 'edit_inventory',   'label' => 'Edit inventory',    'desc' => 'Edit products, put items on offer or archive them, and manage suppliers/categories/brands.', 'caps' => [Capabilities::INVENTORY_EDIT]],
 ];
 $manageable = [];
 foreach ($toggles as $t) { foreach ($t['caps'] as $c) { $manageable[] = $c; } }
