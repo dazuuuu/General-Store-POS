@@ -1,0 +1,2 @@
+echo "app/config/mail.php" >> .gitignore
+echo "app/config/mpesa.php" >> .gitignore

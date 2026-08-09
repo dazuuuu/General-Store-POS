@@ -1,0 +1,551 @@
+[01-Jul-2026 06:47:36 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'dazutech_lucsela.subscriptions' doesn't exist in /home/dazutech/public_html/Kitale/app/models/SubscriptionModel.php:28
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/models/SubscriptionModel.php(28): PDO->prepare('SELECT * FROM s...')
+#1 /home/dazutech/public_html/Kitale/app/services/AuthService.php(39): Models\SubscriptionModel->forTenant(2)
+#2 /home/dazutech/public_html/Kitale/public/auth/login.php(53): AuthService->subscriptionFor(2)
+#3 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/models/SubscriptionModel.php on line 28
+[01-Jul-2026 06:47:50 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'dazutech_lucsela.subscriptions' doesn't exist in /home/dazutech/public_html/Kitale/app/models/SubscriptionModel.php:28
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/models/SubscriptionModel.php(28): PDO->prepare('SELECT * FROM s...')
+#1 /home/dazutech/public_html/Kitale/app/services/AuthService.php(39): Models\SubscriptionModel->forTenant(2)
+#2 /home/dazutech/public_html/Kitale/public/auth/login.php(53): AuthService->subscriptionFor(2)
+#3 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/models/SubscriptionModel.php on line 28
+[01-Jul-2026 07:13:37 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[01-Jul-2026 07:13:37 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[01-Jul-2026 07:13:37 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[01-Jul-2026 07:13:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[01-Jul-2026 07:13:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[01-Jul-2026 07:13:39 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:10:12 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:10:12 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:10:12 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:11:01 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:11:01 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:11:01 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:11:11 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:11:11 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:11:11 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:11:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:11:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:11:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:14:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:14:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:14:26 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:20:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:20:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:20:13 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:20:34 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:20:34 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:20:34 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:22:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:22:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:22:50 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:23:40 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:23:40 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:23:40 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:23:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:23:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:23:50 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:25:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 08:25:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 08:25:26 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:30:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 13:30:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:30:31 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:30:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 13:30:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:30:44 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:30:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 13:30:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:30:58 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:31:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 13:31:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 13:31:50 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:03:21 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:03:21 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:03:21 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:08:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:08:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:08:23 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:08:43 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:08:43 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:08:43 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:11:54 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:11:54 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:11:54 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:13:54 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:13:54 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:13:54 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:05 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:17 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:17 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:17 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:23 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:31 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:35 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:35 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:35 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:14:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:14:38 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:18:19 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:18:19 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:18:19 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:18:37 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:18:37 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:18:37 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:25:21 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:25:21 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:25:21 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:27:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 14:27:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 14:27:24 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 15:04:21 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 15:04:21 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 15:04:21 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 15:04:25 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 15:04:25 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 15:04:25 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 15:04:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[02-Jul-2026 15:04:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[02-Jul-2026 15:04:52 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:08:28 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:08:28 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:08:28 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:08:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:08:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:08:39 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:08:59 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:08:59 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:08:59 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:20 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:09:20 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:20 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:25 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:09:25 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:25 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:09:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:27 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:09:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:32 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:09:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:09:39 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:10:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:10:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:10:23 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:36:04 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:36:04 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:36:04 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:36:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 04:36:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 04:36:31 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 05:17:43 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 05:17:43 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 05:17:43 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 05:56:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 05:56:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 05:56:05 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 05:56:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 05:56:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 05:56:13 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 06:20:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 06:20:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 06:20:45 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:22:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 12:22:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:22:52 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:22:56 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 12:22:56 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:22:56 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:23:25 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 12:23:25 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:23:25 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:35:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[03-Jul-2026 12:35:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[03-Jul-2026 12:35:27 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[04-Jul-2026 12:12:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[04-Jul-2026 12:12:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[04-Jul-2026 12:12:48 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[07-Jul-2026 15:05:35 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[07-Jul-2026 15:05:35 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[07-Jul-2026 15:05:35 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 05:58:12 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 05:58:12 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 05:58:12 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 05:58:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 05:58:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 05:58:41 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 06:12:04 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 06:12:04 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 06:12:04 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 06:12:10 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 06:12:10 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 06:12:10 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:06 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:25:06 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:06 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:25:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:44 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:54 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:25:54 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:54 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:25:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:25:58 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:26:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:26:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:26:45 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:26:53 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:26:53 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:26:53 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:27:03 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:27:03 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:27:03 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:37:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[08-Jul-2026 07:37:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 07:37:13 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[08-Jul-2026 12:53:53 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Resource temporarily unavailable in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'dazutech_superu...', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/auth/login.php(30): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[08-Jul-2026 12:53:58 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Resource temporarily unavailable in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'dazutech_superu...', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/auth/login.php(30): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[08-Jul-2026 13:01:46 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Resource temporarily unavailable in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'dazutech_superu...', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/auth/login.php(30): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[08-Jul-2026 13:01:53 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Resource temporarily unavailable in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'dazutech_superu...', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/auth/login.php(30): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[08-Jul-2026 13:02:00 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Resource temporarily unavailable in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'dazutech_superu...', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/auth/login.php(30): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[08-Jul-2026 13:02:02 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Resource temporarily unavailable in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'dazutech_superu...', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/auth/login.php(30): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[09-Jul-2026 04:13:11 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 04:13:11 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 04:13:11 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:23:15 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:23:15 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:23:15 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:44:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:44:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:44:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:47:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:47:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:47:42 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:30 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:32 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:41 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:41 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:44 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:46 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:46 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:46 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:46 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:46 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:46 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:46 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:46 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:46 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:50 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:50 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:53 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:53 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:53 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:53 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:50:53 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:50:53 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:52:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:05 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:08 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:52:08 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:08 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:11 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:52:11 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:11 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:14 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:52:14 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:14 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:15 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 12:52:15 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 12:52:15 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:21:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:21:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:21:26 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:23:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:23:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:23:39 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:33:06 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:33:06 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:33:06 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:33:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:33:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:33:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:35:55 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:35:55 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:35:55 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:39:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:39:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:39:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:41:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:41:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:41:52 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:53:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:53:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:53:24 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:57:18 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 13:57:18 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 13:57:18 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:12:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:12:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:12:38 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:12:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:12:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:12:45 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:23:55 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:23:55 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:23:55 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:24:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:24:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:24:58 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:27:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:27:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:27:27 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:08 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:08 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:08 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:13 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:30 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:40 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:40 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:40 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:45 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:35:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:35:48 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:38:47 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:38:47 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:38:47 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:45:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:45:45 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:45:45 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:51:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:51:41 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:51:41 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:52:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:52:52 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:52:52 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:53:09 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:53:09 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:53:09 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:53:33 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:53:33 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:53:33 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:54:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:54:31 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:54:31 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:55:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 14:55:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 14:55:26 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:03:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:03:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:03:32 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:12:08 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:12:08 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:12:08 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:12:47 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:12:47 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:12:47 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:27:12 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:27:12 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:27:12 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:31:15 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:31:15 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:31:15 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:34:55 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:34:55 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:34:55 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:36:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:36:13 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:36:13 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:36:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:36:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:36:30 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:42:09 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:42:09 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:42:09 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:43:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:43:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:43:24 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:44:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:44:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:44:48 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:54:20 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:54:20 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:54:20 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:54:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:54:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:54:38 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:55:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:55:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:55:07 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:55:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 15:55:23 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 15:55:23 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:00:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:00:05 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:00:05 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:00:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:00:30 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:00:30 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:00:49 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:00:49 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:00:49 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:01:03 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:01:03 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:01:03 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:01:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:01:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:01:24 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:01:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:01:26 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:01:26 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:02:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:02:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:02:27 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:02:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:02:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:02:42 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:34:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[09-Jul-2026 16:34:48 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[09-Jul-2026 16:34:48 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 18:51:56 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[12-Jul-2026 18:51:56 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 18:51:56 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 18:52:04 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[12-Jul-2026 18:52:04 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 18:52:04 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 19:41:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[12-Jul-2026 19:41:32 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 19:41:32 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 19:53:36 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[12-Jul-2026 19:53:36 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[12-Jul-2026 19:53:36 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[15-Jul-2026 09:05:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[15-Jul-2026 09:05:58 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[15-Jul-2026 09:05:58 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[16-Jul-2026 17:30:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[16-Jul-2026 17:30:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[16-Jul-2026 17:30:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[16-Jul-2026 17:30:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[16-Jul-2026 17:30:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[16-Jul-2026 17:30:24 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:08:01 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:08:01 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:08:01 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:08:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:08:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:08:07 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:08:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:08:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:08:07 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:19 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:46:19 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:19 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:46:24 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:24 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:36 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:46:36 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:36 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[21-Jul-2026 08:46:38 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[21-Jul-2026 08:46:38 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[23-Jul-2026 13:56:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[23-Jul-2026 13:56:27 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[23-Jul-2026 13:56:27 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[24-Jul-2026 06:58:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[24-Jul-2026 06:58:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[24-Jul-2026 06:58:07 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[24-Jul-2026 06:58:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[24-Jul-2026 06:58:07 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[24-Jul-2026 06:58:07 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[25-Jul-2026 09:49:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:42 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[25-Jul-2026 09:49:42 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:42 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[25-Jul-2026 09:49:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:44 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[25-Jul-2026 09:49:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:44 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[25-Jul-2026 09:49:44 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[25-Jul-2026 09:49:44 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[28-Jul-2026 17:56:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[28-Jul-2026 17:56:39 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[28-Jul-2026 17:56:39 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[29-Jul-2026 03:51:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[29-Jul-2026 03:51:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[29-Jul-2026 03:51:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[30-Jul-2026 04:49:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 152
+[30-Jul-2026 04:49:22 UTC] PHP Warning:  Undefined variable $logoPath in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
+[30-Jul-2026 04:49:22 UTC] PHP Deprecated:  htmlspecialchars(): Passing null to parameter #1 ($string) of type string is deprecated in /home/dazutech/public_html/Kitale/public/templates/auth/layout.php on line 154
