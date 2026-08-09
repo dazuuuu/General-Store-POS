@@ -44,7 +44,11 @@ $isOn = function (string $needle) use ($uri): string {
         <a class="t-link <?php echo $isOn('/super/sales'); ?>" href="<?php echo public_url('super/sales/'); ?>"><i class="fas fa-receipt"></i><span>Sales</span></a>
         <?php endif; ?>
         <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
-        <a class="t-link <?php echo $isOn('/super/orders'); ?>" href="<?php echo public_url('super/orders/'); ?>"><i class="fas fa-hand-holding-dollar"></i><span>Open tabs</span></a>
+        <a class="t-link <?php echo $isOn('/super/orders'); ?>" href="<?php echo public_url('super/orders/'); ?>"><i class="fas fa-hand-holding-dollar"></i><span>Credit sales</span></a>
+        <?php endif; ?>
+
+        <?php if (TenantContext::can(Capabilities::CUSTOMERS_MANAGE) || TenantContext::role() === 'tenant_owner'): ?>
+        <a class="t-link <?php echo $isOn('/super/customers'); ?>" href="<?php echo public_url('super/customers/'); ?>"><i class="fas fa-users"></i><span>Customers / Loyalty</span></a>
         <?php endif; ?>
 
         <?php if (TenantContext::can(Capabilities::STAFF_MANAGE)):
@@ -74,32 +78,41 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <?php endif; ?>
         <?php if (TenantContext::can(Capabilities::INVENTORY_EDIT)):
-            $onStationeryCats = strpos($uri, '/super/categories') !== false && ($_GET['type'] ?? '') === 'stationery';
+            $onStationeryCats = strpos($uri, '/super/categories') !== false && (($_GET['type'] ?? '') === 'stationery');
         ?>
         <a class="t-link <?php echo (strpos($uri, '/super/categories') !== false && !$onStationeryCats) ? 'active' : ''; ?>" href="<?php echo public_url('super/categories/'); ?>">
-            <i class="fas fa-tags"></i><span>Subjects</span>
+            <i class="fas fa-tags"></i><span>Categories</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/grades'); ?>" href="<?php echo public_url('super/grades/'); ?>">
-            <i class="fas fa-graduation-cap"></i><span>Grades</span>
+            <i class="fas fa-layer-group"></i><span>Variants</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/publishers'); ?>" href="<?php echo public_url('super/publishers/'); ?>">
-            <i class="fas fa-building"></i><span>Publishers</span>
+            <i class="fas fa-building"></i><span>Brands</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/suppliers'); ?>" href="<?php echo public_url('super/suppliers/'); ?>">
             <i class="fas fa-truck-field"></i><span>Suppliers</span>
         </a>
+        <a class="t-link <?php echo $isOn('/super/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">
+            <i class="fas fa-box-open"></i><span>Record product</span>
+        </a>
         <a class="t-link <?php echo $isOn('/super/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">
-            <i class="fas fa-truck-loading"></i><span>Record stock</span>
+            <i class="fas fa-boxes-stacked"></i><span>Record products in bulk</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/super/inventory/low-stock'); ?>" href="<?php echo public_url('super/inventory/low-stock.php'); ?>">
+            <i class="fas fa-bell"></i><span>Low stock alerts</span>
         </a>
         <?php endif; ?>
-        <?php if (TenantContext::can(Capabilities::STOCK_ENTER)): ?>
+        <?php if (TenantContext::can(Capabilities::STOCK_ENTER) && !TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">
-            <i class="fas fa-pen-ruler"></i><span>Record stationery</span>
+            <i class="fas fa-box-open"></i><span>Record product</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/super/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">
+            <i class="fas fa-boxes-stacked"></i><span>Record products in bulk</span>
         </a>
         <?php endif; ?>
         <?php if (TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $onStationeryCats ? 'active' : ''; ?>" href="<?php echo public_url('super/categories/') . '?type=stationery'; ?>">
-            <i class="fas fa-shapes"></i><span>Stationery categories</span>
+            <i class="fas fa-shapes"></i><span>Extra categories</span>
         </a>
         <?php endif; ?>
 

@@ -95,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$page_title = 'New order';
+$page_title = 'New credit sale';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
@@ -112,7 +112,7 @@ ob_start();
   <div class="pos-main">
     <div class="pos-search">
       <i class="fas fa-magnifying-glass"></i>
-      <input type="text" id="search" placeholder="Search books…" autocomplete="off">
+      <input type="text" id="search" placeholder="Search products…" autocomplete="off">
     </div>
     <div class="pos-search pos-scan">
       <i class="fas fa-barcode"></i>
@@ -240,7 +240,7 @@ ob_start();
   </div>
 
   <aside class="pos-side">
-    <h2 class="pos-side-title">Order Details</h2>
+    <h2 class="pos-side-title">Sale Details</h2>
     <div class="pos-customer">
       <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
       <input type="text" name="table_name" id="customerName" class="pos-customer-input" placeholder="Customer name"
@@ -273,7 +273,7 @@ ob_start();
     </div>
 
     <div class="pos-actions">
-      <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Order</button>
+      <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
       <button type="submit" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Place Order</button>
     </div>
     <div class="text-muted small text-center mt-2">Place Order opens an unpaid invoice — settle it later on Payments.</div>
@@ -486,7 +486,7 @@ document.getElementById('holdBtn').addEventListener('click', function () { docum
 document.getElementById('checkoutBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'checkout'; });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
-    if (Object.keys(cart).length === 0) { e.preventDefault(); alert('Add at least one drink.'); return; }
+    if (Object.keys(cart).length === 0) { e.preventDefault(); alert('Add at least one item.'); return; }
     if (!document.getElementById('customerName').value.trim()) { e.preventDefault(); alert('Enter a customer name.'); }
 });
 

@@ -99,9 +99,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $items[] = [
                 'mode'            => 'new',
-                'product_type'    => 'stationery',
+                'product_type'    => 'product',
                 'name'            => $name,
-                'category_id'     => (int) $C->findOrCreate($row['category'] ?? '', 'stationery'),
+                'category_id'     => (int) $C->findOrCreate($row['category'] ?? '', 'product'),
                 'brand_id'        => (int) $BA->findOrCreate('brand', $row['brand'] ?? ''),
                 'colors'          => stationery_split_list($row['colors'] ?? ''),
                 'sizes'           => stationery_split_list($row['variants'] ?? ''),
@@ -134,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$page_title = 'Record stationery';
+$page_title = 'Record product';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
@@ -172,8 +172,8 @@ ob_start();
     </div>
   </div>
 
-  <button class="btn btn-primary btn-lg"><i class="fas fa-pen-ruler me-1"></i>Record stationery</button>
-  <a class="btn btn-link" href="<?php echo public_url('super/stock/new.php'); ?>">Recording books instead?</a>
+  <button class="btn btn-primary btn-lg"><i class="fas fa-pen-ruler me-1"></i>Record product</button>
+  <a class="btn btn-link" href="<?php echo public_url('super/stock/new.php'); ?>">Need bulk entry?</a>
 </form>
 
 <template id="rowTpl">
@@ -401,7 +401,7 @@ ob_start();
       var q = input.value.trim();
       if (!q) { menu.classList.remove('show'); return; }
       timer = setTimeout(function () {
-        fetch(API + 'find_titles.php?type=stationery&q=' + encodeURIComponent(q))
+        fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
           .then(function (r) { return r.json(); })
           .then(function (data) { render(data.items || []); })
           .catch(function () {});
@@ -423,13 +423,13 @@ ob_start();
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (input.value.trim() !== code) { return; }
-          if (data.item && data.item.product_type === 'stationery') {
+          if (data.item && data.item.product_type === 'product') {
             restock.setRestock(data.item);
             note.style.display = 'none';
           } else if (data.item) {
             note.style.display = 'block';
             note.className = 'barcodeNote small mt-1 text-danger';
-            note.innerHTML = '<i class="fas fa-triangle-exclamation me-1"></i>That barcode belongs to a book, not stationery.';
+            note.innerHTML = '<i class="fas fa-triangle-exclamation me-1"></i>That barcode already belongs to another product.';
           } else {
             note.style.display = 'block';
             note.className = 'barcodeNote small mt-1 text-muted';

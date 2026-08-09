@@ -59,7 +59,7 @@ $isStaffViewer = TenantContext::role() === 'staff';
       <?php if (!empty($tenant['phone'])): ?><div style="font-size:12px;color:#475569;">TEL: <?php echo htmlspecialchars($tenant['phone']); ?></div><?php endif; ?>
       <?php if (!empty($tenant['address'])): ?><div style="font-size:12px;color:#475569;"><?php echo htmlspecialchars($tenant['address']); ?></div><?php endif; ?>
       <?php if (!empty($tenant['kra_pin'])): ?><div style="font-size:12px;color:#475569;">PIN: <?php echo htmlspecialchars($tenant['kra_pin']); ?></div><?php endif; ?>
-      <div style="font-size:12px;margin-top:4px;"><?php echo $isWalkin ? 'Receipt' : 'Invoice'; ?> <?php echo htmlspecialchars($order['receipt_number']); ?></div>
+      <div style="font-size:12px;margin-top:4px;"><?php echo $isWalkin ? 'Invoice / Receipt' : 'Invoice'; ?> <?php echo htmlspecialchars($order['receipt_number']); ?></div>
       <div style="font-size:12px;">DATE: <?php echo htmlspecialchars(date('j M Y, g:i a', strtotime($order['created_at']))); ?></div>
       <?php if (!$isWalkin || $order['table_name'] !== 'Walk-in Customer'): ?>
       <div style="font-size:12px;"><?php echo $isWalkin ? 'Customer' : 'Customer'; ?>: <strong><?php echo htmlspecialchars($order['table_name']); ?></strong></div>
@@ -83,9 +83,14 @@ $isStaffViewer = TenantContext::role() === 'staff';
     </table>
 
     <table style="width:100%;border-collapse:collapse;font-size:14px;border-top:2px dashed #cbd5e1;margin-top:8px;padding-top:8px;">
-      <?php if ((float) ($order['discount_amount'] ?? 0) > 0): ?>
+      <?php if ((float) ($order['discount_amount'] ?? 0) > 0 || (float) ($order['vat_amount'] ?? 0) > 0): ?>
         <tr><td style="color:#64748b;">Subtotal</td><td style="text-align:right;"><?php echo money($order['subtotal']); ?></td></tr>
+        <?php if ((float) ($order['discount_amount'] ?? 0) > 0): ?>
         <tr><td style="color:#64748b;">Discount</td><td style="text-align:right;">− <?php echo money($order['discount_amount']); ?></td></tr>
+        <?php endif; ?>
+        <?php if ((float) ($order['vat_amount'] ?? 0) > 0): ?>
+        <tr><td style="color:#64748b;">VAT (<?php echo number_format((float) ($order['vat_rate'] ?? 0), 2); ?>%)</td><td style="text-align:right;"><?php echo money($order['vat_amount']); ?></td></tr>
+        <?php endif; ?>
       <?php endif; ?>
       <tr><td style="font-weight:700;padding-top:8px;">Total</td><td style="text-align:right;font-weight:700;padding-top:8px;"><?php echo money($order['total']); ?></td></tr>
       <?php if ($order['status'] === 'paid'): ?>
@@ -103,7 +108,7 @@ $isStaffViewer = TenantContext::role() === 'staff';
       <?php endif; ?>
     </table>
 
-    <p style="text-align:center;font-size:12px;color:#94a3b8;margin-top:14px;"><?php echo htmlspecialchars($tenant['receipt_footer'] ?? '') ?: 'Thank you for your business.'; ?></p>
+    <?php echo ReceiptFooter::html($tenant, $order['receipt_number'] ?? null); ?>
   </div>
 
   <div class="actions">
@@ -125,8 +130,8 @@ $isStaffViewer = TenantContext::role() === 'staff';
     </div>
     <?php else: ?>
     <div class="d-flex gap-2">
-      <a href="<?php echo public_url('staff/orders/'); ?>" class="btn btn-link flex-fill">All tabs</a>
-      <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-link flex-fill">New order</a>
+      <a href="<?php echo public_url('staff/orders/'); ?>" class="btn btn-link flex-fill">Credit sales</a>
+      <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-link flex-fill">New credit sale</a>
     </div>
     <?php endif; ?>
   </div>

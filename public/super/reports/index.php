@@ -71,7 +71,19 @@ ob_start();
             <td class="small text-nowrap"><?php echo date('g:i a', strtotime($s['created_at'])); ?></td>
             <td class="small"><?php echo htmlspecialchars($s['staff_name'] ?: '—'); ?></td>
             <td class="small"><?php echo htmlspecialchars($s['customer_name'] ?: '—'); ?></td>
-            <td><?php echo $s['payment_method']==='cash' ? '<span class="badge bg-light text-dark">Cash</span>' : '<span class="badge bg-success text-white">M-Pesa</span>'; ?></td>
+            <td><?php
+              $pm = $s['payment_method'] ?? '';
+              $badge = match ($pm) {
+                  'cash' => '<span class="badge bg-light text-dark">Cash</span>',
+                  'mpesa' => '<span class="badge bg-success text-white">M-Pesa</span>',
+                  'split' => '<span class="badge bg-secondary">Split</span>',
+                  'card' => '<span class="badge bg-dark">Card</span>',
+                  'bank' => '<span class="badge bg-info text-dark">Bank</span>',
+                  'credit' => '<span class="badge bg-warning text-dark">Credit</span>',
+                  default => '<span class="badge bg-light text-dark">'.htmlspecialchars(ucfirst($pm ?: '—')).'</span>',
+              };
+              echo $badge;
+            ?></td>
             <td class="text-end fw-semibold"><?php echo $money($s['total']); ?></td>
           </tr>
           <?php endforeach; ?>

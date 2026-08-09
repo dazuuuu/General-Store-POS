@@ -68,7 +68,7 @@ function receipt_header(array $biz, array $sale, string $staff): string
         . implode('', $rows) . '</div>';
 }
 
-function receipt_inner(array $sale, array $items, string $shop, string $staff, array $biz): string
+function receipt_inner(array $sale, array $items, string $shop, string $staff, array $biz, ?array $tenant = null): string
 {
     $h = fn($s) => htmlspecialchars((string) $s);
 
@@ -107,17 +107,29 @@ function receipt_inner(array $sale, array $items, string $shop, string $staff, a
     } elseif ($method === 'cash') {
         $payLine = '<tr><td style="color:#64748b;">Cash given</td><td style="text-align:right;">' . money($sale['amount_given']) . '</td></tr>'
           . '<tr><td style="color:#64748b;">Change</td><td style="text-align:right;">' . money($sale['change_given']) . '</td></tr>';
+    } elseif ($method === 'card') {
+        $payLine = '<tr><td style="color:#64748b;">Paid by</td><td style="text-align:right;">Card</td></tr>';
+    } elseif ($method === 'bank') {
+        $payLine = '<tr><td style="color:#64748b;">Paid by</td><td style="text-align:right;">Bank transfer</td></tr>';
+    } elseif ($method === 'credit') {
+        $payLine = '<tr><td style="color:#64748b;">Paid by</td><td style="text-align:right;">Credit</td></tr>';
     } else {
         $payLine = '<tr><td style="color:#64748b;">Paid by</td><td style="text-align:right;">M-Pesa</td></tr>';
     }
 
     $stype = ($sale['sale_type'] ?? 'retail') === 'wholesale' ? 'Wholesale' : 'Retail';
     $disc = (float)($sale['discount_amount'] ?? 0);
+    $vat = (float)($sale['vat_amount'] ?? 0);
     $sub = (float)($sale['subtotal'] ?? $sale['total']);
     $totals = '';
-    if ($disc > 0) {
+    if ($disc > 0 || $vat > 0) {
         $totals .= '<tr><td style="color:#64748b;">Subtotal</td><td style="text-align:right;">' . money($sub) . '</td></tr>';
-        $totals .= '<tr><td style="color:#64748b;">Discount</td><td style="text-align:right;">− ' . money($disc) . '</td></tr>';
+        if ($disc > 0) {
+            $totals .= '<tr><td style="color:#64748b;">Discount</td><td style="text-align:right;">− ' . money($disc) . '</td></tr>';
+        }
+        if ($vat > 0) {
+            $totals .= '<tr><td style="color:#64748b;">VAT (' . number_format((float)($sale['vat_rate'] ?? 0), 2) . '%)</td><td style="text-align:right;">' . money($vat) . '</td></tr>';
+        }
     }
     $cust = '';
     if (!empty($sale['customer_name']) || !empty($sale['customer_phone'])) {
@@ -127,14 +139,14 @@ function receipt_inner(array $sale, array $items, string $shop, string $staff, a
 
     return '<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:360px;margin:0 auto;color:#0f172a;">'
         . receipt_header($biz, $sale, $staff)
-        . '<div style="font-size:12px;color:#64748b;margin-bottom:6px;">Receipt ' . $h($sale['receipt_number']) . ' · ' . $h($stype) . ' sale</div>'
+        . '<div style="font-size:12px;color:#64748b;margin-bottom:6px;">Invoice / Receipt ' . $h($sale['receipt_number']) . ' · ' . $h($stype) . ' sale</div>'
         . '<table style="width:100%;border-collapse:collapse;font-size:13px;">' . $thead . $rows . '</table>'
         . '<table style="width:100%;border-collapse:collapse;font-size:14px;border-top:2px dashed #cbd5e1;margin-top:8px;padding-top:8px;">'
         . $totals
         . '<tr><td style="font-weight:700;padding-top:8px;">Total</td><td style="text-align:right;font-weight:700;padding-top:8px;">' . money($sale['total']) . '</td></tr>'
         . $payLine . '</table>'
         . $cust
-        . '<p style="text-align:center;font-size:12px;color:#94a3b8;margin-top:14px;">Thank you for your business.</p>'
+        . ReceiptFooter::html($tenant, $sale['receipt_number'] ?? null)
         . '</div>';
 }
 
@@ -146,8 +158,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'email
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
         $flash = 'Enter a valid email address.';
     } else {
-        $html = '<div style="background:#f8fafc;padding:20px;">' . receipt_inner($sale, $items, $shop, $staff, $RECEIPT_BUSINESS) . '</div>';
-        $sent = (new MailService())->send($to, 'Receipt ' . $sale['receipt_number'] . ' — ' . $RECEIPT_BUSINESS['name'], $html, 'Receipt ' . $sale['receipt_number'] . ' from ' . $RECEIPT_BUSINESS['name']);
+        $html = '<div style="background:#f8fafc;padding:20px;">' . receipt_inner($sale, $items, $shop, $staff, $RECEIPT_BUSINESS, $tenant) . '</div>';
+        $sent = (new MailService())->send($to, 'Invoice / Receipt ' . $sale['receipt_number'] . ' — ' . $RECEIPT_BUSINESS['name'], $html, 'Invoice ' . $sale['receipt_number'] . ' from ' . $RECEIPT_BUSINESS['name']);
         if ($sent) { $flash = 'Receipt sent to ' . $to . '.'; $flashOk = true; }
         else { $flash = 'Could not send the email. Check the mail settings and try again.'; }
     }
@@ -173,7 +185,7 @@ $defaultEmail = htmlspecialchars($sale['customer_email'] ?? '');
 // always dropping an owner onto the staff selling screen.
 $isStaffViewer = TenantContext::role() === 'staff';
 $backLinks = $isStaffViewer
-    ? ['New order' => public_url('staff/orders/new.php'), 'My sales' => public_url('staff/sales/')]
+    ? ['New sale' => public_url('staff/dashboard/'), 'My sales' => public_url('staff/sales/')]
     : ['Sales' => public_url('super/sales/'), 'Dashboard' => public_url('super/dashboard/')];
 ?>
 <!DOCTYPE html>
@@ -196,7 +208,7 @@ $backLinks = $isStaffViewer
     <div class="actions"><div class="alert <?php echo $flashOk ? 'alert-success' : 'alert-danger'; ?> py-2"><?php echo htmlspecialchars($flash); ?></div></div>
   <?php endif; ?>
 
-  <div class="sheet"><?php echo receipt_inner($sale, $items, $shop, $staff, $RECEIPT_BUSINESS); ?></div>
+  <div class="sheet"><?php echo receipt_inner($sale, $items, $shop, $staff, $RECEIPT_BUSINESS, $tenant); ?></div>
 
   <div class="actions">
     <div class="d-flex gap-2 mb-2">

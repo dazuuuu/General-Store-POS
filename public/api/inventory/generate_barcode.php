@@ -23,7 +23,7 @@ $barcode = $id > 0 ? (new Models\ProductModel($pdo))->assignBarcode($id) : null;
 
 if ($barcode === null) {
     http_response_code(404);
-    echo json_encode(['ok' => false, 'error' => 'Book not found.']);
+    echo json_encode(['ok' => false, 'error' => 'Product not found.']);
     exit;
 }
 

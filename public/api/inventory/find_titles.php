@@ -13,7 +13,8 @@ if (!TenantContext::check() || !TenantContext::can(Capabilities::STOCK_ENTER)) {
 }
 
 $q = trim((string) ($_GET['q'] ?? ''));
-$productType = ($_GET['type'] ?? 'book') === 'stationery' ? 'stationery' : 'book';
+$rawType = $_GET['type'] ?? 'product';
+$productType = in_array($rawType, ['product','book','stationery'], true) ? $rawType : 'product';
 $pdo = Database::pdo();
 $rows = (new Models\ProductModel($pdo))->searchByName($q, 8, $productType);
 

@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 }
 
 $publishers = $BA->listWithCounts('publisher');
-$page_title = 'Publishers';
+$page_title = 'Brands';
 ob_start();
 ?>
 <div class="row g-4">

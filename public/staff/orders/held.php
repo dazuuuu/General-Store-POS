@@ -1,5 +1,5 @@
 <?php
-// public/staff/orders/held.php — carts set aside with "Hold Order" (no stock
+// public/staff/orders/held.php — carts set aside with "Hold Sale" (no stock
 // touched yet). Resume loads one back into the selling screen; Discard drops it.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::SALES_RECORD);
@@ -16,12 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'disca
 }
 
 $held = $HO->listForTenant();
-$page_title = 'Held orders';
+$page_title = 'Held sales';
 ob_start();
 ?>
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-  <h1 class="h5 mb-0 fw-bold"><i class="fas fa-pause me-2 text-primary"></i>Held orders</h1>
-  <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-sm btn-primary"><i class="fas fa-plus me-1"></i>New order</a>
+  <h1 class="h5 mb-0 fw-bold"><i class="fas fa-pause me-2 text-primary"></i>Held sales</h1>
+  <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-sm btn-primary"><i class="fas fa-plus me-1"></i>New credit sale</a>
 </div>
 
 <?php if (!$held): ?>

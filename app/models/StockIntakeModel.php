@@ -92,7 +92,7 @@ class StockIntakeModel extends Model
                         return ['ok' => false, 'intake_id' => null, 'errors' => ['_' => 'Every new product needs a name.']];
                     }
                     $res = $productModel->create([
-                        'product_type'    => $i['product_type'] ?? 'book',
+                        'product_type'    => $i['product_type'] ?? 'product',
                         'name'            => $name,
                         'category_id'     => (int) ($i['category_id'] ?? 0),
                         'grade_id'        => (int) ($i['grade_id'] ?? 0),

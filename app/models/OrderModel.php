@@ -70,15 +70,38 @@ class OrderModel extends Model
             $discountIn = round((float) ($in['discount_amount'] ?? 0), 2);
             $email = trim((string) ($in['customer_email'] ?? ''));
             $phone = trim((string) ($in['customer_phone'] ?? ''));
-            if ($discountIn > 0 || $email !== '' || $phone !== '') {
-                $sub = $db->prepare('SELECT subtotal FROM orders WHERE id = ?');
-                $sub->execute([$orderId]);
-                $subtotal = (float) $sub->fetchColumn();
-                $discount = min(max($discountIn, 0), $subtotal); // never negative, never more than the subtotal
-                $newTotal = round($subtotal - $discount, 2);
-                $db->prepare('UPDATE orders SET discount_amount = ?, total = ?, customer_email = ?, customer_phone = ? WHERE id = ?')
-                    ->execute([$discount, $newTotal, $email !== '' ? $email : null, $phone !== '' ? $phone : null, $orderId]);
-            }
+            $customerId = (int) ($in['customer_id'] ?? 0);
+            $saleType = (($in['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+            $vatRate = max(0, round((float) ($in['vat_rate'] ?? 0), 2));
+            $vatInclusive = array_key_exists('vat_inclusive', $in) ? (bool) $in['vat_inclusive'] : true;
+
+            $sub = $db->prepare('SELECT subtotal FROM orders WHERE id = ?');
+            $sub->execute([$orderId]);
+            $subtotal = (float) $sub->fetchColumn();
+            $priced = \Pricing::totals($subtotal, $discountIn, $vatRate, $vatInclusive);
+
+            $sets = ['discount_amount = ?', 'total = ?', 'customer_email = ?', 'customer_phone = ?'];
+            $vals = [
+                $priced['discount'],
+                $priced['total'],
+                $email !== '' ? $email : null,
+                $phone !== '' ? $phone : null,
+            ];
+            try {
+                $db->query('SELECT vat_amount FROM orders LIMIT 1');
+                $sets[] = 'vat_rate = ?';
+                $sets[] = 'vat_amount = ?';
+                $sets[] = 'sale_type = ?';
+                $vals[] = $priced['vat_rate'];
+                $vals[] = $priced['vat_amount'];
+                $vals[] = $saleType;
+                if ($customerId > 0) {
+                    $sets[] = 'customer_id = ?';
+                    $vals[] = $customerId;
+                }
+            } catch (\PDOException $ignored) {}
+            $vals[] = $orderId;
+            $db->prepare('UPDATE orders SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($vals);
 
             $db->commit();
             return ['ok' => true, 'order_id' => $orderId, 'receipt_number' => $receipt, 'errors' => []];
@@ -98,7 +121,7 @@ class OrderModel extends Model
         }
         $items = array_values(array_filter($items, fn($i) => (int) ($i['product_id'] ?? 0) > 0 && (float) ($i['quantity'] ?? 0) > 0));
         if (!$items) {
-            return ['ok' => false, 'errors' => ['_' => 'Add at least one drink.']];
+            return ['ok' => false, 'errors' => ['_' => 'Add at least one item.']];
         }
 
         $db = $this->db;
@@ -154,7 +177,7 @@ class OrderModel extends Model
             $sel->execute([$pid, $tid]);
             $p = $sel->fetch();
             if (!$p) {
-                return ['ok' => false, 'errors' => ['_' => 'One of the drinks is no longer available. Refresh and try again.']];
+                return ['ok' => false, 'errors' => ['_' => 'One of the products is no longer available. Refresh and try again.']];
             }
             if ($qty > (float) $p['quantity']) {
                 return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' left.']];
@@ -186,14 +209,15 @@ class OrderModel extends Model
         return ['ok' => true, 'errors' => []];
     }
 
-    /** Settle a tab in full. $payment: method (cash/mpesa/split), cash_amount, mpesa_amount. */
+    /** Settle a sale in full. Supports cash/mpesa/split/card/bank/credit. */
     public function markPaid(int $orderId, array $payment, int $staffId): array
     {
         $tid = \TenantContext::tenantId();
         if ($tid === null) {
             return ['ok' => false, 'error' => 'No shop in context.'];
         }
-        $method = in_array($payment['method'] ?? '', ['cash', 'mpesa', 'split'], true) ? $payment['method'] : null;
+        $allowed = ['cash', 'mpesa', 'split', 'card', 'bank', 'credit'];
+        $method = in_array($payment['method'] ?? '', $allowed, true) ? $payment['method'] : null;
         if (!$method) {
             return ['ok' => false, 'error' => 'Choose how the customer paid.'];
         }
@@ -201,11 +225,16 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, total FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
-            $sel->execute([$orderId, $tid]);
+            $sel = $db->prepare('SELECT id, status, total, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            try {
+                $sel->execute([$orderId, $tid]);
+            } catch (\PDOException $e) {
+                $sel = $db->prepare('SELECT id, status, total FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+                $sel->execute([$orderId, $tid]);
+            }
             $order = $sel->fetch();
-            if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Tab not found.']; }
-            if ($order['status'] !== 'open') { $db->rollBack(); return ['ok' => false, 'error' => 'This tab is not open.']; }
+            if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Sale not found.']; }
+            if ($order['status'] !== 'open') { $db->rollBack(); return ['ok' => false, 'error' => 'This sale is not open.']; }
 
             $total = (float) $order['total'];
             $cash  = 0.0;
@@ -222,7 +251,7 @@ class OrderModel extends Model
                 $change = round($tendered - $cash, 2);
             } elseif ($method === 'mpesa') {
                 $mpesa = $total;
-            } else { // split
+            } elseif ($method === 'split') {
                 $cash  = max(0, round((float) ($payment['cash_amount'] ?? 0), 2));
                 $mpesa = max(0, round((float) ($payment['mpesa_amount'] ?? 0), 2));
                 if (abs(($cash + $mpesa) - $total) > 0.01) {
@@ -238,10 +267,30 @@ class OrderModel extends Model
                     $change = round($tendered - $cash, 2);
                 }
             }
+            // card / bank / credit: paid in full, no cash split tracking
+
+            try {
+                $db->exec("ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cash','mpesa','split','card','bank','credit') DEFAULT NULL");
+            } catch (\PDOException $ignored) {}
 
             $db->prepare(
                 'UPDATE orders SET status = ?, payment_method = ?, cash_amount = ?, mpesa_amount = ?, amount_tendered = ?, change_due = ?, paid_by = ?, paid_at = NOW() WHERE id = ?'
             )->execute(['paid', $method, $cash > 0 ? $cash : null, $mpesa > 0 ? $mpesa : null, $tendered, $change, $staffId, $orderId]);
+
+            $customerId = (int) ($order['customer_id'] ?? 0);
+            if ($customerId > 0) {
+                try {
+                    $tenant = (new TenantModel($db))->find($tid);
+                    $rate = (float) ($tenant['loyalty_points_per_kes'] ?? 1);
+                    $earned = round($total * $rate, 2);
+                    if ($earned > 0) {
+                        (new CustomerModel($db))->adjustPoints($customerId, $earned, 'Sale #' . $orderId, $orderId, $staffId);
+                        try {
+                            $db->prepare('UPDATE orders SET loyalty_points_earned = ? WHERE id = ?')->execute([$earned, $orderId]);
+                        } catch (\PDOException $ignored) {}
+                    }
+                } catch (\Throwable $ignored) {}
+            }
 
             $db->commit();
             return ['ok' => true, 'error' => null];
@@ -389,6 +438,25 @@ class OrderModel extends Model
     {
         $tid = \TenantContext::tenantId();
         $this->db->prepare('UPDATE orders SET delivery_note_sent_at = NOW() WHERE id = ? AND tenant_id = ?')->execute([$orderId, $tid]);
+    }
+
+    public function markThankYouSent(int $orderId): void
+    {
+        $tid = \TenantContext::tenantId();
+        try {
+            $this->db->prepare('UPDATE orders SET thank_you_sent_at = NOW() WHERE id = ? AND tenant_id = ?')->execute([$orderId, $tid]);
+        } catch (\PDOException $e) {
+            // Column may not exist yet on older installs.
+        }
+    }
+
+    public function markRemembranceSent(int $orderId): void
+    {
+        $tid = \TenantContext::tenantId();
+        try {
+            $this->db->prepare('UPDATE orders SET remembrance_sent_at = NOW() WHERE id = ? AND tenant_id = ?')->execute([$orderId, $tid]);
+        } catch (\PDOException $e) {
+        }
     }
 
     // ===== owner reporting: paid orders, shaped like SaleModel's rows ======

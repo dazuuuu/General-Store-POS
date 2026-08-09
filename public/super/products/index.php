@@ -98,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // This page's form only ever edits the book fields — product_type isn't
     // a form field, so keep whatever the row already was (never silently
     // flip a stationery item back to 'book' just by saving an edit).
-    $productType = in_array($editRow['product_type'] ?? 'book', ['book', 'stationery'], true) ? $editRow['product_type'] : 'book';
+    $productType = in_array($editRow['product_type'] ?? 'product', ['book', 'stationery', 'product'], true) ? ($editRow['product_type'] === 'book' ? 'product' : $editRow['product_type']) : 'product';
     $in = [
         'product_type'        => $productType,
         'name'                => trim($_POST['name'] ?? ''),
@@ -125,6 +125,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'offer_starts_at'     => $_POST['offer_starts_at'] ?? '',
         'offer_ends_at'       => $_POST['offer_ends_at'] ?? '',
         'low_stock_threshold' => (int) ($_POST['low_stock_threshold'] ?? 10),
+        'credit_limit'        => $_POST['credit_limit'] ?? '',
+        'units_per_pack'      => $_POST['units_per_pack'] ?? 1,
+        'pack_unit'           => $_POST['pack_unit'] ?? '',
+        'pack_price'          => $_POST['pack_price'] ?? '',
         // Draft always wins; otherwise keep an archived book archived instead
         // of silently reactivating it just because its price was edited.
         'status'              => ($_POST['action'] ?? '') === 'draft' ? 'draft' : ($editRow['status'] === 'archived' ? 'archived' : 'active'),
@@ -155,6 +159,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } catch (\Throwable $e) { /* logging must never block the save */ }
 
+            $tiers = [];
+            foreach (($_POST['tiers'] ?? []) as $tr) {
+                if ((float)($tr['min_qty'] ?? 0) > 0 && ($tr['unit_price'] ?? '') !== '') {
+                    $tiers[] = $tr;
+                }
+            }
+            (new Models\PriceTierModel($pdo))->replaceForProduct($editId, $tiers);
             $_SESSION['flash']['success'] = 'Product updated.';
             header('Location: ' . $inventoryUrl); exit;
         }
@@ -219,7 +230,7 @@ $actionBadge = function (string $a): string {
           <input type="hidden" name="id" value="<?php echo (int)$editRow['id']; ?>">
 
           <div class="mb-3">
-            <label class="form-label">Book title</label>
+            <label class="form-label">Product name</label>
             <input name="name" class="form-control" value="<?php echo htmlspecialchars($val('name')); ?>" placeholder="e.g. Growing in Christ" required>
             <?php if (!empty($errors['name'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['name']); ?></small><?php endif; ?>
           </div>
@@ -366,7 +377,46 @@ $actionBadge = function (string $a): string {
             <small class="text-muted">JPG, PNG, WEBP or GIF, under 3 MB.<?php echo $curImage ? ' Leave empty to keep the current image.' : ''; ?></small>
           </div>
 
-          <button class="btn btn-primary" name="action" value="save">Save book</button>
+          
+          <hr class="my-3">
+          <h3 class="h6 fw-bold">Bulk units &amp; credit limit</h3>
+          <div class="row g-2 mb-3">
+            <div class="col-md-4">
+              <label class="form-label small">Units per pack</label>
+              <input name="units_per_pack" type="number" step="0.01" min="0.01" class="form-control" value="<?php echo htmlspecialchars((string) $val('units_per_pack', $editRow['units_per_pack'] ?? 1)); ?>">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Pack unit label</label>
+              <input name="pack_unit" type="text" class="form-control" placeholder="e.g. carton" value="<?php echo htmlspecialchars((string) $val('pack_unit', $editRow['pack_unit'] ?? '')); ?>">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Pack price (KES)</label>
+              <input name="pack_price" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars((string) $val('pack_price', $editRow['pack_price'] ?? '')); ?>">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Product credit limit (KES)</label>
+              <input name="credit_limit" type="number" step="0.01" min="0" class="form-control" placeholder="Leave blank for no limit" value="<?php echo htmlspecialchars((string) $val('credit_limit', $editRow['credit_limit'] ?? '')); ?>">
+              <div class="form-text">Admin ceiling for a single credit line on this product.</div>
+            </div>
+          </div>
+          <h3 class="h6 fw-bold">Tiered pricing</h3>
+          <p class="text-muted small">Quantity breaks — larger buys get a lower unit price.</p>
+          <?php
+            $tierRows = (new Models\PriceTierModel($pdo))->forProduct($editId);
+            if (!$tierRows) { $tierRows = [['min_qty'=>'', 'max_qty'=>'', 'unit_price'=>'', 'label'=>'']]; }
+          ?>
+          <div id="tierRows">
+            <?php foreach ($tierRows as $i => $tr): ?>
+            <div class="row g-2 mb-2">
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][min_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Min qty" value="<?php echo htmlspecialchars((string)($tr['min_qty'] ?? '')); ?>"></div>
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][max_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Max (opt)" value="<?php echo htmlspecialchars((string)($tr['max_qty'] ?? '')); ?>"></div>
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][unit_price]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Unit price" value="<?php echo htmlspecialchars((string)($tr['unit_price'] ?? '')); ?>"></div>
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][label]" type="text" class="form-control form-control-sm" placeholder="Label" value="<?php echo htmlspecialchars((string)($tr['label'] ?? '')); ?>"></div>
+            </div>
+            <?php endforeach; ?>
+          </div>
+
+          <button class="btn btn-primary" name="action" value="save">Save product</button>
           <button class="btn btn-outline-secondary" name="action" value="draft">Save as draft</button>
           <a class="btn btn-link" href="<?php echo $inventoryUrl; ?>">Cancel</a>
         </form>

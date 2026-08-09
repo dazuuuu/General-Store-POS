@@ -9,6 +9,8 @@
 require_once __DIR__ . '/../../../app/app.php';
 require_once ROOT_PATH . '/app/services/emails/order_invoice_email.php';
 require_once ROOT_PATH . '/app/services/emails/order_delivery_note_email.php';
+require_once ROOT_PATH . '/app/services/emails/order_thank_you_email.php';
+require_once ROOT_PATH . '/app/services/emails/order_remembrance_email.php';
 PageGuard::capability(Capabilities::SALES_RECORD);
 
 $pdo = Database::pdo();
@@ -49,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: ' . $viewUrl);
             exit;
         }
-        $error = $res['errors']['_'] ?? 'Could not add those books.';
+        $error = $res['errors']['_'] ?? 'Could not add those products.';
 
     } elseif ($action === 'void') {
         $res = $O->void($id, TenantContext::userId());
@@ -62,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($res['ok']) { $notice = "Customer contact saved."; }
         else { $error = $res['error']; }
 
-    } elseif (in_array($action, ['send_invoice', 'send_delivery_note'], true)) {
+    } elseif (in_array($action, ['send_invoice', 'send_delivery_note', 'send_thank_you', 'send_remembrance'], true)) {
         if (empty($order['customer_email'])) {
             $error = 'Add a customer email first.';
         } else {
@@ -71,13 +73,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $items = $O->items($id);
             if ($action === 'send_invoice') {
                 $msg = build_order_invoice_email($order, $items, $shop);
-            } else {
+            } elseif ($action === 'send_delivery_note') {
                 $msg = build_order_delivery_note_email($order, $items, $shop);
+            } elseif ($action === 'send_thank_you') {
+                $msg = build_order_thank_you_email($order, $items, $shop);
+            } else {
+                $msg = build_order_remembrance_email($order, $items, $shop);
             }
             if ((new MailService())->send($order['customer_email'], $msg['subject'], $msg['html'], $msg['text'])) {
                 if ($action === 'send_invoice') { $O->markInvoiceSent($id); }
-                else { $O->markDeliveryNoteSent($id); }
-                $notice = ($action === 'send_invoice' ? 'Invoice' : 'Delivery note') . ' emailed to ' . $order['customer_email'] . '.';
+                elseif ($action === 'send_delivery_note') { $O->markDeliveryNoteSent($id); }
+                elseif ($action === 'send_thank_you') { $O->markThankYouSent($id); }
+                else { $O->markRemembranceSent($id); }
+                $labels = [
+                    'send_invoice' => 'Invoice',
+                    'send_delivery_note' => 'Delivery note',
+                    'send_thank_you' => 'Thank-you note',
+                    'send_remembrance' => 'Remembrance note',
+                ];
+                $notice = ($labels[$action] ?? 'Message') . ' emailed to ' . $order['customer_email'] . '.';
             } else {
                 $error = 'Could not send the email: ' . (MailService::lastError() ?: 'unknown error');
             }
@@ -102,7 +116,7 @@ ob_start();
     <div class="small text-muted">Invoice <?php echo htmlspecialchars($order['receipt_number']); ?> · opened <?php echo date('j M Y, g:i a', strtotime($order['created_at'])); ?></div>
   </div>
   <div class="d-flex gap-2">
-    <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-arrow-left me-1"></i>All tabs</a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-arrow-left me-1"></i>Credit sales</a>
     <a class="btn btn-sm btn-outline-primary" href="<?php echo $receiptUrl; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
   </div>
 </div>
@@ -151,9 +165,9 @@ ob_start();
     </div>
 
     <?php if ($order['status'] === 'open'): ?>
-    <form method="post" class="d-inline" onsubmit="return confirm('Void this tab? Stock will be restored.');">
+    <form method="post" class="d-inline" onsubmit="return confirm('Void this credit sale? Stock will be restored.');">
       <input type="hidden" name="action" value="void">
-      <button class="btn btn-outline-danger btn-sm"><i class="fas fa-ban me-1"></i>Void tab</button>
+      <button class="btn btn-outline-danger btn-sm"><i class="fas fa-ban me-1"></i>Void sale</button>
     </form>
     <?php endif; ?>
 
@@ -184,6 +198,14 @@ ob_start();
             <input type="hidden" name="action" value="send_delivery_note">
             <button class="btn btn-sm btn-outline-primary" <?php echo empty($order['customer_email']) ? 'disabled' : ''; ?>><i class="fas fa-truck-ramp-box me-1"></i>Email delivery note</button>
           </form>
+          <form method="post" class="d-inline">
+            <input type="hidden" name="action" value="send_thank_you">
+            <button class="btn btn-sm btn-outline-success" <?php echo empty($order['customer_email']) ? 'disabled' : ''; ?>><i class="fas fa-heart me-1"></i>Thank-you note</button>
+          </form>
+          <form method="post" class="d-inline">
+            <input type="hidden" name="action" value="send_remembrance">
+            <button class="btn btn-sm btn-outline-secondary" <?php echo empty($order['customer_email']) ? 'disabled' : ''; ?>><i class="fas fa-envelope-open-text me-1"></i>Remembrance note</button>
+          </form>
         </div>
         <?php if (!empty($order['invoice_sent_at']) || !empty($order['delivery_note_sent_at'])): ?>
           <div class="text-muted small mt-2">
@@ -199,7 +221,7 @@ ob_start();
     <?php if ($order['status'] === 'open'): ?>
     <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
       <div class="card-body p-4">
-        <h2 class="h6 mb-3">Add another round</h2>
+        <h2 class="h6 mb-3">Add more items</h2>
         <?php if (!$products): ?>
           <div class="text-muted small">No products in stock.</div>
         <?php else: ?>
@@ -207,7 +229,7 @@ ob_start();
           <input type="hidden" name="action" value="add_items">
           <input type="hidden" name="cart" id="cartInput" value="">
           <div class="position-relative mb-2">
-            <input type="text" id="search" class="form-control" placeholder="Search books…" autocomplete="off">
+            <input type="text" id="search" class="form-control" placeholder="Search products…" autocomplete="off">
           </div>
           <div id="productList" style="max-height:280px;overflow-y:auto;">
             <?php foreach ($products as $p):

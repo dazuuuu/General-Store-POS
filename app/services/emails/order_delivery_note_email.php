@@ -34,7 +34,7 @@ function build_order_delivery_note_email(array $order, array $items, array $shop
     <div style="padding:28px">
       <h1 style="margin:0 0 12px;font-size:20px;color:#0f172a">Hi {$h($order['table_name'])},</h1>
       <p style="margin:0 0 18px;color:#475569;font-size:15px;line-height:1.5">
-        This confirms the following books were handed over to you on {$h(date('j M Y', strtotime($order['created_at'])))}, for your records.
+        This confirms the following goods were handed over to you on {$h(date('j M Y', strtotime($order['created_at'])))}, for your records.
       </p>
       <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin-bottom:8px">
         <tr style="color:#64748b;font-size:12px;text-transform:uppercase;">

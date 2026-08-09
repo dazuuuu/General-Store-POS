@@ -1,24 +1,31 @@
 <?php
 // public/super/settings/index.php — business details shown on receipts:
-// name, logo, location, and an optional KRA PIN (only printed when set).
+// name, logo, location, VAT, loyalty, and receipt footer.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::SETTINGS_MANAGE);
 
 $pdo = Database::pdo();
 $tenantId = TenantContext::tenantId();
 $tenantModel = new Models\TenantModel($pdo);
+$tenantModel->ensureShopSchema();
+
+$defaultFooter = implode("\n", ReceiptFooter::DEFAULT_LINES);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data = [
-        'name'           => trim($_POST['name'] ?? ''),
-        'phone'          => trim($_POST['phone'] ?? ''),
-        'address'        => trim($_POST['address'] ?? ''),
-        'currency'       => trim($_POST['currency'] ?? 'KES'),
-        'receipt_footer' => trim($_POST['receipt_footer'] ?? ''),
-        'kra_pin'        => trim($_POST['kra_pin'] ?? ''),
+        'name'                    => trim($_POST['name'] ?? ''),
+        'phone'                   => trim($_POST['phone'] ?? ''),
+        'address'                 => trim($_POST['address'] ?? ''),
+        'currency'                => trim($_POST['currency'] ?? 'KES'),
+        'receipt_footer'          => trim($_POST['receipt_footer'] ?? ''),
+        'kra_pin'                 => trim($_POST['kra_pin'] ?? ''),
+        'vat_rate'                => max(0, round((float) ($_POST['vat_rate'] ?? 0), 2)),
+        'vat_inclusive'           => !empty($_POST['vat_inclusive']) ? 1 : 0,
+        'loyalty_points_per_kes'  => max(0, round((float) ($_POST['loyalty_points_per_kes'] ?? 1), 2)),
+        'loyalty_kes_per_point'   => max(0, round((float) ($_POST['loyalty_kes_per_point'] ?? 0.01), 4)),
+        'low_stock_alert_enabled' => !empty($_POST['low_stock_alert_enabled']) ? 1 : 0,
     ];
 
-    // Logo upload (optional). Stored under public/uploads/branding/.
     if (!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])) {
         $logo = save_tenant_logo($_FILES['logo'], $tenantId);
         if ($logo['ok']) {
@@ -40,7 +47,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-/** Minimal, safe image saver (swap for app/helpers/uploads.php if you prefer). */
 function save_tenant_logo(array $file, int $tenantId): array
 {
     if ($file['error'] !== UPLOAD_ERR_OK)               return ['ok' => false, 'error' => 'Upload failed.'];
@@ -55,8 +61,6 @@ function save_tenant_logo(array $file, int $tenantId): array
     if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
         return ['ok' => false, 'error' => 'Could not save the logo.'];
     }
-    // Stored relative to the public web root; Branding::tenantLogo() resolves
-    // it through public_url() when displaying it.
     return ['ok' => true, 'path' => 'uploads/branding/' . $name];
 }
 
@@ -70,7 +74,7 @@ ob_start();
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-4">
         <h2 class="h5 mb-1">Business details</h2>
-        <p class="text-muted small mb-3">Shown on every printed and emailed receipt.</p>
+        <p class="text-muted small mb-3">Shown on every printed and emailed receipt and invoice.</p>
         <form method="post" enctype="multipart/form-data">
           <div class="mb-3">
             <label class="form-label fw-semibold">Business name</label>
@@ -100,11 +104,50 @@ ob_start();
                    value="<?php echo htmlspecialchars($__tenant['kra_pin'] ?? ''); ?>">
             <div class="form-text">Only printed on receipts when you fill this in.</div>
           </div>
+
+          <hr class="my-4">
+          <h3 class="h6 fw-bold mb-3">VAT &amp; pricing</h3>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">VAT rate (%)</label>
+              <input type="number" step="0.01" min="0" name="vat_rate" class="form-control"
+                     value="<?php echo htmlspecialchars((string) ($__tenant['vat_rate'] ?? '0')); ?>">
+            </div>
+            <div class="col-md-6 mb-3 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="vat_inclusive" value="1" id="vatInc"
+                       <?php echo !empty($__tenant['vat_inclusive']) || !isset($__tenant['vat_inclusive']) ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="vatInc">Prices include VAT</label>
+              </div>
+            </div>
+          </div>
+
+          <hr class="my-4">
+          <h3 class="h6 fw-bold mb-3">Loyalty</h3>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Points per KES spent</label>
+              <input type="number" step="0.01" min="0" name="loyalty_points_per_kes" class="form-control"
+                     value="<?php echo htmlspecialchars((string) ($__tenant['loyalty_points_per_kes'] ?? '1')); ?>">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">KES value per point</label>
+              <input type="number" step="0.0001" min="0" name="loyalty_kes_per_point" class="form-control"
+                     value="<?php echo htmlspecialchars((string) ($__tenant['loyalty_kes_per_point'] ?? '0.01')); ?>">
+            </div>
+          </div>
+
+          <hr class="my-4">
           <div class="mb-3">
             <label class="form-label fw-semibold">Receipt footer</label>
-            <input type="text" name="receipt_footer" class="form-control"
-                   placeholder="e.g. Thank you for shopping with us!"
-                   value="<?php echo htmlspecialchars($__tenant['receipt_footer'] ?? ''); ?>">
+            <textarea name="receipt_footer" class="form-control" rows="4"
+                      placeholder="<?php echo htmlspecialchars($defaultFooter); ?>"><?php echo htmlspecialchars($__tenant['receipt_footer'] ?? $defaultFooter); ?></textarea>
+            <div class="form-text">Printed at the bottom of every receipt and invoice. Include your return policy and welcome line.</div>
+          </div>
+          <div class="mb-3 form-check">
+            <input class="form-check-input" type="checkbox" name="low_stock_alert_enabled" value="1" id="lowStock"
+                   <?php echo !isset($__tenant['low_stock_alert_enabled']) || !empty($__tenant['low_stock_alert_enabled']) ? 'checked' : ''; ?>>
+            <label class="form-check-label" for="lowStock">Enable low stock alerts</label>
           </div>
           <div class="mb-4">
             <label class="form-label fw-semibold">Logo</label>

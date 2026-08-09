@@ -36,10 +36,10 @@ $isOn = function (string $needle) use ($uri): string {
 
         <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
         <a class="t-link <?php echo $isOn('/staff/orders/held') ? '' : $isOn('/staff/orders'); ?>" href="<?php echo public_url('staff/orders/'); ?>">
-            <i class="fas fa-receipt"></i><span>Orders</span>
+            <i class="fas fa-file-invoice-dollar"></i><span>Credit sales</span>
         </a>
         <a class="t-link <?php echo $isOn('/staff/orders/held'); ?>" href="<?php echo public_url('staff/orders/held.php'); ?>">
-            <i class="fas fa-pause"></i><span>Held orders</span>
+            <i class="fas fa-pause"></i><span>Held sales</span>
         </a>
         <?php endif; ?>
 

@@ -37,8 +37,14 @@ $C  = new Models\CategoryModel($pdo);
 $BA = new Models\BookAttributeModel($pdo);
 $HO = new Models\HeldOrderModel($pdo);
 $OR = new Models\OrderModel($pdo);
+$tenantRow = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
+(new Models\TenantModel($pdo))->ensureShopSchema();
+$tenantRow = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: $tenantRow;
+$vatRate = (float) ($tenantRow['vat_rate'] ?? 0);
+$vatInclusive = (int) ($tenantRow['vat_inclusive'] ?? 1) === 1;
 $products   = $P->sellable();
-$subjects   = $C->all(['type' => 'subject'], 'name ASC');
+$subjects   = $C->all(['type' => 'product'], 'name ASC');
+if (!$subjects) { $subjects = $C->all(['type' => 'subject'], 'name ASC'); }
 $grades     = $BA->all(['type' => 'grade'], 'name ASC');
 $publishers = $BA->all(['type' => 'publisher'], 'name ASC');
 $stationeryCats = $C->all(['type' => 'stationery'], 'name ASC');
@@ -82,11 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $res = $HO->hold(['customer_name' => $customerName, 'staff_id' => TenantContext::userId(), 'items' => $items]);
         if ($res['ok']) {
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-            $_SESSION['flash']['success'] = 'Order held for ' . $customerName . '.';
+            $_SESSION['flash']['success'] = 'Sale held for ' . $customerName . '.';
             header('Location: ' . public_url('staff/orders/held.php'));
             exit;
         }
-        $error = $res['errors']['_'] ?? ($res['errors']['customer_name'] ?? 'Could not hold this order.');
+        $error = $res['errors']['_'] ?? ($res['errors']['customer_name'] ?? 'Could not hold this sale.');
 
     } else { // pay — walk-in, paid immediately
         // Recompute the total server-side from real prices so we can validate
@@ -100,14 +106,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $subtotal = round($subtotal, 2);
         // Negotiated discount — clamp so a typo can't produce a negative total.
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), $subtotal);
-        $total = round($subtotal - $discount, 2);
+        $saleType = (($_POST['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+        $postVatRate = max(0, round((float) ($_POST['vat_rate'] ?? $vatRate), 2));
+        $postVatInc = array_key_exists('vat_inclusive', $_POST) ? (bool) (int) $_POST['vat_inclusive'] : $vatInclusive;
+        $priced = Pricing::totals($subtotal, $discount, $postVatRate, $postVatInc);
+        $total = $priced['total'];
         $method = $_POST['payment_method'] ?? '';
         $tendered = round((float) ($_POST['amount_tendered'] ?? 0), 2);
         $cashAmt  = round((float) ($_POST['cash_amount'] ?? 0), 2);
         $mpesaAmt = round((float) ($_POST['mpesa_amount'] ?? 0), 2);
+        $allowedPay = ['cash', 'mpesa', 'split', 'card', 'bank', 'credit'];
 
         if (!$items) {
             $error = 'Add at least one item.';
+        } elseif (!in_array($method, $allowedPay, true)) {
+            $error = 'Choose how the customer paid.';
         } elseif ($method === 'cash' && $tendered + 0.0001 < $total) {
             $error = 'Cash given is less than the total.';
         } elseif ($method === 'split' && abs(($cashAmt + $mpesaAmt) - $total) > 0.01) {
@@ -115,7 +128,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($method === 'split' && $cashAmt > 0 && $tendered + 0.0001 < $cashAmt) {
             $error = 'Cash given is less than the cash portion.';
         } else {
-            $openRes = $OR->open(['table_name' => $customerName, 'opened_by' => TenantContext::userId(), 'items' => $items, 'channel' => 'walkin', 'discount_amount' => $discount]);
+            $openRes = $OR->open([
+                'table_name' => $customerName,
+                'opened_by' => TenantContext::userId(),
+                'items' => $items,
+                'channel' => 'walkin',
+                'discount_amount' => $discount,
+                'vat_rate' => $postVatRate,
+                'vat_inclusive' => $postVatInc,
+                'sale_type' => $saleType,
+            ]);
             if (!$openRes['ok']) {
                 $error = $openRes['errors']['_'] ?? 'Could not record this sale.';
             } else {
@@ -129,8 +151,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
                 // Rare: opened fine but settling failed. It's now a normal open
-                // tab, recoverable from Orders/Payments — not lost.
-                $error = ($payRes['error'] ?? 'Could not complete the payment.') . ' The sale was saved as an open tab — settle it from Payments.';
+                // tab, recoverable from Credit sales/Payments — not lost.
+                $error = ($payRes['error'] ?? 'Could not complete the payment.') . ' The sale was saved as a credit sale — settle it from Payments.';
             }
         }
     }
@@ -157,7 +179,7 @@ ob_start();
   <div class="pos-main">
     <div class="pos-search">
       <i class="fas fa-magnifying-glass"></i>
-      <input type="text" id="search" placeholder="Search books…" autocomplete="off">
+      <input type="text" id="search" placeholder="Search products…" autocomplete="off">
     </div>
     <div class="pos-search pos-scan">
       <i class="fas fa-barcode"></i>
@@ -168,15 +190,15 @@ ob_start();
     <?php $offerCount = count(array_filter($products, fn($p) => !empty($p['on_offer']))); ?>
     <?php if ($offerCount > 0): ?>
       <button type="button" class="pos-offer-banner" id="offerBanner">
-        <i class="fas fa-tag me-1"></i><?php echo $offerCount; ?> book<?php echo $offerCount === 1 ? '' : 's'; ?> on offer right now — tap to see them
+        <i class="fas fa-tag me-1"></i><?php echo $offerCount; ?> product<?php echo $offerCount === 1 ? '' : 's'; ?> on offer right now — tap to see them
       </button>
     <?php endif; ?>
 
     <div class="pos-dim-tabs" id="dimTabs">
-      <button type="button" class="pos-dim active" data-dim="subject">By subject</button>
-      <button type="button" class="pos-dim" data-dim="grade">By grade</button>
-      <button type="button" class="pos-dim" data-dim="publisher">By publisher</button>
-      <button type="button" class="pos-dim" data-dim="stationery">Stationery</button>
+      <button type="button" class="pos-dim active" data-dim="subject">By category</button>
+      <button type="button" class="pos-dim" data-dim="grade">By variant</button>
+      <button type="button" class="pos-dim" data-dim="publisher">By brand</button>
+      <button type="button" class="pos-dim" data-dim="stationery">Other</button>
       <button type="button" class="pos-dim" data-dim="offers">Offers</button>
       <button type="button" class="pos-dim" data-dim="archive">Archive</button>
     </div>
@@ -282,7 +304,7 @@ ob_start();
   </div>
 
   <aside class="pos-side">
-    <h2 class="pos-side-title">Order Details</h2>
+    <h2 class="pos-side-title">Sale Details</h2>
     <div class="pos-customer">
       <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
       <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>">
@@ -295,21 +317,38 @@ ob_start();
         <span>Discount <span class="text-muted small">(if they negotiate)</span></span>
         <input type="number" step="0.01" min="0" id="discountInput" name="discount_amount" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
       </div>
+      <div class="d-flex justify-content-between align-items-center py-1">
+        <span>VAT <span class="text-muted small" id="vatRateLabel"></span></span>
+        <span id="vatOut">KES 0</span>
+      </div>
+      <div class="d-flex justify-content-between align-items-center py-1">
+        <span>Sale type</span>
+        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:120px;">
+          <option value="retail">Retail</option>
+          <option value="wholesale">Wholesale</option>
+        </select>
+      </div>
+      <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
+      <input type="hidden" name="vat_inclusive" id="vatInclusiveInput" value="1">
       <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
     </div>
 
     <div class="pos-actions" id="cartButtons">
-      <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Order</button>
+      <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
       <button type="button" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Checkout</button>
     </div>
 
     <div id="payPanel" style="display:none;">
       <hr>
-      <div class="btn-group w-100 mb-2" role="group">
+      <div class="btn-group w-100 mb-2 flex-wrap" role="group">
         <input type="radio" class="btn-check" name="pm" id="pmCash" value="cash" checked>
         <label class="btn btn-outline-primary btn-sm" for="pmCash"><i class="fas fa-money-bill-wave me-1"></i>Cash</label>
         <input type="radio" class="btn-check" name="pm" id="pmMpesa" value="mpesa">
         <label class="btn btn-outline-success btn-sm" for="pmMpesa"><i class="fas fa-mobile-screen me-1"></i>M-Pesa</label>
+        <input type="radio" class="btn-check" name="pm" id="pmCard" value="card">
+        <label class="btn btn-outline-dark btn-sm" for="pmCard"><i class="fas fa-credit-card me-1"></i>Card</label>
+        <input type="radio" class="btn-check" name="pm" id="pmBank" value="bank">
+        <label class="btn btn-outline-secondary btn-sm" for="pmBank"><i class="fas fa-building-columns me-1"></i>Bank</label>
         <input type="radio" class="btn-check" name="pm" id="pmSplit" value="split">
         <label class="btn btn-outline-secondary btn-sm" for="pmSplit"><i class="fas fa-divide me-1"></i>Split</label>
       </div>
@@ -426,12 +465,23 @@ function total() {
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
     if (d < 0) d = 0;
     if (d > sub) d = sub;
-    return sub - d;
+    var net = sub - d;
+    var rate = parseFloat(document.getElementById('vatRateInput').value) || 0;
+    var inclusive = document.getElementById('vatInclusiveInput').value === '1';
+    var vat = 0;
+    if (rate > 0) {
+        vat = inclusive ? (net - (net / (1 + rate / 100))) : (net * rate / 100);
+        if (!inclusive) net = net + vat;
+    }
+    return { total: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100 };
 }
 function updateTotals() {
+    var t = total();
     document.getElementById('subtotalOut').textContent = money(subtotal());
-    document.getElementById('totalOut').textContent = money(total());
-    document.getElementById('payableOut').textContent = money(total());
+    var vatOut = document.getElementById('vatOut');
+    if (vatOut) vatOut.textContent = money(t.vat);
+    document.getElementById('totalOut').textContent = money(t.total);
+    document.getElementById('payableOut').textContent = money(t.total);
     updatePayFields();
 }
 
@@ -529,20 +579,24 @@ document.getElementById('checkoutBtn').addEventListener('click', function () {
 
 function payMethod() { return document.querySelector('input[name=pm]:checked').value; }
 function updatePayFields() {
-    var m = payMethod(), t = total();
-    document.getElementById('cashBox').style.display = m === 'mpesa' ? 'none' : 'flex';
+    var m = payMethod(), t = total().total;
+    var needsCash = (m === 'cash' || m === 'split');
+    document.getElementById('cashBox').style.display = needsCash ? 'flex' : 'none';
     document.getElementById('splitBox').style.display = m === 'split' ? 'flex' : 'none';
     var due = m === 'split' ? (parseFloat(document.getElementById('cashPortionInput').value) || 0) : t;
     var given = parseFloat(document.getElementById('cashGivenInput').value) || 0;
-    document.getElementById('balanceOut').textContent = m === 'mpesa' ? '—' : (given >= due ? money(given - due) : 'short');
+    document.getElementById('balanceOut').textContent = needsCash ? (given >= due ? money(given - due) : 'short') : '—';
 
     document.getElementById('paymentMethod').value = m;
     if (m === 'cash') { document.getElementById('amountTendered').value = given; document.getElementById('cashAmount').value = ''; document.getElementById('mpesaAmount').value = ''; }
-    else if (m === 'mpesa') { document.getElementById('amountTendered').value = ''; document.getElementById('cashAmount').value = ''; document.getElementById('mpesaAmount').value = ''; }
-    else {
+    else if (m === 'split') {
         document.getElementById('cashAmount').value = document.getElementById('cashPortionInput').value || 0;
         document.getElementById('mpesaAmount').value = document.getElementById('mpesaPortionInput').value || 0;
         document.getElementById('amountTendered').value = document.getElementById('cashGivenInput').value || 0;
+    } else {
+        document.getElementById('amountTendered').value = '';
+        document.getElementById('cashAmount').value = '';
+        document.getElementById('mpesaAmount').value = '';
     }
 }
 document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventListener('change', updatePayFields); });
@@ -553,7 +607,7 @@ document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventLis
 document.getElementById('orderForm').addEventListener('submit', function (e) {
     if (Object.keys(cart).length === 0) { e.preventDefault(); alert('Add at least one product.'); return; }
     if (document.getElementById('formAction').value === 'pay') {
-        var m = payMethod(), t = total();
+        var m = payMethod(), t = total().total;
         if (m === 'cash' && (parseFloat(document.getElementById('cashGivenInput').value) || 0) < t) { e.preventDefault(); alert('Cash given is less than the total.'); return; }
         if (m === 'split') {
             var cp = parseFloat(document.getElementById('cashPortionInput').value) || 0, mp = parseFloat(document.getElementById('mpesaPortionInput').value) || 0;
@@ -561,6 +615,16 @@ document.getElementById('orderForm').addEventListener('submit', function (e) {
         }
     }
 });
+
+// Shop VAT settings from the owner Settings page
+(function () {
+    var rate = <?php echo json_encode($vatRate); ?>;
+    var inclusive = <?php echo $vatInclusive ? 'true' : 'false'; ?>;
+    document.getElementById('vatRateInput').value = rate;
+    document.getElementById('vatInclusiveInput').value = inclusive ? '1' : '0';
+    var label = document.getElementById('vatRateLabel');
+    if (label) label.textContent = rate > 0 ? '(' + rate + '%' + (inclusive ? ' incl.' : ' excl.') + ')' : '(off)';
+})();
 
 var barcodeScan = document.getElementById('barcodeScan');
 var scanMsg = document.getElementById('scanMsg');
@@ -578,11 +642,11 @@ if (barcodeScan) {
         barcodeScan.value = '';
         if (!code) { return; }
         var id = BARCODES[code];
-        if (!id) { flashScan('No book with that barcode.', false); return; }
+        if (!id) { flashScan('No product with that barcode.', false); return; }
         var p = PRODUCTS[id];
         if (p && p.stock <= (cart[id] || 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
         add(id);
-        flashScan((p ? p.name : 'Book') + ' added.', true);
+        flashScan((p ? p.name : 'Product') + ' added.', true);
     });
     // Keep the scanner's keystrokes landing here even after other clicks,
     // as long as no other field is being typed into.
@@ -593,6 +657,7 @@ if (barcodeScan) {
 }
 
 render();
+applyFilters();
 </script>
 <?php endif; ?>
 <?php

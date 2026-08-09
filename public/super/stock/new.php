@@ -1,11 +1,11 @@
 <?php
 // public/super/stock/new.php — record a delivery: a supplier brings a batch
 // of books (new titles, or a restock of ones already on the shelf), in the
-// same shape as the shop's paper stock ledger: Subject, Book Title,
-// Grade/Class, Publisher, Author, Edition, Opening Stock, Unit Price, Total,
+// same shape as the shop's paper stock ledger: Category, Book Title,
+// Variant, Brand, Supplier SKU / maker, Model / size, Opening Stock, Unit Price, Total,
 // Balance, Remark. Every text field below is free entry with live
 // suggestions — picking a suggestion (or typing an exact match) reuses the
-// existing Subject/Grade/Publisher/Author/Edition/Supplier; anything new is
+// existing Category/Grade/Brand/Supplier SKU / maker/Model / size/Supplier; anything new is
 // created automatically on save. No dropdowns.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::STOCK_ENTER);
@@ -95,7 +95,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $items[] = [
                 'mode'            => 'new',
                 'name'            => $title,
-                'category_id'     => (int) $C->findOrCreate($row['subject'] ?? ''),
+                'category_id'     => (int) $C->findOrCreate($row['subject'] ?? '', 'product'),
+                'product_type'    => 'product',
                 'grade_id'        => (int) $BA->findOrCreate('grade', $row['grade'] ?? ''),
                 'publisher_id'    => (int) $BA->findOrCreate('publisher', $row['publisher'] ?? ''),
                 'author_id'       => (int) $BA->findOrCreate('author', $row['author'] ?? ''),
@@ -114,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$error && !$items) {
-            $error = 'Add at least one book with a quantity.';
+            $error = 'Add at least one product with a quantity.';
         }
 
         if (!$error) {
@@ -124,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'notes'       => $_POST['notes'] ?? '',
             ], $items);
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = 'Stock recorded — ' . count($items) . ' book' . (count($items) === 1 ? '' : 's') . '.';
+                $_SESSION['flash']['success'] = 'Stock recorded — ' . count($items) . ' product' . (count($items) === 1 ? '' : 's') . '.';
                 header('Location: ' . public_url('super/inventory/'));
                 exit;
             }
@@ -133,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$page_title = 'Record stock';
+$page_title = 'Record products in bulk';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
@@ -146,7 +147,7 @@ ob_start();
         <div class="col-12 col-md-6">
           <label class="form-label">Supplier <span class="text-muted">(optional — who delivered it)</span></label>
           <div class="ta-wrap">
-            <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" placeholder="e.g. Longhorn Distributors" autocomplete="off">
+            <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" placeholder="e.g. Coca-Cola Distributors" autocomplete="off">
             <div class="ta-menu"></div>
           </div>
         </div>
@@ -161,8 +162,8 @@ ob_start();
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Books received</h2>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"><i class="fas fa-plus me-1"></i>Add another book</button>
+        <h2 class="h5 mb-0">Products received</h2>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"><i class="fas fa-plus me-1"></i>Add another product</button>
       </div>
       <div id="rows"></div>
       <div class="d-flex justify-content-end pt-2 border-top mt-2">
@@ -171,20 +172,20 @@ ob_start();
     </div>
   </div>
 
-  <button class="btn btn-primary btn-lg"><i class="fas fa-truck-loading me-1"></i>Record stock</button>
+  <button class="btn btn-primary btn-lg"><i class="fas fa-truck-loading me-1"></i>Record products in bulk</button>
 </form>
 
 <template id="rowTpl">
   <div class="stock-row border rounded p-3 mb-3" style="border-color:#e2e8f0!important;">
     <div class="d-flex justify-content-between align-items-center mb-2">
-      <span class="fw-semibold small text-muted">Book __N__</span>
+      <span class="fw-semibold small text-muted">Product __N__</span>
       <button type="button" class="btn btn-sm btn-link text-danger p-0 removeRow">Remove</button>
     </div>
     <div class="row g-2">
       <div class="col-12 col-sm-6">
-        <label class="form-label small mb-1">Book title</label>
+        <label class="form-label small mb-1">Product name</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][title]" class="form-control form-control-sm ta-input bookTitle" data-field="title" placeholder="e.g. Let's do Mathematics" autocomplete="off">
+          <input type="text" name="items[__I__][title]" class="form-control form-control-sm ta-input bookTitle" data-field="title" placeholder="e.g. Soft drink 500ml" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
         <input type="hidden" name="items[__I__][product_choice]" class="productChoice" value="">
@@ -196,7 +197,7 @@ ob_start();
         <div class="barcodeNote small mt-1" style="display:none;"></div>
       </div>
       <div class="col-12 col-sm-6 photoCol newProductFields">
-        <label class="form-label small mb-1">Cover photo <span class="text-muted">(optional)</span></label>
+        <label class="form-label small mb-1">Product photo <span class="text-muted">(optional)</span></label>
         <div class="d-flex align-items-center gap-2">
           <input type="file" name="items[__I__][image]" accept="image/*" class="form-control form-control-sm photoInput">
           <img class="photoPreview" style="display:none;width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;">
@@ -204,37 +205,37 @@ ob_start();
       </div>
 
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Subject</label>
+        <label class="form-label small mb-1">Category</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][subject]" class="form-control form-control-sm ta-input" data-field="subject" placeholder="e.g. Mathematics" autocomplete="off">
+          <input type="text" name="items[__I__][subject]" class="form-control form-control-sm ta-input" data-field="subject" placeholder="e.g. Beverages" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Grade/Class</label>
+        <label class="form-label small mb-1">Variant</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][grade]" class="form-control form-control-sm ta-input" data-field="grade" placeholder="e.g. Grade Three" autocomplete="off">
+          <input type="text" name="items[__I__][grade]" class="form-control form-control-sm ta-input" data-field="grade" placeholder="e.g. Large / 500ml" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Publisher</label>
+        <label class="form-label small mb-1">Brand</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][publisher]" class="form-control form-control-sm ta-input" data-field="publisher" placeholder="e.g. Longhorn" autocomplete="off">
+          <input type="text" name="items[__I__][publisher]" class="form-control form-control-sm ta-input" data-field="publisher" placeholder="e.g. Coca-Cola" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Author</label>
+        <label class="form-label small mb-1">Supplier SKU / maker</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][author]" class="form-control form-control-sm ta-input" data-field="author" placeholder="e.g. Kefa Masita" autocomplete="off">
+          <input type="text" name="items[__I__][author]" class="form-control form-control-sm ta-input" data-field="author" placeholder="optional" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Edition</label>
+        <label class="form-label small mb-1">Model / size</label>
         <div class="ta-wrap">
-          <input type="text" name="items[__I__][edition]" class="form-control form-control-sm ta-input" data-field="edition" placeholder="e.g. First" autocomplete="off">
+          <input type="text" name="items[__I__][edition]" class="form-control form-control-sm ta-input" data-field="edition" placeholder="optional" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
@@ -268,7 +269,7 @@ ob_start();
       <div class="col-12 mt-2 newProductFields">
         <div class="form-check">
           <input class="form-check-input offerToggle" type="checkbox" id="offerToggle__I__">
-          <label class="form-check-label small" for="offerToggle__I__"><i class="fas fa-tag me-1"></i>Put this book on offer</label>
+          <label class="form-check-label small" for="offerToggle__I__"><i class="fas fa-tag me-1"></i>Put this product on offer</label>
         </div>
         <div class="row g-2 mt-1 offerFields" style="display:none;">
           <div class="col-6 col-sm-4">
@@ -437,7 +438,7 @@ ob_start();
       var q = input.value.trim();
       if (!q) { menu.classList.remove('show'); return; }
       timer = setTimeout(function () {
-        fetch(API + 'find_titles.php?q=' + encodeURIComponent(q))
+        fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
           .then(function (r) { return r.json(); })
           .then(function (data) { render(data.items || []); })
           .catch(function () {});

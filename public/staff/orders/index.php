@@ -14,13 +14,13 @@ $orders = $O->openOrders();
 $isStaffViewer = TenantContext::role() === 'staff';
 $viewBase = $isStaffViewer ? public_url('staff/orders/view.php') : public_url('super/orders/view.php');
 
-$page_title = 'Open tabs';
+$page_title = 'Credit sales';
 ob_start();
 ?>
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-  <h1 class="h5 mb-0 fw-bold"><i class="fas fa-receipt me-2 text-warning"></i>Open tabs</h1>
+  <h1 class="h5 mb-0 fw-bold"><i class="fas fa-receipt me-2 text-warning"></i>Credit sales</h1>
   <?php if ($isStaffViewer): ?>
-  <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-sm btn-primary"><i class="fas fa-plus me-1"></i>New order</a>
+  <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-sm btn-primary"><i class="fas fa-plus me-1"></i>New credit sale</a>
   <?php endif; ?>
 </div>
 

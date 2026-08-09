@@ -10,12 +10,12 @@ PageGuard::auth();
 $pdo = Database::pdo();
 $C = new Models\CategoryModel($pdo);
 
-$type = (($_GET['type'] ?? $_POST['type'] ?? '') === 'stationery') ? 'stationery' : 'subject';
-$noun = $type === 'stationery' ? 'category' : 'subject';
-$nounCap = ucfirst($noun);
-$countLabel = $type === 'stationery' ? 'Items' : 'Books';
+$type = (($_GET['type'] ?? $_POST['type'] ?? '') === 'stationery') ? 'stationery' : 'product';
+$noun = 'category';
+$nounCap = 'Category';
+$countLabel = 'Products';
 $recordUrl = $type === 'stationery' ? public_url('super/stationery/new.php') : public_url('super/stock/new.php');
-$recordLabel = $type === 'stationery' ? 'Record stationery' : 'Record stock';
+$recordLabel = $type === 'stationery' ? 'Record product' : 'Record products in bulk';
 
 $error = ''; $old = '';
 
@@ -93,7 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $categories = $C->listWithCounts($type);
-$page_title = $type === 'stationery' ? 'Stationery categories' : 'Subjects';
+$page_title = $type === 'stationery' ? 'Extra categories' : 'Categories';
 ob_start();
 ?>
 <div class="row g-4">

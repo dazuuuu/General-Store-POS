@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'creat
 }
 
 $grades = $BA->listWithCounts('grade');
-$page_title = 'Grades';
+$page_title = 'Variants';
 ob_start();
 ?>
 <div class="row g-4">

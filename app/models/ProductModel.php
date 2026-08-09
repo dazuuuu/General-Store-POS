@@ -12,8 +12,9 @@ class ProductModel extends Model
         $this->ensureSchema();
     }
 
-    public const UNITS = ['piece', 'g', 'kg', 'tonne', 'ml', 'litre'];
+    public const UNITS = ['piece', 'g', 'kg', 'tonne', 'ml', 'litre', 'pack', 'dozen', 'box', 'carton'];
     public const SIZE_UNITS = ['ml', 'l'];
+    public const PRODUCT_TYPES = ['product', 'book', 'stationery'];
 
     /**
      * @param array $in name, category_id, subcategory_id, supplier_id, description,
@@ -213,7 +214,8 @@ class ProductModel extends Model
         // no "unknown column" fallback needed here.
         $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at,
-                       p.quantity, p.unit, p.status, p.barcode, p.colors, p.sizes,
+                       p.quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price,
+                       p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,
                        p.category_id, c.name AS category_name,
                        p.grade_id, g.name AS grade_name,
@@ -227,7 +229,29 @@ class ProductModel extends Model
                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
               ORDER BY p.name ASC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([$tid]);
+        try {
+            $stmt->execute([$tid]);
+        } catch (\PDOException $e) {
+            // Older DBs missing bulk/credit columns — fall back.
+            $stmt = $this->db->prepare(
+                "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
+                        p.offer_price, p.offer_starts_at, p.offer_ends_at,
+                        p.quantity, p.unit, p.status, p.barcode, p.colors, p.sizes,
+                        p.image_path, p.size_value, p.size_unit,
+                        p.category_id, c.name AS category_name,
+                        p.grade_id, g.name AS grade_name,
+                        p.publisher_id, pu.name AS publisher_name,
+                        p.brand_id, br.name AS brand_name
+                   FROM products p
+              LEFT JOIN categories c ON c.id = p.category_id
+              LEFT JOIN book_attributes g  ON g.id  = p.grade_id
+              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
+              LEFT JOIN book_attributes br ON br.id = p.brand_id
+                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
+               ORDER BY p.name ASC"
+            );
+            $stmt->execute([$tid]);
+        }
         $rows = $stmt->fetchAll();
         foreach ($rows as &$r) {
             $eff = self::effectivePrice($r);
@@ -246,16 +270,22 @@ class ProductModel extends Model
     /** Active books (or, with $productType='stationery', stationery items)
      *  whose name matches $q — powers the title type-ahead / restock lookup
      *  on both Record Stock and Record Stationery. */
-    public function searchByName(string $q, int $limit = 8, string $productType = 'book'): array
+    public function searchByName(string $q, int $limit = 8, string $productType = 'product'): array
     {
         $tid = \TenantContext::tenantId();
         $q = trim($q);
         if ($q === '') {
             return [];
         }
-        $productType = in_array($productType, ['book', 'stationery'], true) ? $productType : 'book';
+        // Treat legacy 'book' rows as products when searching the general catalogue.
+        $types = [$productType];
+        if ($productType === 'product') {
+            $types[] = 'book';
+        }
+        $productType = in_array($productType, self::PRODUCT_TYPES, true) ? $productType : 'product';
+        $placeholders = implode(',', array_fill(0, count($types), '?'));
         $stmt = $this->db->prepare(
-            'SELECT p.id, p.name, p.quantity, p.buying_price, p.image_path, p.barcode,
+            "SELECT p.id, p.name, p.quantity, p.buying_price, p.image_path, p.barcode,
                     c.name AS subject_name, g.name AS grade_name, pu.name AS publisher_name,
                     au.name AS author_name, ed.name AS edition_name, br.name AS brand_name
                FROM products p
@@ -265,11 +295,12 @@ class ProductModel extends Model
           LEFT JOIN book_attributes au ON au.id = p.author_id
           LEFT JOIN book_attributes ed ON ed.id = p.edition_id
           LEFT JOIN book_attributes br ON br.id = p.brand_id
-              WHERE p.tenant_id = ? AND p.product_type = ? AND p.status = ? AND p.name LIKE ?
+              WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
            ORDER BY (p.name LIKE ?) DESC, p.name ASC
-              LIMIT ' . (int) $limit
+              LIMIT " . (int) $limit
         );
-        $stmt->execute([$tid, $productType, 'active', '%' . $q . '%', $q . '%']);
+        $params = array_merge([$tid], $types, ['active', '%' . $q . '%', $q . '%']);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
 
@@ -408,8 +439,12 @@ class ProductModel extends Model
             'publisher_id' => "ALTER TABLE `products` ADD COLUMN `publisher_id` INT NULL AFTER `grade_id`",
             'author_id' => "ALTER TABLE `products` ADD COLUMN `author_id` INT NULL AFTER `publisher_id`",
             'edition_id' => "ALTER TABLE `products` ADD COLUMN `edition_id` INT NULL AFTER `author_id`",
-            'product_type' => "ALTER TABLE `products` ADD COLUMN `product_type` ENUM('book','stationery') NOT NULL DEFAULT 'book' AFTER `tenant_id`",
+            'product_type' => "ALTER TABLE `products` ADD COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product' AFTER `tenant_id`",
             'brand_id' => "ALTER TABLE `products` ADD COLUMN `brand_id` INT NULL AFTER `edition_id`",
+            'credit_limit' => "ALTER TABLE `products` ADD COLUMN `credit_limit` DECIMAL(12,2) NULL AFTER `low_stock_threshold`",
+            'units_per_pack' => "ALTER TABLE `products` ADD COLUMN `units_per_pack` DECIMAL(12,2) NOT NULL DEFAULT 1.00 AFTER `unit`",
+            'pack_unit' => "ALTER TABLE `products` ADD COLUMN `pack_unit` VARCHAR(20) NULL AFTER `units_per_pack`",
+            'pack_price' => "ALTER TABLE `products` ADD COLUMN `pack_price` DECIMAL(12,2) NULL AFTER `pack_unit`",
         ];
 
         foreach ($checks as $column => $sql) {
@@ -423,6 +458,28 @@ class ProductModel extends Model
                 }
             }
         }
+        try {
+            $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
+        } catch (\PDOException $ignored) {}
+    }
+
+    /** Products at or below their low-stock threshold. */
+    public function lowStock(int $limit = 100): array
+    {
+        $tid = \TenantContext::tenantId();
+        $st = $this->db->prepare(
+            "SELECT p.*, c.name AS category_name
+               FROM products p
+               LEFT JOIN categories c ON c.id = p.category_id
+              WHERE p.tenant_id = ? AND p.status IN ('active','archived')
+                AND p.quantity <= p.low_stock_threshold
+              ORDER BY p.quantity ASC, p.name ASC
+              LIMIT ?"
+        );
+        $st->bindValue(1, $tid, \PDO::PARAM_INT);
+        $st->bindValue(2, $limit, \PDO::PARAM_INT);
+        $st->execute();
+        return $st->fetchAll();
     }
 
     private function validate(array $in): array
@@ -436,7 +493,7 @@ class ProductModel extends Model
             if (strlen($barcode) > 64) {
                 $errors['barcode'] = 'That barcode is too long.';
             } elseif ($this->barcodeTakenByAnother($barcode, (int) ($in['id'] ?? 0))) {
-                $errors['barcode'] = 'Another book already has this barcode.';
+                $errors['barcode'] = 'Another product already has this barcode.';
             }
         }
         $catId = (int) ($in['category_id'] ?? 0);
@@ -466,9 +523,15 @@ class ProductModel extends Model
                 $errors[$field] = 'Choose a valid ' . $type . '.';
             }
         }
-        $productType = $in['product_type'] ?? 'book';
-        if (!in_array($productType, ['book', 'stationery'], true)) {
+        $productType = $in['product_type'] ?? 'product';
+        if (!in_array($productType, self::PRODUCT_TYPES, true)) {
             $errors['product_type'] = 'Invalid product type.';
+        }
+        if (isset($in['credit_limit']) && $in['credit_limit'] !== '' && (!is_numeric($in['credit_limit']) || (float) $in['credit_limit'] < 0)) {
+            $errors['credit_limit'] = 'Enter a valid credit limit.';
+        }
+        if (isset($in['units_per_pack']) && $in['units_per_pack'] !== '' && (!is_numeric($in['units_per_pack']) || (float) $in['units_per_pack'] <= 0)) {
+            $errors['units_per_pack'] = 'Enter a valid pack size.';
         }
         $sizeValue = $in['size_value'] ?? '';
         if ($sizeValue !== '' && (!is_numeric($sizeValue) || (float) $sizeValue <= 0)) {
@@ -533,8 +596,12 @@ class ProductModel extends Model
         $offerPrice  = ($in['offer_price'] ?? '') !== '' ? (float) $in['offer_price'] : null;
         $offerStarts = $offerPrice !== null && !empty($in['offer_starts_at']) ? date('Y-m-d H:i:s', strtotime($in['offer_starts_at'])) : null;
         $offerEnds   = $offerPrice !== null && !empty($in['offer_ends_at']) ? date('Y-m-d H:i:s', strtotime($in['offer_ends_at'])) : null;
-        $productTypeIn = $in['product_type'] ?? 'book';
-        $productType = in_array($productTypeIn, ['book', 'stationery'], true) ? $productTypeIn : 'book';
+        $productTypeIn = $in['product_type'] ?? 'product';
+        $productType = in_array($productTypeIn, self::PRODUCT_TYPES, true) ? $productTypeIn : 'product';
+        $creditLimit = ($in['credit_limit'] ?? '') !== '' ? (float) $in['credit_limit'] : null;
+        $unitsPerPack = max(0.01, (float) ($in['units_per_pack'] ?? 1));
+        $packUnit = trim((string) ($in['pack_unit'] ?? '')) ?: null;
+        $packPrice = ($in['pack_price'] ?? '') !== '' ? (float) $in['pack_price'] : null;
         return [
             'product_type'        => $productType,
             'category_id'         => $catId > 0 ? $catId : null,
@@ -550,6 +617,9 @@ class ProductModel extends Model
             'description'         => ($in['description'] ?? '') !== '' ? trim($in['description']) : null,
             'quantity'            => (float) ($in['quantity'] ?? 0),
             'unit'                => $in['unit'] ?? 'piece',
+            'units_per_pack'      => $unitsPerPack,
+            'pack_unit'           => $packUnit,
+            'pack_price'          => $packPrice,
             'size_value'          => $sizeValue,
             'size_unit'           => $sizeUnit,
             'buying_price'        => (float) ($in['buying_price'] ?? 0),
@@ -563,6 +633,7 @@ class ProductModel extends Model
             'sizes'               => $sizes ? json_encode($sizes) : null,
             'image_path'          => ($in['image_path'] ?? '') !== '' ? $in['image_path'] : null,
             'low_stock_threshold' => (int) ($in['low_stock_threshold'] ?? 10),
+            'credit_limit'        => $creditLimit,
             'status'              => $status,
         ];
     }

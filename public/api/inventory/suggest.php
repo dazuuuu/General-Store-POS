@@ -23,10 +23,16 @@ $q = trim((string) ($_GET['q'] ?? ''));
 $pdo = Database::pdo();
 $items = [];
 
-if ($field === 'subject') {
-    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'subject');
+if ($field === 'subject' || $field === 'category') {
+    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'product');
+    if (!$items) {
+        $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'subject');
+    }
 } elseif ($field === 'stationery_category') {
-    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'stationery');
+    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'product');
+    if (!$items) {
+        $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'stationery');
+    }
 } elseif ($field === 'supplier') {
     $items = (new Models\SupplierModel($pdo))->suggestions($q);
 } elseif (in_array($field, Models\BookAttributeModel::TYPES, true)) {
