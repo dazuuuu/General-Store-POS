@@ -34,7 +34,7 @@ if ($field === 'subject' || $field === 'category' || $field === 'stationery_cate
 } elseif ($field === 'brand' || $field === 'publisher') {
     $BA = new Models\BookAttributeModel($pdo);
     $items = $BA->suggestions('brand', $q);
-    if (!$items && $field === 'publisher') {
+    if (!$items) {
         $items = $BA->suggestions('publisher', $q);
     }
 } elseif (in_array($field, Models\BookAttributeModel::TYPES, true)) {

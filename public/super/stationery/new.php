@@ -116,21 +116,31 @@ ob_start();
     <div class="row g-3">
       <div class="col-12 col-md-6">
         <label class="form-label fw-semibold">Product name</label>
-        <input type="text" name="name" id="prodName" class="form-control" required placeholder="e.g. Yellow beans, Cooking oil 5L" value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>">
+        <div class="ta-wrap">
+          <input type="text" name="name" id="prodName" class="form-control ta-input" data-field="title" required placeholder="e.g. Yellow beans, Cooking oil 5L" value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>" autocomplete="off">
+          <div class="ta-menu"></div>
+        </div>
         <input type="hidden" name="product_choice" id="productChoice" value="">
         <div id="matchNote" class="small text-primary mt-1" style="display:none;"></div>
       </div>
       <div class="col-12 col-md-6">
         <label class="form-label fw-semibold"><i class="fas fa-barcode me-1"></i>Barcode</label>
-        <input type="text" name="barcode" class="form-control" placeholder="Scan or type" value="<?php echo htmlspecialchars($_POST['barcode'] ?? ''); ?>">
+        <input type="text" name="barcode" id="barcodeField" class="form-control" placeholder="Scan or type" value="<?php echo htmlspecialchars($_POST['barcode'] ?? ''); ?>" autocomplete="off">
+        <div id="barcodeNote" class="small mt-1" style="display:none;"></div>
       </div>
       <div class="col-md-4">
         <label class="form-label fw-semibold">Category</label>
-        <input type="text" name="category" class="form-control" placeholder="e.g. Cereals" value="<?php echo htmlspecialchars($_POST['category'] ?? ''); ?>">
+        <div class="ta-wrap">
+          <input type="text" name="category" class="form-control ta-input" data-field="category" placeholder="e.g. Cereals" value="<?php echo htmlspecialchars($_POST['category'] ?? ''); ?>" autocomplete="off">
+          <div class="ta-menu"></div>
+        </div>
       </div>
       <div class="col-md-4">
         <label class="form-label fw-semibold">Brand</label>
-        <input type="text" name="brand" class="form-control" placeholder="optional" value="<?php echo htmlspecialchars($_POST['brand'] ?? ''); ?>">
+        <div class="ta-wrap">
+          <input type="text" name="brand" class="form-control ta-input" data-field="brand" placeholder="optional" value="<?php echo htmlspecialchars($_POST['brand'] ?? ''); ?>" autocomplete="off">
+          <div class="ta-menu"></div>
+        </div>
       </div>
       <div class="col-md-4">
         <label class="form-label fw-semibold">Colors</label>
@@ -154,11 +164,14 @@ ob_start();
       </div>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Supplier</label>
-        <input type="text" name="supplier" class="form-control" placeholder="optional" value="<?php echo htmlspecialchars($_POST['supplier'] ?? ''); ?>">
+        <div class="ta-wrap">
+          <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" placeholder="optional" value="<?php echo htmlspecialchars($_POST['supplier'] ?? ''); ?>" autocomplete="off">
+          <div class="ta-menu"></div>
+        </div>
       </div>
       <div class="col-md-4">
         <label class="form-label fw-semibold">Buying price (KES)</label>
-        <input type="number" step="0.01" min="0" name="buying_price" class="form-control" value="<?php echo htmlspecialchars($_POST['buying_price'] ?? ''); ?>">
+        <input type="number" step="0.01" min="0" name="buying_price" id="buyingPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['buying_price'] ?? ''); ?>">
       </div>
       <div class="col-md-4">
         <label class="form-label fw-semibold">Selling price (KES)</label>
@@ -182,34 +195,151 @@ ob_start();
     </div>
   </div>
 </form>
+<style>
+  .ta-wrap { position: relative; }
+  .ta-menu {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 40;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(15,23,42,.08); margin-top: 2px; max-height: 220px; overflow-y: auto; display: none;
+  }
+  .ta-menu.show { display: block; }
+  .ta-menu button {
+    display: block; width: 100%; text-align: left; background: none; border: 0;
+    padding: .45rem .7rem; font-size: .9rem; cursor: pointer;
+  }
+  .ta-menu button:hover { background: #f1f5f9; }
+</style>
 <script>
 (function () {
   var API = <?php echo json_encode($apiBase); ?>;
   var nameInput = document.getElementById('prodName');
   var choice = document.getElementById('productChoice');
   var note = document.getElementById('matchNote');
-  var timer = null;
-  nameInput.addEventListener('input', function () {
-    clearTimeout(timer);
-    choice.value = '';
-    note.style.display = 'none';
-    var q = nameInput.value.trim();
-    if (!q) return;
-    timer = setTimeout(function () {
-      fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          var exact = (data.items || []).find(function (it) { return (it.name || '').toLowerCase() === q.toLowerCase(); });
-          if (exact) {
-            choice.value = exact.id;
-            note.style.display = 'block';
-            note.textContent = 'Restocking existing product (balance ' + exact.balance + ').';
-          }
+  var barcode = document.getElementById('barcodeField');
+  var barcodeNote = document.getElementById('barcodeNote');
+  var lastMatchedName = null;
+
+  function attachTypeahead(input, field) {
+    var wrap = input.closest('.ta-wrap');
+    var menu = wrap && wrap.querySelector('.ta-menu');
+    if (!menu) return;
+    var timer = null;
+    function render(items) {
+      menu.innerHTML = '';
+      if (!items.length) { menu.classList.remove('show'); return; }
+      items.forEach(function (item) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = item.name;
+        b.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          input.value = item.name;
+          menu.classList.remove('show');
         });
-    }, 200);
+        menu.appendChild(b);
+      });
+      menu.classList.add('show');
+    }
+    input.addEventListener('input', function () {
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (!q) { menu.classList.remove('show'); return; }
+      timer = setTimeout(function () {
+        fetch(API + 'suggest.php?field=' + encodeURIComponent(field) + '&q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { render(data.items || []); })
+          .catch(function () {});
+      }, 180);
+    });
+    input.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); }, 150); });
+  }
+
+  function setRestock(item) {
+    choice.value = item.id;
+    lastMatchedName = item.name;
+    nameInput.value = item.name;
+    if (item.barcode) barcode.value = item.barcode;
+    if (item.buying_price) document.getElementById('buyingPrice').value = item.buying_price;
+    var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
+    note.style.display = 'block';
+    note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +
+      (bits.length ? ' — ' + bits.join(' · ') : '') +
+      '. Current balance: <strong>' + item.balance + '</strong>. This adds to it.';
+  }
+
+  function clearRestock() {
+    choice.value = '';
+    lastMatchedName = null;
+    note.style.display = 'none';
+    note.innerHTML = '';
+  }
+
+  // Product name: suggest existing products and switch to restock when picked.
+  (function wireTitle() {
+    var wrap = nameInput.closest('.ta-wrap');
+    var menu = wrap.querySelector('.ta-menu');
+    var timer = null;
+    function render(items) {
+      menu.innerHTML = '';
+      if (!items.length) { menu.classList.remove('show'); return; }
+      items.forEach(function (item) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
+        b.innerHTML = '<span class="fw-semibold">' + item.name + '</span>' +
+          (bits.length ? ' <span class="text-muted">— ' + bits.join(' · ') + '</span>' : '') +
+          ' <span class="text-muted">(balance ' + item.balance + ')</span>';
+        b.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          menu.classList.remove('show');
+          setRestock(item);
+        });
+        menu.appendChild(b);
+      });
+      menu.classList.add('show');
+    }
+    nameInput.addEventListener('input', function () {
+      if (lastMatchedName !== null && nameInput.value !== lastMatchedName) clearRestock();
+      clearTimeout(timer);
+      var q = nameInput.value.trim();
+      if (!q) { menu.classList.remove('show'); return; }
+      timer = setTimeout(function () {
+        fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { render(data.items || []); })
+          .catch(function () {});
+      }, 180);
+    });
+    nameInput.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); }, 150); });
+  })();
+
+  function lookupBarcode() {
+    var code = barcode.value.trim();
+    if (!code) return;
+    fetch(API + 'find_barcode.php?code=' + encodeURIComponent(code))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.item) {
+          setRestock(data.item);
+          barcodeNote.style.display = 'none';
+        } else {
+          barcodeNote.style.display = 'block';
+          barcodeNote.className = 'small mt-1 text-muted';
+          barcodeNote.innerHTML = '<i class="fas fa-circle-plus me-1"></i>New barcode — will be saved with this product.';
+        }
+      });
+  }
+  barcode.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); lookupBarcode(); }
+  });
+  barcode.addEventListener('blur', lookupBarcode);
+
+  document.querySelectorAll('.ta-input[data-field="category"], .ta-input[data-field="brand"], .ta-input[data-field="supplier"]').forEach(function (input) {
+    attachTypeahead(input, input.dataset.field);
   });
 })();
 </script>
 <?php
 $content = ob_get_clean();
-include __DIR__ . '/../../templates/tenants/layout.php';
+$__layout = TenantContext::role() === 'staff' ? 'staff' : 'tenants';
+include __DIR__ . '/../../templates/' . $__layout . '/layout.php';

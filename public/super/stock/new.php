@@ -305,9 +305,12 @@ ob_start();
     idx++;
   }
 
+  // Free-text typeahead: suggests stored values; typing a new name still works (no forced dropdown).
   function attachTypeahead(input, field, onPick) {
     var wrap = input.closest('.ta-wrap');
+    if (!wrap) return;
     var menu = wrap.querySelector('.ta-menu');
+    if (!menu) return;
     var timer = null;
     function render(items) {
       menu.innerHTML = '';
@@ -341,31 +344,137 @@ ob_start();
     input.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); }, 150); });
   }
 
-  function setRestock(row, product) {
-    var choice = row.querySelector('.productChoice');
+  function makeRestockControls(row) {
+    var titleInput = row.querySelector('.productTitle');
+    var barcodeInput = row.querySelector('.barcodeInput');
+    var productChoice = row.querySelector('.productChoice');
     var note = row.querySelector('.matchNote');
-    if (product && product.id) {
-      choice.value = product.id;
+    var lastMatchedId = null;
+
+    function setRestock(item) {
+      productChoice.value = item.id;
+      lastMatchedId = item.id;
       row.classList.add('is-restock');
-      note.style.display = 'block';
-      note.textContent = 'Restocking existing product (balance ' + product.balance + ').';
+      titleInput.value = item.name;
+      if (item.barcode) { barcodeInput.value = item.barcode; }
+      if (item.buying_price) { row.querySelector('.buyingPrice').value = item.buying_price; }
       row.querySelector('.qtyLabel').textContent = 'Qty to add';
-    } else {
-      choice.value = '';
-      row.classList.remove('is-restock');
-      note.style.display = 'none';
-      row.querySelector('.qtyLabel').textContent = 'Good qty received';
+      var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
+      note.style.display = 'block';
+      note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +
+        (bits.length ? ' — ' + bits.join(' · ') : '') +
+        '. Current balance: <strong>' + (item.balance != null ? item.balance : '') + '</strong>. This adds to it.';
     }
-    recalc();
+
+    function clearRestock() {
+      productChoice.value = '';
+      lastMatchedId = null;
+      row.classList.remove('is-restock');
+      row.querySelector('.qtyLabel').textContent = 'Good qty received';
+      note.style.display = 'none';
+      note.innerHTML = '';
+    }
+
+    return { setRestock: setRestock, clearRestock: clearRestock, isMatched: function () { return lastMatchedId !== null; } };
+  }
+
+  function wireTitleField(row, restock) {
+    var input = row.querySelector('.productTitle');
+    var wrap = input.closest('.ta-wrap');
+    var menu = wrap.querySelector('.ta-menu');
+    var timer = null;
+    var lastMatchedName = null;
+
+    function render(items) {
+      menu.innerHTML = '';
+      if (!items.length) { menu.classList.remove('show'); return; }
+      items.forEach(function (item) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
+        b.innerHTML = '<span class="fw-semibold">' + item.name + '</span>' +
+          (bits.length ? ' <span class="text-muted">— ' + bits.join(' · ') + '</span>' : '') +
+          ' <span class="text-muted">(balance ' + item.balance + ')</span>';
+        b.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          lastMatchedName = item.name;
+          menu.classList.remove('show');
+          restock.setRestock(item);
+        });
+        menu.appendChild(b);
+      });
+      menu.classList.add('show');
+    }
+
+    input.addEventListener('input', function () {
+      if (lastMatchedName !== null && input.value !== lastMatchedName) {
+        lastMatchedName = null;
+        restock.clearRestock();
+      }
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (!q) { menu.classList.remove('show'); return; }
+      timer = setTimeout(function () {
+        fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { render(data.items || []); })
+          .catch(function () {});
+      }, 180);
+    });
+    input.addEventListener('blur', function () { setTimeout(function () { menu.classList.remove('show'); }, 150); });
+  }
+
+  function wireBarcodeField(row, restock) {
+    var input = row.querySelector('.barcodeInput');
+    var note = row.querySelector('.barcodeNote');
+    var lastChecked = null;
+
+    function lookup() {
+      var code = input.value.trim();
+      if (!code || code === lastChecked) return;
+      lastChecked = code;
+      fetch(API + 'find_barcode.php?code=' + encodeURIComponent(code))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (input.value.trim() !== code) return;
+          if (data.item) {
+            restock.setRestock(data.item);
+            note.style.display = 'none';
+          } else {
+            note.style.display = 'block';
+            note.style.color = '#64748b';
+            note.innerHTML = '<i class="fas fa-circle-plus me-1"></i>New barcode — will be saved with this product.';
+          }
+        })
+        .catch(function () {});
+    }
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); lookup(); }
+    });
+    input.addEventListener('blur', lookup);
+    input.addEventListener('input', function () { note.style.display = 'none'; });
   }
 
   function wireRow(row) {
     row.querySelector('.removeRow').addEventListener('click', function () {
-      row.remove(); recalc();
+      row.remove();
+      recalc();
     });
+
+    var restock = makeRestockControls(row);
+    wireTitleField(row, restock);
+    wireBarcodeField(row, restock);
+
+    ['category', 'brand'].forEach(function (field) {
+      var el = row.querySelector('[data-field="' + field + '"]');
+      if (el) attachTypeahead(el, field);
+    });
+
     row.querySelectorAll('.qty, .buyingPrice').forEach(function (el) {
       el.addEventListener('input', recalc);
     });
+
     var photo = row.querySelector('.photoInput');
     if (photo) {
       photo.addEventListener('change', function () {
@@ -376,51 +485,6 @@ ob_start();
         }
       });
     }
-    row.querySelectorAll('.ta-input').forEach(function (input) {
-      var field = input.dataset.field;
-      if (field === 'title') {
-        attachTypeahead(input, 'title', function () {});
-        var timer = null;
-        input.addEventListener('input', function () {
-          clearTimeout(timer);
-          var q = input.value.trim();
-          if (!q) { setRestock(row, null); return; }
-          timer = setTimeout(function () {
-            fetch(API + 'find_titles.php?type=product&q=' + encodeURIComponent(q))
-              .then(function (r) { return r.json(); })
-              .then(function (data) {
-                var exact = (data.items || []).find(function (it) { return (it.name || '').toLowerCase() === q.toLowerCase(); });
-                setRestock(row, exact || null);
-              }).catch(function () {});
-          }, 200);
-        });
-      } else {
-        attachTypeahead(input, field);
-      }
-    });
-    var barcode = row.querySelector('.barcodeInput');
-    var barcodeNote = row.querySelector('.barcodeNote');
-    barcode.addEventListener('keydown', function (e) {
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      var code = barcode.value.trim();
-      if (!code) return;
-      fetch(API + 'find_barcode.php?code=' + encodeURIComponent(code))
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (data.item) {
-            row.querySelector('.productTitle').value = data.item.name;
-            setRestock(row, { id: data.item.id, balance: data.item.balance || data.item.quantity || 0 });
-            barcodeNote.style.display = 'block';
-            barcodeNote.style.color = '#15803d';
-            barcodeNote.textContent = 'Matched existing product.';
-          } else {
-            barcodeNote.style.display = 'block';
-            barcodeNote.style.color = '#64748b';
-            barcodeNote.textContent = 'New barcode — will be saved with this product.';
-          }
-        });
-    });
   }
 
   function recalc() {
@@ -439,8 +503,12 @@ ob_start();
 
   document.getElementById('addRowBtn').addEventListener('click', addRow);
   addRow();
+
+  var supplierInput = document.querySelector('.ta-input[data-field="supplier"]');
+  if (supplierInput) attachTypeahead(supplierInput, 'supplier');
 })();
 </script>
 <?php
 $content = ob_get_clean();
-include __DIR__ . '/../../templates/tenants/layout.php';
+$__layout = TenantContext::role() === 'staff' ? 'staff' : 'tenants';
+include __DIR__ . '/../../templates/' . $__layout . '/layout.php';
