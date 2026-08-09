@@ -187,16 +187,22 @@ class ProductModel extends Model
     }
 
     /** Active products at or below their restock threshold (for alerts). */
-    public function lowStock(): array
+    public function lowStock(int $limit = 100): array
     {
         $tid = \TenantContext::tenantId();
-        $stmt = $this->db->prepare(
-            "SELECT * FROM products
-              WHERE tenant_id = ? AND status = 'active' AND quantity <= low_stock_threshold
-           ORDER BY quantity ASC"
+        $st = $this->db->prepare(
+            "SELECT p.*, c.name AS category_name
+               FROM products p
+               LEFT JOIN categories c ON c.id = p.category_id
+              WHERE p.tenant_id = ? AND p.status IN ('active','archived')
+                AND p.quantity <= p.low_stock_threshold
+              ORDER BY p.quantity ASC, p.name ASC
+              LIMIT ?"
         );
-        $stmt->execute([$tid]);
-        return $stmt->fetchAll();
+        $st->bindValue(1, $tid, \PDO::PARAM_INT);
+        $st->bindValue(2, max(1, $limit), \PDO::PARAM_INT);
+        $st->execute();
+        return $st->fetchAll();
     }
 
     /** Active or archived, in-stock books for the till — carries Subject/Grade/
@@ -461,25 +467,6 @@ class ProductModel extends Model
         try {
             $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
         } catch (\PDOException $ignored) {}
-    }
-
-    /** Products at or below their low-stock threshold. */
-    public function lowStock(int $limit = 100): array
-    {
-        $tid = \TenantContext::tenantId();
-        $st = $this->db->prepare(
-            "SELECT p.*, c.name AS category_name
-               FROM products p
-               LEFT JOIN categories c ON c.id = p.category_id
-              WHERE p.tenant_id = ? AND p.status IN ('active','archived')
-                AND p.quantity <= p.low_stock_threshold
-              ORDER BY p.quantity ASC, p.name ASC
-              LIMIT ?"
-        );
-        $st->bindValue(1, $tid, \PDO::PARAM_INT);
-        $st->bindValue(2, $limit, \PDO::PARAM_INT);
-        $st->execute();
-        return $st->fetchAll();
     }
 
     private function validate(array $in): array
