@@ -82,6 +82,12 @@ class OrderModel extends Model
             $email = trim((string) ($in['customer_email'] ?? ''));
             $phone = trim((string) ($in['customer_phone'] ?? ''));
             $customerId = (int) ($in['customer_id'] ?? 0);
+            if ($customerId <= 0 && $tableName !== '') {
+                $byName = (new CustomerModel($db))->findByName($tableName);
+                if ($byName) {
+                    $customerId = (int) $byName['id'];
+                }
+            }
             $creditDays = max(0, (int) ($in['credit_duration_days'] ?? 0));
             $creditDueAt = $creditDays > 0 ? date('Y-m-d H:i:s', strtotime('+' . $creditDays . ' days')) : null;
             $vatRate = max(0, round((float) ($in['vat_rate'] ?? 0), 2));
@@ -123,15 +129,20 @@ class OrderModel extends Model
                 $vals[] = $priced['vat_rate'];
                 $vals[] = $priced['vat_amount'];
                 $vals[] = $saleType;
-                if ($customerId > 0) {
-                    $sets[] = 'customer_id = ?';
-                    $vals[] = $customerId;
-                }
             } catch (\PDOException $ignored) {}
+            if ($customerId > 0) {
+                $sets[] = 'customer_id = ?';
+                $vals[] = $customerId;
+            }
             $vals[] = $orderId;
             $db->prepare('UPDATE orders SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($vals);
 
             $db->commit();
+            if ($channel === 'tab' && $customerId > 0) {
+                try {
+                    (new CustomerModel($db))->refreshCreditBalance($customerId);
+                } catch (\Throwable $ignored) {}
+            }
             return ['ok' => true, 'order_id' => $orderId, 'receipt_number' => $receipt, 'errors' => []];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
@@ -462,18 +473,37 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, total, amount_paid, amount_due, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, total, amount_paid, amount_due, customer_id, table_name FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Sale not found.']; }
             if ($order['status'] !== 'open') { $db->rollBack(); return ['ok' => false, 'error' => 'This sale is not open.']; }
 
+            // Attach customer from the payment form when the invoice was opened by name only.
+            $linkCustomerId = (int) ($payment['customer_id'] ?? 0);
+            $customerId = (int) ($order['customer_id'] ?? 0);
+            if ($customerId <= 0 && $linkCustomerId > 0) {
+                $customerId = $linkCustomerId;
+                try {
+                    $db->prepare('UPDATE orders SET customer_id = ? WHERE id = ? AND tenant_id = ?')
+                        ->execute([$customerId, $orderId, $tid]);
+                } catch (\PDOException $ignored) {}
+            }
+            if ($customerId <= 0) {
+                $byName = (new CustomerModel($db))->findByName((string) ($order['table_name'] ?? ''));
+                if ($byName) {
+                    $customerId = (int) $byName['id'];
+                    try {
+                        $db->prepare('UPDATE orders SET customer_id = ? WHERE id = ? AND tenant_id = ?')
+                            ->execute([$customerId, $orderId, $tid]);
+                    } catch (\PDOException $ignored) {}
+                }
+            }
+
             $total = (float) $order['total'];
             $paidBefore = max(0, (float) ($order['amount_paid'] ?? 0));
-            $balanceDue = (float) ($order['amount_due'] ?? 0);
-            if ($balanceDue <= 0.0001) {
-                $balanceDue = max(0, round($total - $paidBefore, 2));
-            }
+            // Always trust total - paid so a stale amount_due=0 cannot block deposits.
+            $balanceDue = max(0, round($total - $paidBefore, 2));
             if ($balanceDue <= 0.0001) {
                 $db->rollBack();
                 return ['ok' => false, 'error' => 'This sale is already fully paid.'];
@@ -485,7 +515,7 @@ class OrderModel extends Model
             $recordMethod = $method;
             if ($method === 'cash') {
                 $cash = $balanceDue;
-                $tendered = max(0, round((float) ($payment['amount_tendered'] ?? 0), 2));
+                $tendered = $this->parseMoney($payment['amount_tendered'] ?? null, $cash);
                 if ($tendered + 0.0001 < $cash) {
                     $db->rollBack();
                     return ['ok' => false, 'error' => 'Cash given is less than the total (KES ' . number_format($cash, 0) . ').'];
@@ -501,7 +531,7 @@ class OrderModel extends Model
                     return ['ok' => false, 'error' => 'Cash and M-Pesa amounts must add up to the balance due (KES ' . number_format($balanceDue, 0) . ').'];
                 }
                 if ($cash > 0) {
-                    $tendered = max(0, round((float) ($payment['amount_tendered'] ?? 0), 2));
+                    $tendered = $this->parseMoney($payment['amount_tendered'] ?? null, $cash);
                     if ($tendered + 0.0001 < $cash) {
                         $db->rollBack();
                         return ['ok' => false, 'error' => 'Cash given is less than the cash portion (KES ' . number_format($cash, 0) . ').'];
@@ -512,7 +542,7 @@ class OrderModel extends Model
                 $depositAllowed = ['cash', 'mpesa', 'paybill', 'card', 'bank', 'sacco'];
                 $actualMethod = in_array($payment['deposit_method'] ?? '', $depositAllowed, true) ? $payment['deposit_method'] : 'cash';
                 $recordMethod = $actualMethod;
-                $received = max(0, round((float) ($payment['amount_received'] ?? 0), 2));
+                $received = $this->parseMoney($payment['amount_received'] ?? null, 0.0);
                 if ($received <= 0) {
                     $db->rollBack();
                     return ['ok' => false, 'error' => 'Enter the amount the customer is paying now.'];
@@ -520,7 +550,9 @@ class OrderModel extends Model
                 $received = min($received, $balanceDue);
                 if ($actualMethod === 'cash') {
                     $cash = $received;
-                    $tendered = max(0, round((float) ($payment['amount_tendered'] ?? $received), 2));
+                    // Empty "cash given" must default to the deposit amount — otherwise
+                    // deposits silently fail and balances never move.
+                    $tendered = $this->parseMoney($payment['amount_tendered'] ?? null, $received);
                     if ($tendered + 0.0001 < $cash) {
                         $db->rollBack();
                         return ['ok' => false, 'error' => 'Cash given is less than this payment (KES ' . number_format($cash, 0) . ').'];
@@ -529,18 +561,14 @@ class OrderModel extends Model
                 } elseif ($actualMethod === 'mpesa') {
                     $mpesa = $received;
                 }
-                // paybill / card / bank / sacco deposits still count as money received
-                // even though they are not tracked in cash_amount / mpesa_amount.
                 $payment['provider'] = $payment['provider'] ?: ($actualMethod === 'paybill' ? 'Paybill / Till' : ucfirst($actualMethod));
             } elseif ($method === 'paybill') {
                 if (trim((string) ($payment['provider'] ?? '')) === '') {
                     $payment['provider'] = 'Paybill / Till';
                 }
             }
-            // card / bank / sacco / paybill settle: paid in full for this call.
-            // Credit deposits always use the received amount (any deposit method).
             if ($method === 'credit') {
-                $paymentAmount = min(max(0, round((float) ($payment['amount_received'] ?? 0), 2)), $balanceDue);
+                $paymentAmount = min($this->parseMoney($payment['amount_received'] ?? null, 0.0), $balanceDue);
                 if ($paymentAmount <= 0.0001) {
                     $paymentAmount = round($cash + $mpesa, 2);
                 }
@@ -588,16 +616,13 @@ class OrderModel extends Model
                 $reference !== '' ? $reference : null,
             ]);
 
-            // Always recompute live balance from the payments ledger so deposits
-            // show the real remaining amount immediately (no migration wait).
+            // Always recompute live balance from the payments ledger.
             $sumPaid = $db->prepare('SELECT COALESCE(SUM(amount),0) FROM order_payments WHERE order_id = ? AND tenant_id = ?');
             $sumPaid->execute([$orderId, $tid]);
             $newPaid = round((float) $sumPaid->fetchColumn(), 2);
             $newDue = max(0, round($total - $newPaid, 2));
             $newStatus = $newDue <= 0.0001 ? 'paid' : 'open';
-            $paymentStatus = $newStatus === 'paid' ? 'paid' : ($paidBefore > 0.0001 || $newPaid > 0.0001 ? 'part_paid' : 'credit');
-            // Keep the invoice marked as credit while anything is still owed;
-            // store the settling / deposit channel once it is fully paid.
+            $paymentStatus = $newStatus === 'paid' ? 'paid' : ($newPaid > 0.0001 ? 'part_paid' : 'credit');
             $orderPayMethod = $newStatus === 'paid' ? $recordMethod : 'credit';
 
             $cashSql = $cash > 0 ? 'cash_amount = COALESCE(cash_amount,0) + ?' : 'cash_amount = cash_amount';
@@ -630,7 +655,6 @@ class OrderModel extends Model
                 $orderId,
             ]));
 
-            $customerId = (int) ($order['customer_id'] ?? 0);
             if ($newStatus === 'paid' && $customerId > 0) {
                 try {
                     $tenant = (new TenantModel($db))->find($tid);
@@ -646,10 +670,18 @@ class OrderModel extends Model
             }
 
             $db->commit();
+
+            if ($customerId > 0) {
+                try {
+                    (new CustomerModel($db))->refreshCreditBalance($customerId);
+                } catch (\Throwable $ignored) {}
+            }
+
             return [
                 'ok' => true,
                 'status' => $newStatus,
                 'amount_due' => $newDue,
+                'amount_paid' => $newPaid,
                 'amount_paid_now' => $paymentAmount,
                 'order_id' => $orderId,
                 'error' => null,
@@ -657,8 +689,17 @@ class OrderModel extends Model
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
             error_log('OrderModel::markPaid failed: ' . $e->getMessage());
-            return ['ok' => false, 'error' => 'Could not record the payment. Please try again.'];
+            return ['ok' => false, 'error' => 'Could not record the payment: ' . $e->getMessage()];
         }
+    }
+
+    /** Parse a posted money field; empty string / null uses $fallback (not 0). */
+    private function parseMoney($value, float $fallback = 0.0): float
+    {
+        if ($value === null || $value === '') {
+            return round($fallback, 2);
+        }
+        return max(0, round((float) $value, 2));
     }
 
     /**
@@ -680,7 +721,7 @@ class OrderModel extends Model
                        c.name AS customer_record_name,
                        c.company_name AS customer_company,
                        (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
-                       GREATEST(COALESCE(o.amount_due, GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0) AS balance_due
+                       GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) AS balance_due
                   FROM orders o
              LEFT JOIN users u ON u.id = o.opened_by
              LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
@@ -691,6 +732,15 @@ class OrderModel extends Model
         if ($customerId !== null && $customerId > 0) {
             $parts[] = 'o.customer_id = ?';
             $params[] = $customerId;
+            // Also pull invoices opened under this customer's exact name
+            // when customer_id was never linked at sale time.
+            $nameSt = $this->db->prepare('SELECT name FROM customers WHERE id = ? AND tenant_id = ? LIMIT 1');
+            $nameSt->execute([$customerId, $tid]);
+            $custName = trim((string) ($nameSt->fetchColumn() ?: ''));
+            if ($custName !== '') {
+                $parts[] = 'LOWER(TRIM(o.table_name)) = LOWER(?)';
+                $params[] = $custName;
+            }
         }
         if ($customerName !== '') {
             $parts[] = 'LOWER(TRIM(o.table_name)) = LOWER(?)';
@@ -700,7 +750,20 @@ class OrderModel extends Model
         $sql .= ' ORDER BY o.created_at ASC, o.id ASC LIMIT ' . (int) $limit;
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll();
+        $rows = $stmt->fetchAll();
+        // Deduplicate when both customer_id and name match the same invoice.
+        $seen = [];
+        $out = [];
+        foreach ($rows as $r) {
+            $id = (int) $r['id'];
+            if (isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $r['amount_due'] = (float) $r['balance_due'];
+            $out[] = $r;
+        }
+        return $out;
     }
 
     /** Payment history across all invoices for a customer. */
@@ -775,28 +838,36 @@ class OrderModel extends Model
             if (!$order || ($order['status'] ?? '') !== 'open') {
                 continue;
             }
-            $due = (float) ($order['amount_due'] ?? 0);
-            if ($due <= 0.0001) {
-                $due = max(0, (float) ($order['total'] ?? 0) - max(0, (float) ($order['amount_paid'] ?? 0)));
-            }
+            // Always derive due from total - paid so deposits never skip invoices
+            // that still have a stale amount_due of 0.
+            $due = max(0, round((float) ($order['total'] ?? 0) - max(0, (float) ($order['amount_paid'] ?? 0)), 2));
             if ($due <= 0.0001) {
                 continue;
             }
             $slice = min($remaining, $due);
             $isFull = $slice + 0.0001 >= $due;
             $payload = $payment;
+            if (!empty($payment['customer_id'])) {
+                $payload['customer_id'] = (int) $payment['customer_id'];
+            }
             if ($isFull && ($payment['method'] ?? '') !== 'credit' && ($payment['method'] ?? '') !== 'split') {
                 // Full settle of this invoice with the chosen mode.
                 $payload['method'] = $depositChannel === 'split' ? 'cash' : $depositChannel;
                 if ($payload['method'] === 'cash') {
-                    $payload['amount_tendered'] = $payload['amount_tendered'] ?? $slice;
+                    $rawTender = $payload['amount_tendered'] ?? null;
+                    if ($rawTender === null || $rawTender === '') {
+                        $payload['amount_tendered'] = $slice;
+                    }
                 }
             } else {
                 $payload['method'] = 'credit';
                 $payload['deposit_method'] = in_array($depositChannel, ['cash', 'mpesa', 'paybill', 'card', 'bank', 'sacco'], true) ? $depositChannel : 'cash';
                 $payload['amount_received'] = $slice;
                 if ($payload['deposit_method'] === 'cash') {
-                    $payload['amount_tendered'] = $payload['amount_tendered'] ?? $slice;
+                    $rawTender = $payload['amount_tendered'] ?? null;
+                    if ($rawTender === null || $rawTender === '') {
+                        $payload['amount_tendered'] = $slice;
+                    }
                 }
             }
             $res = $this->markPaid($oid, $payload, $staffId);

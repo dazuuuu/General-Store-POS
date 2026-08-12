@@ -6,10 +6,13 @@ class CustomerModel extends Model
 {
     protected string $table = 'customers';
 
+    private static bool $balancesSynced = false;
+
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensureSchema();
+        $this->syncAllCreditBalancesOnce();
     }
 
     public function create(array $in): array
@@ -111,21 +114,84 @@ class CustomerModel extends Model
         if ($new < 0) {
             return false;
         }
-        $this->db->beginTransaction();
+        // Do not nest transactions — markPaid may already be inside one.
+        $started = false;
         try {
+            if (!$this->db->inTransaction()) {
+                $this->db->beginTransaction();
+                $started = true;
+            }
             $this->update($customerId, ['loyalty_points' => $new]);
             $st = $this->db->prepare(
                 'INSERT INTO loyalty_transactions (tenant_id, customer_id, order_id, points, reason, created_by) VALUES (?,?,?,?,?,?)'
             );
             $st->execute([$tid, $customerId, $orderId, $points, $reason, $createdBy]);
-            $this->db->commit();
+            if ($started) {
+                $this->db->commit();
+            }
             return true;
         } catch (\Throwable $e) {
-            if ($this->db->inTransaction()) {
+            if ($started && $this->db->inTransaction()) {
                 $this->db->rollBack();
             }
             return false;
         }
+    }
+
+    /**
+     * Recompute customers.credit_balance from open invoice balances.
+     * Matches by customer_id and/or exact customer name on the invoice.
+     */
+    public function refreshCreditBalance(int $customerId): float
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null || $customerId <= 0) {
+            return 0.0;
+        }
+        $cust = $this->find($customerId);
+        if (!$cust || (int) $cust['tenant_id'] !== (int) $tid) {
+            return 0.0;
+        }
+        $name = trim((string) ($cust['name'] ?? ''));
+        try {
+            $sql = "SELECT COALESCE(SUM(GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0)
+                      FROM orders o
+                     WHERE o.tenant_id = ?
+                       AND o.status = 'open'
+                       AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
+                       AND (o.customer_id = ?";
+            $params = [$tid, $customerId];
+            if ($name !== '') {
+                $sql .= ' OR LOWER(TRIM(o.table_name)) = LOWER(?)';
+                $params[] = $name;
+            }
+            $sql .= ')';
+            $st = $this->db->prepare($sql);
+            $st->execute($params);
+            $balance = round((float) $st->fetchColumn(), 2);
+            $this->db->prepare('UPDATE customers SET credit_balance = ? WHERE id = ? AND tenant_id = ?')
+                ->execute([$balance, $customerId, $tid]);
+            return $balance;
+        } catch (\Throwable $e) {
+            error_log('CustomerModel::refreshCreditBalance failed: ' . $e->getMessage());
+            return (float) ($cust['credit_balance'] ?? 0);
+        }
+    }
+
+    /** Find an active customer by exact name (case-insensitive). */
+    public function findByName(string $name): ?array
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return null;
+        }
+        $tid = \TenantContext::tenantId();
+        $st = $this->db->prepare(
+            'SELECT * FROM customers WHERE tenant_id = ? AND status = ? AND LOWER(TRIM(name)) = LOWER(?) LIMIT 1'
+        );
+        $st->execute([$tid, 'active', $name]);
+        $row = $st->fetch();
+        return $row ?: null;
     }
 
     private function ensureSchema(): void
@@ -156,6 +222,49 @@ class CustomerModel extends Model
                 );
             } catch (\PDOException $ignored) {
             }
+        }
+        try {
+            $st = $this->db->prepare(
+                "SELECT COUNT(*) FROM information_schema.columns
+                  WHERE table_schema = DATABASE() AND table_name = 'customers' AND column_name = 'credit_balance'"
+            );
+            $st->execute();
+            if ((int) $st->fetchColumn() === 0) {
+                $this->db->exec('ALTER TABLE customers ADD COLUMN credit_balance DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER credit_limit');
+            }
+        } catch (\PDOException $ignored) {
+        }
+    }
+
+    /** One-time per request: recompute every customer's credit_balance from open invoices. */
+    private function syncAllCreditBalancesOnce(): void
+    {
+        if (self::$balancesSynced) {
+            return;
+        }
+        self::$balancesSynced = true;
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) {
+            return;
+        }
+        try {
+            $st = $this->db->prepare(
+                "UPDATE customers c
+                    SET c.credit_balance = (
+                        SELECT COALESCE(SUM(GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0)
+                          FROM orders o
+                         WHERE o.tenant_id = c.tenant_id
+                           AND o.status = 'open'
+                           AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
+                           AND (
+                                o.customer_id = c.id
+                             OR LOWER(TRIM(o.table_name)) = LOWER(TRIM(c.name))
+                           )
+                    )
+                  WHERE c.tenant_id = ?"
+            );
+            $st->execute([$tid]);
+        } catch (\PDOException $ignored) {
         }
     }
 }

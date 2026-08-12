@@ -125,9 +125,11 @@ ob_start();
         <?php else: ?>
         <div class="table-responsive">
           <table class="table table-sm align-middle mb-0">
-            <thead><tr class="text-muted small text-uppercase"><th>Name</th><th>Contact</th><th>Tier</th><th>Points</th><th>Credit</th><th></th></tr></thead>
+            <thead><tr class="text-muted small text-uppercase"><th>Name</th><th>Contact</th><th>Tier</th><th>Points</th><th>Credit limit</th><th>Balance owed</th><th></th></tr></thead>
             <tbody>
-              <?php foreach ($customers as $c): ?>
+              <?php foreach ($customers as $c):
+                $owed = (float) ($c['credit_balance'] ?? 0);
+              ?>
               <tr>
                 <td>
                   <div class="fw-semibold"><?php echo htmlspecialchars($c['name']); ?></div>
@@ -137,7 +139,11 @@ ob_start();
                 <td><span class="badge bg-light text-dark text-uppercase"><?php echo htmlspecialchars($c['loyalty_tier']); ?></span></td>
                 <td><?php echo number_format((float) $c['loyalty_points'], 1); ?></td>
                 <td class="small">KES <?php echo number_format((float) $c['credit_limit'], 0); ?></td>
-                <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="?edit=<?php echo (int) $c['id']; ?>">Edit</a></td>
+                <td class="small fw-semibold <?php echo $owed > 0 ? 'text-danger' : 'text-muted'; ?>">KES <?php echo number_format($owed, 0); ?></td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/payments/?customer_id=' . (int) $c['id'] . '&customer=' . urlencode($c['name'])); ?>">Pay</a>
+                  <a class="btn btn-sm btn-outline-secondary" href="?edit=<?php echo (int) $c['id']; ?>">Edit</a>
+                </td>
               </tr>
               <?php endforeach; ?>
             </tbody>

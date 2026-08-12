@@ -111,21 +111,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
         'method' => $payMode === 'deposit' ? 'credit' : $mode,
         'deposit_method' => $mode,
         'amount_received' => $amount,
-        'amount_tendered' => $_POST['amount_tendered'] ?? $amount,
+        'amount_tendered' => (isset($_POST['amount_tendered']) && $_POST['amount_tendered'] !== '')
+            ? $_POST['amount_tendered']
+            : $amount,
         'cash_amount' => $_POST['cash_amount'] ?? 0,
         'mpesa_amount' => $_POST['mpesa_amount'] ?? 0,
         'provider' => $_POST['payment_provider'] ?? '',
         'account_name' => $_POST['payment_account_name'] ?? '',
         'reference' => $_POST['payment_reference'] ?? '',
+        'customer_id' => $customerId,
     ];
     if ($payMode === 'full') {
         $payload['method'] = $mode === 'split' ? 'split' : $mode;
+        if ($mode === 'cash' && (!isset($_POST['amount_tendered']) || $_POST['amount_tendered'] === '')) {
+            $payload['amount_tendered'] = $amount;
+        }
     }
     $res = $O->applyCustomerPayment($ids, $amount, $payload, TenantContext::userId());
     if ($res['ok']) {
+        if ($customerId > 0) {
+            try { $CM->refreshCreditBalance($customerId); } catch (\Throwable $ignored) {}
+        }
         $firstId = (int) ($res['receipt_order_ids'][0] ?? 0);
         $applied = (float) ($res['amount_applied'] ?? $amount);
-        $_SESSION['flash']['success'] = 'Payment of KES ' . number_format($applied, 0) . ' recorded across ' . count($res['allocations']) . ' invoice(s).';
+        $newBalance = 0.0;
+        if ($customerId > 0) {
+            $fresh = $CM->find($customerId);
+            $newBalance = (float) ($fresh['credit_balance'] ?? 0);
+        }
+        $_SESSION['flash']['success'] = 'Payment of KES ' . number_format($applied, 0) . ' recorded across ' . count($res['allocations']) . ' invoice(s). Balance now KES ' . number_format($newBalance, 0) . '.';
         if ($firstId > 0) {
             $isDeposit = false;
             foreach ($res['allocations'] as $a) {
@@ -150,14 +164,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
             'method'          => $_POST['payment_method'] ?? '',
             'cash_amount'     => $_POST['cash_amount'] ?? 0,
             'mpesa_amount'    => $_POST['mpesa_amount'] ?? 0,
-            'amount_tendered' => $_POST['amount_tendered'] ?? 0,
+            'amount_tendered' => (isset($_POST['amount_tendered']) && $_POST['amount_tendered'] !== '')
+                ? $_POST['amount_tendered']
+                : (($_POST['payment_method'] ?? '') === 'credit'
+                    ? ($_POST['amount_received'] ?? 0)
+                    : null),
             'provider'        => $_POST['payment_provider'] ?? '',
             'account_name'    => $_POST['payment_account_name'] ?? '',
             'reference'       => $_POST['payment_reference'] ?? '',
             'amount_received' => $_POST['amount_received'] ?? 0,
             'deposit_method'  => $_POST['deposit_method'] ?? '',
+            'customer_id'     => (int) ($order['customer_id'] ?? $customerId),
         ], TenantContext::userId());
         if ($res['ok']) {
+            $cid = (int) ($order['customer_id'] ?? $customerId);
+            if ($cid <= 0) {
+                $byName = $CM->findByName((string) ($order['table_name'] ?? ''));
+                $cid = $byName ? (int) $byName['id'] : 0;
+            }
+            if ($cid > 0) {
+                try { $CM->refreshCreditBalance($cid); } catch (\Throwable $ignored) {}
+            }
             if (($res['status'] ?? 'paid') === 'paid') {
                 $_SESSION['flash']['success'] = 'Payment recorded for ' . $order['receipt_number'] . '.';
                 header('Location: ' . $receiptBase . '?id=' . (int) $order['id'] . '&print=1');
@@ -179,6 +206,11 @@ foreach ($customerInvoices as $inv) {
         $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
     }
     $customerBalance += $due;
+}
+if ($customerId > 0) {
+    try {
+        $customerBalance = $CM->refreshCreditBalance($customerId);
+    } catch (\Throwable $ignored) {}
 }
 
 $page_title = 'Payments';
