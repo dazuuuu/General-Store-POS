@@ -14,6 +14,9 @@ class OrderModel extends Model
 {
     protected string $table = 'orders';
 
+    /** Run expensive one-time schema/balance sync at most once per request. */
+    private static bool $paymentSchemaSynced = false;
+
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
@@ -89,14 +92,23 @@ class OrderModel extends Model
             $subtotal = (float) $sub->fetchColumn();
             $priced = \Pricing::totals($subtotal, $discountIn, $vatRate, $vatInclusive);
 
-            $sets = ['discount_amount = ?', 'total = ?', 'amount_due = ?', 'customer_email = ?', 'customer_phone = ?'];
+            // Credit tabs (channel=tab) start unpaid — stamp method/status so Sales
+            // and Payments show them immediately without waiting on migrations.
+            $sets = ['discount_amount = ?', 'total = ?', 'amount_paid = ?', 'amount_due = ?', 'customer_email = ?', 'customer_phone = ?'];
             $vals = [
                 $priced['discount'],
                 $priced['total'],
+                0,
                 $priced['total'],
                 $email !== '' ? $email : null,
                 $phone !== '' ? $phone : null,
             ];
+            if ($channel === 'tab') {
+                $sets[] = 'payment_method = ?';
+                $sets[] = 'payment_status = ?';
+                $vals[] = 'credit';
+                $vals[] = 'credit';
+            }
             if ($creditDays > 0) {
                 $sets[] = 'credit_duration_days = ?';
                 $sets[] = 'credit_due_at = ?';
@@ -517,16 +529,23 @@ class OrderModel extends Model
                 } elseif ($actualMethod === 'mpesa') {
                     $mpesa = $received;
                 }
+                // paybill / card / bank / sacco deposits still count as money received
+                // even though they are not tracked in cash_amount / mpesa_amount.
                 $payment['provider'] = $payment['provider'] ?: ($actualMethod === 'paybill' ? 'Paybill / Till' : ucfirst($actualMethod));
             } elseif ($method === 'paybill') {
                 if (trim((string) ($payment['provider'] ?? '')) === '') {
                     $payment['provider'] = 'Paybill / Till';
                 }
             }
-            // card / bank / sacco: paid in full, no cash split tracking.
-            $paymentAmount = $method === 'credit' ? ($cash + $mpesa) : $balanceDue;
-            if ($method === 'credit' && $paymentAmount <= 0.0001) {
+            // card / bank / sacco / paybill settle: paid in full for this call.
+            // Credit deposits always use the received amount (any deposit method).
+            if ($method === 'credit') {
                 $paymentAmount = min(max(0, round((float) ($payment['amount_received'] ?? 0), 2)), $balanceDue);
+                if ($paymentAmount <= 0.0001) {
+                    $paymentAmount = round($cash + $mpesa, 2);
+                }
+            } else {
+                $paymentAmount = $balanceDue;
             }
             $provider = trim((string) ($payment['provider'] ?? ''));
             $accountName = trim((string) ($payment['account_name'] ?? ''));
@@ -545,10 +564,10 @@ class OrderModel extends Model
                 $provider = 'Deposit';
             }
 
-            $newPaid = round($paidBefore + $paymentAmount, 2);
-            $newDue = max(0, round($total - $newPaid, 2));
-            $newStatus = $newDue <= 0.0001 ? 'paid' : 'open';
-            $paymentStatus = $newStatus === 'paid' ? 'paid' : 'part_paid';
+            if ($paymentAmount <= 0.0001) {
+                $db->rollBack();
+                return ['ok' => false, 'error' => 'Enter the amount the customer is paying now.'];
+            }
 
             $db->prepare(
                 'INSERT INTO order_payments
@@ -569,6 +588,18 @@ class OrderModel extends Model
                 $reference !== '' ? $reference : null,
             ]);
 
+            // Always recompute live balance from the payments ledger so deposits
+            // show the real remaining amount immediately (no migration wait).
+            $sumPaid = $db->prepare('SELECT COALESCE(SUM(amount),0) FROM order_payments WHERE order_id = ? AND tenant_id = ?');
+            $sumPaid->execute([$orderId, $tid]);
+            $newPaid = round((float) $sumPaid->fetchColumn(), 2);
+            $newDue = max(0, round($total - $newPaid, 2));
+            $newStatus = $newDue <= 0.0001 ? 'paid' : 'open';
+            $paymentStatus = $newStatus === 'paid' ? 'paid' : ($paidBefore > 0.0001 || $newPaid > 0.0001 ? 'part_paid' : 'credit');
+            // Keep the invoice marked as credit while anything is still owed;
+            // store the settling / deposit channel once it is fully paid.
+            $orderPayMethod = $newStatus === 'paid' ? $recordMethod : 'credit';
+
             $cashSql = $cash > 0 ? 'cash_amount = COALESCE(cash_amount,0) + ?' : 'cash_amount = cash_amount';
             $mpesaSql = $mpesa > 0 ? 'mpesa_amount = COALESCE(mpesa_amount,0) + ?' : 'mpesa_amount = mpesa_amount';
             $payVals = [];
@@ -588,7 +619,7 @@ class OrderModel extends Model
                 $paymentStatus,
                 $newPaid,
                 $newDue,
-                $recordMethod,
+                $orderPayMethod,
             ], $payVals, [
                 $tendered,
                 $change,
@@ -826,9 +857,8 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'credit_due_at', "ALTER TABLE orders ADD COLUMN credit_due_at DATETIME NULL AFTER credit_duration_days");
         $this->ensureColumn('orders', 'thank_you_sent_at', "ALTER TABLE orders ADD COLUMN thank_you_sent_at DATETIME NULL AFTER delivery_note_sent_at");
         $this->ensureColumn('orders', 'remembrance_sent_at', "ALTER TABLE orders ADD COLUMN remembrance_sent_at DATETIME NULL AFTER thank_you_sent_at");
-        try {
-            $this->db->exec("ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cash','mpesa','split','card','bank','sacco','credit') DEFAULT NULL");
-        } catch (\PDOException $ignored) {}
+        // Widen payment_method so deposits (incl. paybill) never fail on a
+        // stale ENUM — schema self-heals at runtime, no manual migration.
         try {
             $this->db->exec(
                 "CREATE TABLE IF NOT EXISTS order_payments (
@@ -852,6 +882,53 @@ class OrderModel extends Model
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
         } catch (\PDOException $ignored) {}
+        if (!self::$paymentSchemaSynced) {
+            self::$paymentSchemaSynced = true;
+            try {
+                $this->db->exec("ALTER TABLE orders MODIFY COLUMN payment_method VARCHAR(20) DEFAULT NULL");
+            } catch (\PDOException $ignored) {}
+            try {
+                // Recompute open-invoice balances from the payments ledger so
+                // deposits always show the real remaining amount automatically.
+                $this->db->exec(
+                    "UPDATE orders o
+                        LEFT JOIN (
+                            SELECT order_id, tenant_id, COALESCE(SUM(amount),0) AS paid
+                              FROM order_payments
+                          GROUP BY order_id, tenant_id
+                        ) p ON p.order_id = o.id AND p.tenant_id = o.tenant_id
+                        SET o.amount_paid = COALESCE(p.paid, o.amount_paid, 0),
+                            o.amount_due = GREATEST(COALESCE(o.total,0) - COALESCE(p.paid, o.amount_paid, 0), 0),
+                            o.payment_method = CASE
+                                WHEN GREATEST(COALESCE(o.total,0) - COALESCE(p.paid, o.amount_paid, 0), 0) > 0.0001
+                                    THEN COALESCE(NULLIF(o.payment_method,''), 'credit')
+                                ELSE o.payment_method
+                            END,
+                            o.payment_status = CASE
+                                WHEN GREATEST(COALESCE(o.total,0) - COALESCE(p.paid, o.amount_paid, 0), 0) <= 0.0001 THEN 'paid'
+                                WHEN COALESCE(p.paid, o.amount_paid, 0) > 0.0001 THEN 'part_paid'
+                                ELSE COALESCE(NULLIF(o.payment_status,''), 'credit')
+                            END
+                      WHERE o.status = 'open' AND COALESCE(o.total,0) > 0"
+                );
+            } catch (\PDOException $ignored) {}
+            try {
+                $this->db->exec(
+                    "UPDATE orders
+                        SET amount_paid = COALESCE(amount_paid, 0),
+                            amount_due = GREATEST(COALESCE(total,0) - COALESCE(amount_paid,0), 0),
+                            payment_method = COALESCE(NULLIF(payment_method,''), 'credit'),
+                            payment_status = CASE
+                                WHEN GREATEST(COALESCE(total,0) - COALESCE(amount_paid,0), 0) <= 0.0001 THEN 'paid'
+                                WHEN COALESCE(amount_paid,0) > 0.0001 THEN 'part_paid'
+                                ELSE COALESCE(NULLIF(payment_status,''), 'credit')
+                            END
+                      WHERE status = 'open' AND COALESCE(total,0) > 0
+                        AND (amount_due IS NULL OR amount_due = 0)
+                        AND COALESCE(amount_paid,0) < COALESCE(total,0)"
+                );
+            } catch (\PDOException $ignored) {}
+        }
     }
 
     private function ensureColumn(string $table, string $column, string $sql): void
@@ -1193,22 +1270,19 @@ class OrderModel extends Model
     // ===== owner reporting: paid orders, shaped like SaleModel's rows ======
 
     /**
-     * Paid tabs for a period, shaped with the same keys SaleModel::forTenant()
-     * rows have (total, payment_method, cash_amount, mpesa_amount,
-     * staff_name, sale_type, payment_status, discount_amount,
-     * amount_paid, amount_due) so the owner's Sales page can merge the two
-     * lists and reuse SaleModel's summarize()/staffBreakdown().
-     * Filtered by paid_at (when the money actually came in), not created_at
-     * (when the tab was opened) — a late-night tab shouldn't count against
-     * the wrong day.
+     * Sales for a period (paid + open credit / part-paid), shaped with the same
+     * keys SaleModel::forTenant() rows have so the owner's Sales page can merge
+     * the two lists and reuse SaleModel's summarize()/staffBreakdown().
+     * Uses COALESCE(paid_at, created_at) so unpaid credit sales still appear
+     * on the day they were sold, and deposits update collected/balance live.
      */
     public function forTenant(int $limit = 1000, string $period = 'all', ?int $staffId = null): array
     {
         $tid = \TenantContext::tenantId();
         $periodSql = match ($period) {
-            'today' => "AND DATE(o.paid_at) = CURDATE()",
-            'week'  => "AND o.paid_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "AND o.paid_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'today' => "AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()",
+            'week'  => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+            'month' => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
             default => '',
         };
         $staffSql = $staffId !== null ? "AND o.opened_by = :staff_id" : '';
@@ -1217,8 +1291,12 @@ class OrderModel extends Model
                     (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
                FROM orders o
           LEFT JOIN users u ON u.id = o.opened_by
-              WHERE o.tenant_id = :tid AND o.status = 'paid' {$periodSql} {$staffSql}
-           ORDER BY o.paid_at DESC, o.id DESC
+              WHERE o.tenant_id = :tid
+                AND o.status IN ('paid', 'open')
+                AND COALESCE(o.total, 0) > 0
+                AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
+                {$periodSql} {$staffSql}
+           ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.id DESC
               LIMIT :lim"
         );
         $stmt->bindValue(':tid', $tid, \PDO::PARAM_INT);
@@ -1228,13 +1306,35 @@ class OrderModel extends Model
         $rows = $stmt->fetchAll();
 
         foreach ($rows as &$r) {
-            $r['created_at']       = $r['paid_at'];       // reporting date = when paid
+            $paid = max(0, (float) ($r['amount_paid'] ?? 0));
+            $due = (float) ($r['amount_due'] ?? 0);
+            if ($due <= 0.0001 && ($r['status'] ?? '') === 'open') {
+                $due = max(0, round((float) ($r['total'] ?? 0) - $paid, 2));
+            }
+            if (($r['status'] ?? '') === 'paid') {
+                $due = 0;
+                if ($paid <= 0.0001) {
+                    $paid = (float) ($r['total'] ?? 0);
+                }
+            }
+            $status = (string) ($r['payment_status'] ?? '');
+            if ($status === '' || $status === 'credit') {
+                if ($due <= 0.0001) {
+                    $status = 'paid';
+                } elseif ($paid > 0.0001) {
+                    $status = 'part_paid';
+                } else {
+                    $status = 'credit';
+                }
+            }
+            $r['created_at']       = $r['paid_at'] ?: $r['created_at'];
             $r['customer_name']    = $r['table_name'];
             $r['sale_type']        = $r['sale_type'] ?? 'retail';
-            $r['payment_status']   = 'paid';               // only paid tabs are reported as sales
+            $r['payment_status']   = $status;
+            $r['payment_method']   = $r['payment_method'] ?: ($due > 0.0001 ? 'credit' : 'cash');
             $r['discount_amount']  = (float) ($r['discount_amount'] ?? 0);
-            $r['amount_due']       = 0;
-            $r['amount_paid']      = $r['total'];
+            $r['amount_due']       = $due;
+            $r['amount_paid']      = $paid;
             $r['receipt_url']      = 'staff/orders/receipt.php?id=' . (int) $r['id'];
             $r['source']           = 'order';
         }
@@ -1244,7 +1344,7 @@ class OrderModel extends Model
     }
 
     /**
-     * Paid orders for one tenant on one exact Y-m-d date — CLI-safe (explicit
+     * Paid + credit orders for one tenant on one exact Y-m-d date — CLI-safe (explicit
      * tenant id, no TenantContext), mirrors SaleModel::forTenantId(). Used by
      * the daily sales report (page, PDF, email cron).
      */
@@ -1256,20 +1356,46 @@ class OrderModel extends Model
                     (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
                FROM orders o
           LEFT JOIN users u ON u.id = o.opened_by
-              WHERE o.tenant_id = ? AND o.status = 'paid' AND DATE(o.paid_at) = ?
-           ORDER BY o.paid_at ASC, o.id ASC"
+              WHERE o.tenant_id = ?
+                AND o.status IN ('paid', 'open')
+                AND COALESCE(o.total, 0) > 0
+                AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
+                AND DATE(COALESCE(o.paid_at, o.created_at)) = ?
+           ORDER BY COALESCE(o.paid_at, o.created_at) ASC, o.id ASC"
         );
         $stmt->execute([$tenantId, $date]);
         $rows = $stmt->fetchAll();
 
         foreach ($rows as &$r) {
-            $r['created_at']      = $r['paid_at'];
+            $paid = max(0, (float) ($r['amount_paid'] ?? 0));
+            $due = (float) ($r['amount_due'] ?? 0);
+            if ($due <= 0.0001 && ($r['status'] ?? '') === 'open') {
+                $due = max(0, round((float) ($r['total'] ?? 0) - $paid, 2));
+            }
+            if (($r['status'] ?? '') === 'paid') {
+                $due = 0;
+                if ($paid <= 0.0001) {
+                    $paid = (float) ($r['total'] ?? 0);
+                }
+            }
+            $status = (string) ($r['payment_status'] ?? '');
+            if ($status === '' || $status === 'credit') {
+                if ($due <= 0.0001) {
+                    $status = 'paid';
+                } elseif ($paid > 0.0001) {
+                    $status = 'part_paid';
+                } else {
+                    $status = 'credit';
+                }
+            }
+            $r['created_at']      = $r['paid_at'] ?: $r['created_at'];
             $r['customer_name']   = $r['table_name'];
             $r['sale_type']       = $r['sale_type'] ?? 'retail';
-            $r['payment_status']  = 'paid';
+            $r['payment_status']  = $status;
+            $r['payment_method']  = $r['payment_method'] ?: ($due > 0.0001 ? 'credit' : 'cash');
             $r['discount_amount'] = (float) ($r['discount_amount'] ?? 0);
-            $r['amount_due']      = 0;
-            $r['amount_paid']     = $r['total'];
+            $r['amount_due']      = $due;
+            $r['amount_paid']     = $paid;
             $r['receipt_url']     = 'staff/orders/receipt.php?id=' . (int) $r['id'];
             $r['source']          = 'order';
         }
@@ -1292,7 +1418,8 @@ class OrderModel extends Model
                      WHERE source_type = 'order'
                   GROUP BY tenant_id, source_item_id
                ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
-              WHERE oi.tenant_id = ? AND o.status = 'paid' AND DATE(o.paid_at) = ?
+              WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0
+                AND DATE(COALESCE(o.paid_at, o.created_at)) = ?
            GROUP BY oi.product_name
            ORDER BY revenue DESC"
         );
@@ -1308,9 +1435,9 @@ class OrderModel extends Model
 
         $this->ensureColumn('products', 'package_buying_price', "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $periodSql = match ($period) {
-            'today' => "AND DATE(o.paid_at) = CURDATE()",
-            'week'  => "AND o.paid_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "AND o.paid_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            'today' => "AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()",
+            'week'  => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+            'month' => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
             default => '',
         };
 
@@ -1349,7 +1476,7 @@ class OrderModel extends Model
                      WHERE source_type = 'order'
                   GROUP BY tenant_id, source_item_id
              ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
-                 WHERE oi.tenant_id = ? AND o.status = 'paid' {$periodSql}
+                 WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0 {$periodSql}
               GROUP BY oi.product_id";
 
         $stmt = $this->db->prepare($sql);

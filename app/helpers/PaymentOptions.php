@@ -212,7 +212,7 @@ class PaymentOptions
             'card' => 'Card',
             'bank' => 'Bank',
             'sacco' => 'SACCO',
-            'credit' => 'Deposit',
+            'credit' => 'Credit',
         ][$method] ?? ucfirst((string) $method);
 
         $detail = $provider !== '' ? $provider : $account;

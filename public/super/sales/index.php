@@ -480,10 +480,14 @@ ob_start();
                 <?php endif; ?>
               </td>
               <td class="small"><?php echo Models\SaleModel::itemsSummaryHtml($s['items']); ?></td>
-              <td class="small"><?php
-                $pm = $s['payment_method'] ?? 'cash';
-                $class = ['mpesa' => 'bg-success text-white', 'split' => 'bg-secondary', 'card' => 'bg-dark', 'bank' => 'bg-info text-dark', 'sacco' => 'bg-primary', 'credit' => 'bg-warning text-dark'][$pm] ?? 'bg-light text-dark';
-                echo '<span class="badge ' . $class . '">' . htmlspecialchars(PaymentOptions::label($s)) . '</span>';
+                            <td class="small"><?php
+                echo Models\SaleModel::paymentStatusBadge($s);
+                echo ' <span class="text-muted">' . htmlspecialchars(Models\SaleModel::paymentLabel($s)) . '</span>';
+                if ((float)($s['amount_due'] ?? 0) > 0.0001) {
+                    echo '<div class="text-danger" style="font-size:.7rem;">Owes KES ' . number_format((float)$s['amount_due'], 0) . '</div>';
+                } elseif ((float)($s['amount_paid'] ?? 0) > 0 && (float)($s['amount_paid'] ?? 0) + 0.0001 < (float)($s['total'] ?? 0)) {
+                    echo '<div class="text-muted" style="font-size:.7rem;">Paid KES ' . number_format((float)$s['amount_paid'], 0) . '</div>';
+                }
                 if ((float)($s['discount_amount'] ?? 0) > 0) {
                     echo '<div class="text-danger" style="font-size:.7rem;">−KES ' . number_format((float)$s['discount_amount'], 0) . '</div>';
                 }

@@ -344,7 +344,10 @@ ob_start();
               <div class="small text-muted">Wholesale KES <?php echo number_format($wholesale, 0); ?></div>
             <?php endif; ?>
           </div>
-          <button type="button" class="pos-add"><i class="fas fa-cart-plus me-1"></i>Add</button>
+          <div class="pos-add-row">
+            <button type="button" class="pos-add"><i class="fas fa-cart-plus me-1"></i>Add</button>
+            <button type="button" class="pos-add-half" title="Add half unit only">½</button>
+          </div>
         </div>
       <?php endforeach; ?>
       <div id="noMatch" class="text-muted small text-center py-4" style="display:none;grid-column:1/-1;"><i class="fas fa-search me-1"></i>No products match.</div>
@@ -526,8 +529,11 @@ ob_start();
 .pos-card-archived{opacity:.9;}
 .pos-offer-banner{display:block;width:100%;text-align:left;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:12px;padding:10px 14px;font-size:.85rem;font-weight:600;margin-bottom:14px;cursor:pointer;}
 .pos-offer-banner:hover{background:#fef3c7;}
-.pos-add{width:100%;border:0;border-radius:10px;background:var(--pos-green);color:#fff;padding:8px 0;font-weight:600;font-size:.82rem;}
+.pos-add{flex:1;border:0;border-radius:10px;background:var(--pos-green);color:#fff;padding:8px 0;font-weight:600;font-size:.82rem;}
 .pos-add:hover{background:var(--pos-green-dark);}
+.pos-add-row{display:flex;gap:6px;align-items:stretch;}
+.pos-add-half{width:44px;border:1px solid var(--pos-green);border-radius:10px;background:#fff;color:var(--pos-green);font-weight:700;font-size:.95rem;line-height:1;}
+.pos-add-half:hover{background:var(--pos-green-light, #e8f8ef);}
 
 .pos-side{background:#fff;border:1px solid #eef0f4;border-radius:16px;padding:20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow-y:auto;}
 .pos-side.pay-open{max-height:none;overflow:visible;}
@@ -692,6 +698,13 @@ function add(id) {
     if (type === 'wholesale') setWholesaleQty(id, (c.wholesale || 0) + 1);
     else setRetailQty(id, (c.retail || 0) + 1);
 }
+function addHalf(id) {
+    var p = PRODUCTS[id]; if (!p) return;
+    var type = defaultSaleType();
+    var c = ensureCart(id);
+    if (type === 'wholesale') setWholesaleQty(id, (c.wholesale || 0) + 0.5);
+    else setRetailQty(id, (c.retail || 0) + 0.5);
+}
 function subtotal() {
     var t = 0;
     Object.keys(cart).forEach(function (id) {
@@ -834,13 +847,14 @@ document.getElementById('vatEnabledInput').addEventListener('change', function (
 });
 
 document.querySelectorAll('.pos-card .pos-add').forEach(function (b) { b.addEventListener('click', function () { add(b.closest('.pos-card').dataset.id); }); });
+document.querySelectorAll('.pos-card .pos-add-half').forEach(function (b) { b.addEventListener('click', function () { addHalf(b.closest('.pos-card').dataset.id); }); });
 document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
-    if (t.dataset.incRetail) setRetailQty(t.dataset.incRetail, (cart[t.dataset.incRetail] ? cart[t.dataset.incRetail].retail : 0) + 1);
-    else if (t.dataset.decRetail) setRetailQty(t.dataset.decRetail, (cart[t.dataset.decRetail] ? cart[t.dataset.decRetail].retail : 0) - 1);
+    if (t.dataset.incRetail) setRetailQty(t.dataset.incRetail, (cart[t.dataset.incRetail] ? cart[t.dataset.incRetail].retail : 0) + 0.5);
+    else if (t.dataset.decRetail) setRetailQty(t.dataset.decRetail, (cart[t.dataset.decRetail] ? cart[t.dataset.decRetail].retail : 0) - 0.5);
     else if (t.dataset.halfRetail) setRetailQty(t.dataset.halfRetail, (cart[t.dataset.halfRetail] ? cart[t.dataset.halfRetail].retail : 0) + 0.5);
-    else if (t.dataset.incWholesale) setWholesaleQty(t.dataset.incWholesale, (cart[t.dataset.incWholesale] ? cart[t.dataset.incWholesale].wholesale : 0) + 1);
-    else if (t.dataset.decWholesale) setWholesaleQty(t.dataset.decWholesale, (cart[t.dataset.decWholesale] ? cart[t.dataset.decWholesale].wholesale : 0) - 1);
+    else if (t.dataset.incWholesale) setWholesaleQty(t.dataset.incWholesale, (cart[t.dataset.incWholesale] ? cart[t.dataset.incWholesale].wholesale : 0) + 0.5);
+    else if (t.dataset.decWholesale) setWholesaleQty(t.dataset.decWholesale, (cart[t.dataset.decWholesale] ? cart[t.dataset.decWholesale].wholesale : 0) - 0.5);
     else if (t.dataset.halfWholesale) setWholesaleQty(t.dataset.halfWholesale, (cart[t.dataset.halfWholesale] ? cart[t.dataset.halfWholesale].wholesale : 0) + 0.5);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
 });

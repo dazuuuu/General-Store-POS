@@ -767,15 +767,26 @@ class SaleModel extends Model
 
             $method = $r['payment_method'] ?? 'cash';
             // For split/credit, use the actual cash/mpesa columns (deposit routed there).
-            if ($method === 'split' || $method === 'credit') {
+            if ($method === 'split' || $method === 'credit' || (($r['payment_status'] ?? '') === 'part_paid')) {
                 $sum['cash']  += (float) ($r['cash_amount'] ?? 0);
                 $sum['mpesa'] += (float) ($r['mpesa_amount'] ?? 0);
+                $paid = (float) ($r['amount_paid'] ?? 0);
+                $tracked = (float) ($r['cash_amount'] ?? 0) + (float) ($r['mpesa_amount'] ?? 0);
+                $other = max(0, round($paid - $tracked, 2));
+                if ($other > 0) {
+                    $bucket = in_array($method, ['card', 'bank', 'sacco', 'paybill'], true) ? $method : 'paybill';
+                    if (!isset($sum[$bucket])) { $sum[$bucket] = 0.0; }
+                    $sum[$bucket] += $other;
+                }
             } elseif ($method === 'cash') {
-                $sum['cash']  += (float) $r['total'];
+                $sum['cash']  += (float) ($r['amount_paid'] ?? $r['total']);
             } elseif ($method === 'mpesa') {
-                $sum['mpesa'] += (float) $r['total'];
+                $sum['mpesa'] += (float) ($r['amount_paid'] ?? $r['total']);
+            } elseif ($method === 'paybill') {
+                if (!isset($sum['paybill'])) { $sum['paybill'] = 0.0; }
+                $sum['paybill'] += (float) ($r['amount_paid'] ?? $r['total']);
             } elseif (isset($sum[$method])) {
-                $sum[$method] += (float) $r['total'];
+                $sum[$method] += (float) ($r['amount_paid'] ?? $r['total']);
             }
         }
         foreach (['revenue','collected','cash','mpesa','card','bank','sacco','discount','credit_due'] as $k) {

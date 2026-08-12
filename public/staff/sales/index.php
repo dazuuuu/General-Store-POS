@@ -121,9 +121,11 @@ ob_start();
               </td>
               <td class="small"><?php echo Models\SaleModel::itemsSummaryHtml($s['items']); ?></td>
               <td class="small"><?php
-                $pm = $s['payment_method'] ?? 'cash';
-                $class = ['mpesa' => 'bg-success', 'split' => 'bg-secondary', 'card' => 'bg-dark', 'bank' => 'bg-info text-dark', 'sacco' => 'bg-primary', 'credit' => 'bg-warning text-dark'][$pm] ?? 'bg-light text-dark';
-                echo '<span class="badge ' . $class . '">' . htmlspecialchars(PaymentOptions::label($s)) . '</span>';
+                echo Models\SaleModel::paymentStatusBadge($s);
+                echo ' <span class="text-muted">' . htmlspecialchars(Models\SaleModel::paymentLabel($s)) . '</span>';
+                if ((float)($s['amount_due'] ?? 0) > 0.0001) {
+                    echo '<div class="text-danger" style="font-size:.7rem;">Owes KES ' . number_format((float)$s['amount_due'], 0) . '</div>';
+                }
               ?></td>
               <td class="text-end fw-semibold small">KES <?php echo number_format((float) $s['total'], 0); ?></td>
               <td class="text-end">
