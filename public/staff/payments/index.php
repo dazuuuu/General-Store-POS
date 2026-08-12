@@ -34,6 +34,13 @@ $customerPayments = [];
 $customerLabel = $customerQuery;
 $customerCompany = '';
 
+// Typed invoice numbers in the main search box still open a single invoice.
+if ($receiptQuery === '' && $customerQuery !== '' && preg_match('/^ORD[\-\s]?\d+/i', $customerQuery)) {
+    $receiptQuery = strtoupper(preg_replace('/\s+/', '', $customerQuery));
+    if (stripos($receiptQuery, 'ORD') === 0 && $receiptQuery[3] !== '-') {
+        $receiptQuery = 'ORD-' . substr($receiptQuery, 3);
+    }
+}
 if ($customerId > 0) {
     $cust = $CM->find($customerId);
     if ($cust) {
