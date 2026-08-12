@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $items[] = ['product_id' => (int) ($c['product_id'] ?? 0), 'quantity' => (float) ($c['quantity'] ?? 0)];
             }
         }
-        $res = $O->addItems($id, $items, TenantContext::userId());
+        $res = $O->addItems($id, $items, TenantContext::userId(), (float) ($_POST['credit_override_amount'] ?? 0));
         if ($res['ok']) {
             $_SESSION['flash']['success'] = 'Added to the tab.';
             header('Location: ' . $viewUrl);
@@ -69,7 +69,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Add a customer email first.';
         } else {
             $tenant = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
-            $shop = ['name' => $tenant['name'] ?? 'the shop'];
+            $shop = [
+                'name' => $tenant['name'] ?? 'the shop',
+                'phone' => $tenant['phone'] ?? '',
+                'po_box' => $tenant['po_box'] ?? '',
+                'email' => $tenant['business_email'] ?? '',
+                'address' => $tenant['address'] ?? '',
+                'kra_pin' => $tenant['kra_pin'] ?? '',
+                'logo' => Branding::tenantLogo($tenant ?: []),
+                'payment_credentials' => $tenant['payment_credentials'] ?? '',
+            ];
             $items = $O->items($id);
             if ($action === 'send_invoice') {
                 $msg = build_order_invoice_email($order, $items, $shop);
@@ -102,6 +111,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $items = $O->items($id);
+$amountPaid = max(0, (float) ($order['amount_paid'] ?? 0));
+$amountDue = (float) ($order['amount_due'] ?? 0);
+if ($order['status'] === 'open' && $amountDue <= 0.0001) {
+    $amountDue = max(0, (float) $order['total'] - $amountPaid);
+}
 $page_title = 'Tab — ' . $order['table_name'];
 $statusBadge = [
     'open' => '<span class="badge bg-warning text-dark">Unpaid</span>',
@@ -127,7 +141,7 @@ ob_start();
 <?php if ($order['status'] === 'open'): ?>
   <div class="alert alert-info py-2 small">
     <i class="fas fa-circle-info me-1"></i>To collect payment, give the customer invoice <strong><?php echo htmlspecialchars($order['receipt_number']); ?></strong> —
-    whoever is on Payments looks it up by that number and marks it paid.
+    whoever is on Payments looks it up by that number and records full or partial payments.
   </div>
 <?php endif; ?>
 
@@ -161,6 +175,16 @@ ob_start();
           <span class="fw-semibold">Total</span>
           <span class="fw-bold fs-5">KES <?php echo number_format((float) $order['total'], 0); ?></span>
         </div>
+        <?php if ($amountPaid > 0 || $order['status'] === 'open'): ?>
+          <div class="d-flex justify-content-between text-muted small">
+            <span>Paid so far</span>
+            <span>KES <?php echo number_format($amountPaid, 0); ?></span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span class="fw-semibold">Still owed</span>
+            <span class="fw-bold text-danger">KES <?php echo number_format($order['status'] === 'paid' ? 0 : $amountDue, 0); ?></span>
+          </div>
+        <?php endif; ?>
       </div>
     </div>
 
@@ -247,6 +271,10 @@ ob_start();
           </div>
           <div id="cartRows" class="mt-3"></div>
           <div class="d-flex justify-content-between fw-semibold mt-2"><span>Round total</span><span>KES <span id="roundTotal">0</span></span></div>
+          <div class="mt-2">
+            <label class="form-label small mb-1">Loyal customer credit override</label>
+            <input type="number" step="0.01" min="0" name="credit_override_amount" class="form-control form-control-sm" placeholder="Optional higher product limit">
+          </div>
           <button type="submit" class="btn btn-primary w-100 mt-3" id="addBtn" disabled>Add to tab</button>
         </form>
         <?php endif; ?>
@@ -265,10 +293,17 @@ document.querySelectorAll('.prod').forEach(function (b) {
 var cart = {};
 function money(n) { return n.toLocaleString('en-KE', {maximumFractionDigits:0}); }
 function setQty(id, val) {
-    var p = PRODUCTS[id]; val = Math.round(val);
+    var p = PRODUCTS[id]; val = Math.round((parseFloat(val) || 0) * 100) / 100;
     if (val <= 0) { delete cart[id]; render(); return; }
     if (val > p.stock) { val = p.stock; }
     cart[id] = val; render();
+}
+function syncCart() {
+    var ids = Object.keys(cart), total = 0;
+    ids.forEach(function (id) { total += PRODUCTS[id].price * cart[id]; });
+    document.getElementById('roundTotal').textContent = money(total);
+    document.getElementById('addBtn').disabled = ids.length === 0;
+    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) { return { product_id: parseInt(id, 10), quantity: cart[id] }; }));
 }
 function render() {
     var wrap = document.getElementById('cartRows'), ids = Object.keys(cart), total = 0;
@@ -277,20 +312,33 @@ function render() {
         var p = PRODUCTS[id], qty = cart[id]; total += p.price * qty;
         var row = document.createElement('div');
         row.className = 'd-flex justify-content-between align-items-center border-bottom py-1';
-        row.innerHTML = '<span style="font-size:.85rem;">' + p.name + ' × ' + qty + '</span>'
-          + '<span><button type="button" class="btn btn-sm btn-outline-secondary" data-dec="' + id + '">−</button> '
+        row.innerHTML = '<span style="font-size:.85rem;">' + p.name + '</span>'
+          + '<span class="d-flex align-items-center gap-1"><button type="button" class="btn btn-sm btn-outline-secondary" data-dec="' + id + '">−</button>'
+          + '<input type="number" step="0.01" min="0" max="' + p.stock + '" data-qty="' + id + '" class="form-control form-control-sm text-center" style="width:76px;" value="' + qty + '">'
           + '<button type="button" class="btn btn-sm btn-outline-secondary" data-inc="' + id + '">+</button></span>';
         wrap.appendChild(row);
     });
-    document.getElementById('roundTotal').textContent = money(total);
-    document.getElementById('addBtn').disabled = ids.length === 0;
-    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) { return { product_id: parseInt(id, 10), quantity: cart[id] }; }));
+    syncCart();
 }
 document.querySelectorAll('.prod').forEach(function (b) { b.addEventListener('click', function () { setQty(b.dataset.id, (cart[b.dataset.id] || 0) + 1); }); });
 document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
     if (t.dataset.inc) setQty(t.dataset.inc, (cart[t.dataset.inc] || 0) + 1);
     else if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] || 0) - 1);
+});
+document.getElementById('cartRows').addEventListener('input', function (e) {
+    var input = e.target.closest('[data-qty]');
+    if (!input) return;
+    var id = input.dataset.qty;
+    var p = PRODUCTS[id]; if (!p) return;
+    var val = Math.round((parseFloat(input.value) || 0) * 100) / 100;
+    if (val > p.stock) { val = p.stock; input.value = val; }
+    if (val > 0) { cart[id] = val; } else { delete cart[id]; }
+    syncCart();
+});
+document.getElementById('cartRows').addEventListener('change', function (e) {
+    var input = e.target.closest('[data-qty]');
+    if (input) setQty(input.dataset.qty, input.value);
 });
 var search = document.getElementById('search');
 search.addEventListener('input', function () {

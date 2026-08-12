@@ -1,46 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#22c55e"/>
-      <stop offset="1" stop-color="#15803d"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-
-  <!-- bookmark ribbon, behind the book -->
-  <path d="M241 96 H271 V226 L256 210 L241 226 Z" fill="#0f6b31"/>
-
-  <!-- open book -->
-  <g>
-    <path d="M256 208
-             C 214 190 156 182 104 196
-             C 98 198 94 203 94 209
-             L 100 360
-             C 100 366 105 370 111 369
-             C 158 360 212 366 256 386
-             Z" fill="#ffffff"/>
-    <path d="M256 208
-             C 298 190 356 182 408 196
-             C 414 198 418 203 418 209
-             L 412 360
-             C 412 366 407 370 401 369
-             C 354 360 300 366 256 386
-             Z" fill="#f4f4f4"/>
-    <path d="M256 208 L256 386" stroke="#cbd5c8" stroke-width="4" stroke-linecap="round"/>
-
-    <!-- text lines, left page -->
-    <g stroke="#22c55e" stroke-width="10" stroke-linecap="round">
-      <line x1="132" y1="242" x2="222" y2="252"/>
-      <line x1="130" y1="276" x2="222" y2="284"/>
-      <line x1="129" y1="310" x2="220" y2="316"/>
-      <line x1="128" y1="343" x2="216" y2="347"/>
-    </g>
-    <!-- text lines, right page -->
-    <g stroke="#c9ccc9" stroke-width="10" stroke-linecap="round">
-      <line x1="290" y1="252" x2="380" y2="242"/>
-      <line x1="290" y1="284" x2="382" y2="276"/>
-      <line x1="292" y1="316" x2="383" y2="310"/>
-      <line x1="296" y1="347" x2="384" y2="343"/>
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Duaqabe icon">
+  <path d="M100 274a156 156 0 0 1 126-153l-22 55a96 96 0 0 0-48 98z" fill="#050706"/>
+  <path d="M356 274a96 96 0 0 0-48-98l-22-55a156 156 0 0 1 126 153z" fill="#050706"/>
+  <path d="M152 286h208" stroke="#050706" stroke-width="7" stroke-linecap="round"/>
+  <path d="M213 153h86l15 118H198z" fill="#159447"/>
+  <path d="M220 153h73l12 105H204z" fill="#0f843e"/>
+  <path d="M222 161c0-51 19-80 55-80 24 0 43 17 43 42 0 19-12 34-30 34-14 0-20-10-16-22 4-14 18-22 37-20" fill="none" stroke="#050706" stroke-width="7" stroke-linecap="round"/>
+  <path d="M221 160c0-49 20-78 55-78" fill="none" stroke="#1a1d1c" stroke-width="3" stroke-linecap="round" opacity=".35"/>
+  <circle cx="219" cy="162" r="10" fill="#f8faf8"/>
+  <circle cx="293" cy="162" r="10" fill="#f8faf8"/>
+  <path d="M222 150l-4 13M296 150l-5 13" stroke="#050706" stroke-width="6" stroke-linecap="round"/>
+  <text x="256" y="357" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="800" fill="#050706">D</text>
+  <path d="M256 428l-62-66h124z" fill="#050706"/>
 </svg>

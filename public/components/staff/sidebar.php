@@ -38,6 +38,15 @@ $isOn = function (string $needle) use ($uri): string {
         <a class="t-link <?php echo $isOn('/staff/orders/held') ? '' : $isOn('/staff/orders'); ?>" href="<?php echo public_url('staff/orders/'); ?>">
             <i class="fas fa-file-invoice-dollar"></i><span>Credit sales</span>
         </a>
+        <a class="t-link <?php echo $isOn('/staff/bulk'); ?>" href="<?php echo public_url('staff/bulk/'); ?>">
+            <i class="fas fa-boxes-stacked"></i><span>Bulk sales</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/staff/documents'); ?>" href="<?php echo public_url('staff/documents/'); ?>">
+            <i class="fas fa-file-lines"></i><span>Documents</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/staff/returns'); ?>" href="<?php echo public_url('staff/returns/'); ?>">
+            <i class="fas fa-rotate-left"></i><span>Returns</span>
+        </a>
         <a class="t-link <?php echo $isOn('/staff/orders/held'); ?>" href="<?php echo public_url('staff/orders/held.php'); ?>">
             <i class="fas fa-pause"></i><span>Held sales</span>
         </a>
@@ -67,7 +76,7 @@ $isOn = function (string $needle) use ($uri): string {
 </aside>
 
 <style>
-:root { --t-bg:#fff; --t-bg2:var(--pos-green-light,#f0fdf4); --t-line:#eef0f4; --t-accent:var(--pos-green,#16a34a); --t-text:#5b6070; }
+:root { --t-bg:#fff; --t-bg2:var(--pos-green-light,#f5ecff); --t-line:#eef0f4; --t-accent:var(--pos-green,#4b006e); --t-text:#5b6070; }
 .t-sidebar { width:264px; background:var(--t-bg); color:var(--t-text); position:fixed; left:0; top:0; height:100vh; overflow-y:auto; z-index:1001; transition:transform .3s ease; border-right:1px solid var(--t-line); }
 .t-brand { padding:24px 20px; border-bottom:1px solid var(--t-line); text-align:center; position:relative; }
 .t-logo { height:44px; max-width:160px; object-fit:contain; border-radius:8px; padding:4px; }

@@ -10,7 +10,8 @@ $__tenant   = $__tenant ?? null;
 $shopName   = $__tenant['name'] ?? 'My Shop';
 $logo = Branding::tenantLogo($__tenant);
 $username   = $_SESSION['username'] ?? 'User';
-$roleLabel  = TenantContext::role() === 'tenant_owner' ? 'Owner' : 'Staff';
+$isOwner    = TenantContext::role() === 'tenant_owner';
+$roleLabel  = $isOwner ? 'Owner' : 'Staff';
 $uri        = $_SERVER['REQUEST_URI'] ?? '';
 $dashUrl    = TenantContext::role() === 'staff' ? public_url('staff/dashboard/') : public_url('super/dashboard/');
 
@@ -40,14 +41,21 @@ $isOn = function (string $needle) use ($uri): string {
         <?php if (TenantContext::role() === 'staff' && TenantContext::can(Capabilities::SALES_VIEW)): ?>
         <a class="t-link <?php echo $isOn('/staff/sales/'); ?>" href="<?php echo public_url('staff/sales/'); ?>"><i class="fas fa-receipt"></i><span>My sales</span></a>
         <?php endif; ?>
-        <?php if (TenantContext::role() === 'tenant_owner'): ?>
+        <?php if ($isOwner): ?>
+        <a class="t-link <?php echo $isOn('/super/shop'); ?>" href="<?php echo public_url('super/shop/'); ?>"><i class="fas fa-store"></i><span>Shop</span></a>
         <a class="t-link <?php echo $isOn('/super/sales'); ?>" href="<?php echo public_url('super/sales/'); ?>"><i class="fas fa-receipt"></i><span>Sales</span></a>
         <?php endif; ?>
-        <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
+        <?php if ($isOwner || TenantContext::can(Capabilities::SALES_RECORD)): ?>
+        <a class="t-link <?php echo $isOn('/super/invoices'); ?>" href="<?php echo public_url('super/invoices/'); ?>"><i class="fas fa-file-invoice"></i><span>Invoices</span></a>
         <a class="t-link <?php echo $isOn('/super/orders'); ?>" href="<?php echo public_url('super/orders/'); ?>"><i class="fas fa-hand-holding-dollar"></i><span>Credit sales</span></a>
+        <a class="t-link <?php echo $isOn('/super/documents'); ?>" href="<?php echo public_url('super/documents/'); ?>"><i class="fas fa-file-lines"></i><span>Documents</span></a>
+        <a class="t-link <?php echo $isOn('/super/returns'); ?>" href="<?php echo public_url('super/returns/'); ?>"><i class="fas fa-rotate-left"></i><span>Returns</span></a>
+        <?php endif; ?>
+        <?php if ($isOwner || TenantContext::can(Capabilities::PAYMENTS_PROCESS)): ?>
+        <a class="t-link <?php echo $isOn('/super/payments'); ?>" href="<?php echo public_url('super/payments/'); ?>"><i class="fas fa-cash-register"></i><span>Payments</span></a>
         <?php endif; ?>
 
-        <?php if (TenantContext::can(Capabilities::CUSTOMERS_MANAGE) || TenantContext::role() === 'tenant_owner'): ?>
+        <?php if (TenantContext::can(Capabilities::CUSTOMERS_MANAGE) || $isOwner): ?>
         <a class="t-link <?php echo $isOn('/super/customers'); ?>" href="<?php echo public_url('super/customers/'); ?>"><i class="fas fa-users"></i><span>Customers / Loyalty</span></a>
         <?php endif; ?>
 
@@ -66,18 +74,21 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <?php endif; ?>
 
-        <?php if (TenantContext::role() === 'tenant_owner' && (int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId()): ?>
+        <?php if ($isOwner && (int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId()): ?>
         <a class="t-link <?php echo $isOn('/super/admins'); ?>" href="<?php echo public_url('super/admins/'); ?>">
             <i class="fas fa-user-shield"></i><span>Admins</span>
         </a>
         <?php endif; ?>
 
-        <?php if (TenantContext::can(Capabilities::INVENTORY_VIEW) || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
+        <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_VIEW) || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/inventory'); ?>" href="<?php echo public_url('super/inventory/'); ?>">
             <i class="fas fa-warehouse"></i><span>Inventory</span>
         </a>
+        <a class="t-link <?php echo $isOn('/super/store'); ?>" href="<?php echo public_url('super/store/'); ?>">
+            <i class="fas fa-box-archive"></i><span>Store</span>
+        </a>
         <?php endif; ?>
-        <?php if (TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
+        <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/categories'); ?>" href="<?php echo public_url('super/categories/'); ?>">
             <i class="fas fa-tags"></i><span>Categories</span>
         </a>
@@ -106,12 +117,16 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <?php endif; ?>
 
-        <?php if (TenantContext::can(Capabilities::REPORTS_VIEW)): ?>
+        <?php if ($isOwner || TenantContext::can(Capabilities::REPORTS_VIEW)): ?>
         <a class="t-link <?php echo $isOn('/super/reports'); ?>" href="<?php echo public_url('super/reports/'); ?>"><i class="fas fa-chart-line"></i><span>Reports</span></a>
+        <a class="t-link <?php echo $isOn('/super/data'); ?>" href="<?php echo public_url('super/data/'); ?>"><i class="fas fa-file-excel"></i><span>Data export</span></a>
         <?php endif; ?>
 
-        <?php if (TenantContext::can(Capabilities::SETTINGS_MANAGE)): ?>
+        <?php if ($isOwner || TenantContext::can(Capabilities::SETTINGS_MANAGE)): ?>
         <a class="t-link <?php echo $isOn('/super/settings'); ?>" href="<?php echo public_url('super/settings/'); ?>"><i class="fas fa-gear"></i><span>Settings</span></a>
+        <?php endif; ?>
+        <?php if ($isOwner): ?>
+        <a class="t-link <?php echo $isOn('/clean_migrations.php'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>"><i class="fas fa-broom"></i><span>Clean credit records</span></a>
         <?php endif; ?>
 
         <hr>
@@ -124,7 +139,7 @@ $isOn = function (string $needle) use ($uri): string {
 </aside>
 
 <style>
-:root { --t-bg:#fff; --t-bg2:var(--pos-green-light,#f0fdf4); --t-line:#eef0f4; --t-accent:var(--pos-green,#16a34a); --t-text:#5b6070; }
+:root { --t-bg:#fff; --t-bg2:var(--pos-violet-light,#f5ecff); --t-line:#eef0f4; --t-accent:var(--pos-violet,#4b006e); --t-text:#5b6070; }
 .t-sidebar { width:264px; background:var(--t-bg); color:var(--t-text); position:fixed; left:0; top:0; height:100vh; overflow-y:auto; z-index:1001; transition:transform .3s ease; border-right:1px solid var(--t-line); }
 .t-brand { padding:24px 20px; border-bottom:1px solid var(--t-line); text-align:center; position:relative; }
 .t-logo { height:44px; max-width:160px; object-fit:contain; border-radius:8px; padding:4px; }

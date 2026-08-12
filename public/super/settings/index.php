@@ -10,15 +10,40 @@ $tenantModel = new Models\TenantModel($pdo);
 $tenantModel->ensureShopSchema();
 
 $defaultFooter = implode("\n", ReceiptFooter::DEFAULT_LINES);
+$defaultPaymentCredentials = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? 'settings';
+    if ($action === 'reset_shop_data') {
+        $confirm = trim((string) ($_POST['reset_confirm'] ?? ''));
+        $resetGroups = array_values(array_filter(array_map('strval', $_POST['reset_groups'] ?? [])));
+        if ($confirm !== 'RESET') {
+            $_SESSION['flash']['error'] = 'Type RESET to confirm the shop data reset.';
+        } elseif (!$resetGroups) {
+            $_SESSION['flash']['error'] = 'Choose at least one data group to reset.';
+        } else {
+            $reset = (new TenantResetService($pdo))->resetShopData((int) $tenantId, $resetGroups);
+            if ($reset['ok']) {
+                $count = array_sum($reset['deleted']);
+                $_SESSION['flash']['success'] = 'Selected shop data reset complete. Removed ' . number_format($count) . ' record' . ($count === 1 ? '' : 's') . ' while keeping users and receipt settings.';
+            } else {
+                $_SESSION['flash']['error'] = $reset['error'] ?? 'Could not reset shop data.';
+            }
+        }
+        header('Location: ' . public_url('super/settings/'));
+        exit;
+    }
+
     $data = [
-        'name'                    => trim($_POST['name'] ?? ''),
-        'phone'                   => trim($_POST['phone'] ?? ''),
-        'address'                 => trim($_POST['address'] ?? ''),
+        'name'                    => trim($_POST['name'] ?? ReceiptFooter::SHOP_NAME),
+        'phone'                   => trim($_POST['phone'] ?? ReceiptFooter::SHOP_PHONE),
+        'address'                 => trim($_POST['address'] ?? ReceiptFooter::SHOP_LOCATION),
+        'po_box'                  => trim($_POST['po_box'] ?? ReceiptFooter::SHOP_BOX),
+        'business_email'          => trim($_POST['business_email'] ?? ReceiptFooter::SHOP_EMAIL),
         'currency'                => trim($_POST['currency'] ?? 'KES'),
         'receipt_footer'          => trim($_POST['receipt_footer'] ?? ''),
         'kra_pin'                 => trim($_POST['kra_pin'] ?? ''),
+        'payment_credentials'     => trim($_POST['payment_credentials'] ?? $defaultPaymentCredentials),
         'vat_rate'                => max(0, round((float) ($_POST['vat_rate'] ?? 0), 2)),
         'vat_inclusive'           => !empty($_POST['vat_inclusive']) ? 1 : 0,
         'loyalty_points_per_kes'  => max(0, round((float) ($_POST['loyalty_points_per_kes'] ?? 1), 2)),
@@ -79,13 +104,13 @@ ob_start();
           <div class="mb-3">
             <label class="form-label fw-semibold">Business name</label>
             <input type="text" name="name" class="form-control" required
-                   value="<?php echo htmlspecialchars($__tenant['name'] ?? ''); ?>">
+                   value="<?php echo htmlspecialchars($__tenant['name'] ?? ReceiptFooter::SHOP_NAME); ?>">
           </div>
           <div class="row">
             <div class="col-md-6 mb-3">
               <label class="form-label fw-semibold">Phone</label>
               <input type="text" name="phone" class="form-control"
-                     value="<?php echo htmlspecialchars($__tenant['phone'] ?? ''); ?>">
+                     value="<?php echo htmlspecialchars($__tenant['phone'] ?? ReceiptFooter::SHOP_PHONE); ?>">
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label fw-semibold">Currency</label>
@@ -96,13 +121,31 @@ ob_start();
           <div class="mb-3">
             <label class="form-label fw-semibold">Business location</label>
             <input type="text" name="address" class="form-control" placeholder="e.g. Kitengela, St. Monica's Rd"
-                   value="<?php echo htmlspecialchars($__tenant['address'] ?? ''); ?>">
+                   value="<?php echo htmlspecialchars($__tenant['address'] ?? ReceiptFooter::SHOP_LOCATION); ?>">
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">P.O. Box</label>
+              <input type="text" name="po_box" class="form-control" placeholder="e.g. P.O.BOX 631-00610, NAIROBI"
+                     value="<?php echo htmlspecialchars($__tenant['po_box'] ?? ReceiptFooter::SHOP_BOX); ?>">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label fw-semibold">Business email</label>
+              <input type="email" name="business_email" class="form-control" placeholder="shop@example.com"
+                     value="<?php echo htmlspecialchars($__tenant['business_email'] ?? ReceiptFooter::SHOP_EMAIL); ?>">
+            </div>
           </div>
           <div class="mb-3">
             <label class="form-label fw-semibold">KRA PIN <span class="text-muted fw-normal">(optional)</span></label>
             <input type="text" name="kra_pin" class="form-control" placeholder="e.g. PA006734580F"
                    value="<?php echo htmlspecialchars($__tenant['kra_pin'] ?? ''); ?>">
             <div class="form-text">Only printed on receipts when you fill this in.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Payment credentials <span class="text-muted fw-normal">(optional)</span></label>
+            <textarea name="payment_credentials" class="form-control" rows="4"
+                      placeholder="Paybill/Till, bank account, account name, or payment instructions"><?php echo htmlspecialchars($__tenant['payment_credentials'] ?? $defaultPaymentCredentials); ?></textarea>
+            <div class="form-text">Shown on emailed invoices and bulk-sale notes so customers know how to pay.</div>
           </div>
 
           <hr class="my-4">
@@ -160,12 +203,58 @@ ob_start();
     </div>
   </div>
   <div class="col-12 col-lg-4">
+    <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-1">Data export</h2>
+        <p class="text-muted small mb-3">Download Excel files for products, sales, and profit margins by product.</p>
+        <form method="get" action="<?php echo public_url('super/data/export.php'); ?>">
+          <label class="form-label small fw-semibold">Export file</label>
+          <select name="type" class="form-select mb-3">
+            <option value="all">All data workbook</option>
+            <option value="products">Products only</option>
+            <option value="sales">Sales only</option>
+            <option value="profit">Profit margins by product</option>
+          </select>
+          <label class="form-label small fw-semibold">Period</label>
+          <select name="period" class="form-select mb-3">
+            <option value="all">All time</option>
+            <option value="today">Today</option>
+            <option value="week">Last 7 days</option>
+            <option value="month">Last 30 days</option>
+          </select>
+          <button class="btn btn-primary w-100"><i class="fas fa-file-excel me-1"></i>Export Excel</button>
+        </form>
+      </div>
+    </div>
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body text-center p-4">
         <div class="text-muted small text-uppercase mb-2">Current logo</div>
         <img src="<?php echo htmlspecialchars(Branding::tenantLogo($__tenant)); ?>"
              alt="Logo" style="max-height:90px;max-width:100%;object-fit:contain;">
         <div class="text-muted small mt-3">This logo is shown on the login screen, your dashboard, and receipts.</div>
+      </div>
+    </div>
+    <div class="card border-danger shadow-sm mt-4" style="border-radius:12px;">
+      <div class="card-body p-4">
+        <h2 class="h5 mb-1 text-danger">Reset shop data</h2>
+        <p class="text-muted small mb-3">
+          Choose exactly which shop data to clear.
+          Users, passwords, admin accounts, business details, logo, and receipt settings are kept.
+        </p>
+        <form method="post" onsubmit="return confirm('This will permanently delete shop data for this tenant. Continue?');">
+          <input type="hidden" name="action" value="reset_shop_data">
+          <div class="border rounded-3 p-3 mb-3">
+            <?php foreach (TenantResetService::GROUPS as $key => $label): ?>
+              <div class="form-check text-start mb-2">
+                <input class="form-check-input" type="checkbox" name="reset_groups[]" value="<?php echo htmlspecialchars($key); ?>" id="reset_<?php echo htmlspecialchars($key); ?>">
+                <label class="form-check-label small" for="reset_<?php echo htmlspecialchars($key); ?>"><?php echo htmlspecialchars($label); ?></label>
+              </div>
+            <?php endforeach; ?>
+          </div>
+          <label class="form-label small fw-semibold">Type RESET to confirm</label>
+          <input type="text" name="reset_confirm" class="form-control mb-3" autocomplete="off" placeholder="RESET">
+          <button class="btn btn-outline-danger w-100">Reset shop data</button>
+        </form>
       </div>
     </div>
   </div>

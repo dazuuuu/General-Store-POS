@@ -19,16 +19,18 @@ $items = $SA->items($id);
  * list because receipt_header() joins multiple with " & "; only one number
  * is collected today. PIN is only shown when the owner has filled it in. */
 $tenant = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
-$shop   = $tenant['name'] ?? 'My Shop';
+$shop   = $tenant['name'] ?? ReceiptFooter::SHOP_NAME;
 $RECEIPT_BUSINESS = [
     'name'     => $shop,
-    'logo'     => Branding::tenantLogo($tenant),
+    'logo'     => Branding::loginLogo(),
+    'watermark_logo' => Branding::loginLogo(),
     'tagline'  => '',
-    'phones'   => !empty($tenant['phone']) ? [$tenant['phone']] : [],
-    'po_box'   => '',
-    'location' => $tenant['address'] ?? '',
+    'phones'   => [trim((string) ($tenant['phone'] ?? ReceiptFooter::SHOP_PHONE))],
+    'po_box'   => trim((string) ($tenant['po_box'] ?? ReceiptFooter::SHOP_BOX)),
+    'location' => trim((string) ($tenant['address'] ?? ReceiptFooter::SHOP_LOCATION)),
+    'email'    => trim((string) ($tenant['business_email'] ?? ReceiptFooter::SHOP_EMAIL)),
     'pin'      => $tenant['kra_pin'] ?? '',
-    'paybills' => [],
+    'payment_credentials' => $tenant['payment_credentials'] ?? '',
 ];
 
 $st = $pdo->prepare('SELECT username FROM users WHERE id = ?');
@@ -46,24 +48,16 @@ function receipt_header(array $biz, array $sale, string $staff): string
     $h = fn($s) => htmlspecialchars((string) $s);
     $rows = [];
     if (!empty($biz['logo'])) {
-        $rows[] = '<img src="' . $h($biz['logo']) . '" alt="" style="max-height:44px;max-width:160px;object-fit:contain;margin-bottom:6px;">';
+        $rows[] = '<img src="' . $h($biz['logo']) . '" alt="" style="max-height:104px;max-width:285px;object-fit:contain;margin-bottom:8px;">';
     }
-    $rows[] = '<div style="font-size:16px;font-weight:700;">' . $h($biz['name']) . '</div>';
-    if (!empty($biz['tagline']))  { $rows[] = '<div style="font-size:12px;font-weight:600;letter-spacing:.5px;">' . $h($biz['tagline']) . '</div>'; }
-    if (!empty($biz['phones']))   { $rows[] = '<div style="font-size:12px;">TEL: ' . $h(implode(' & ', $biz['phones'])) . '</div>'; }
-    if (!empty($biz['po_box']))   { $rows[] = '<div style="font-size:12px;">' . $h($biz['po_box']) . '</div>'; }
-    if (!empty($biz['location'])) { $rows[] = '<div style="font-size:12px;">LOCATION: ' . $h($biz['location']) . '</div>'; }
-    if (!empty($biz['pin']))      { $rows[] = '<div style="font-size:12px;">PIN: ' . $h($biz['pin']) . '</div>'; }
-    if (!empty($biz['paybills'])) {
-        $lines = [];
-        foreach ($biz['paybills'] as $p) {
-            $lines[] = 'PAYBILL ' . $h($p['paybill'] ?? '') . ' &middot; A/C ' . $h($p['account'] ?? '');
-        }
-        $rows[] = '<div style="font-size:12px;font-weight:600;margin-top:3px;">PAYMENT MODE</div>'
-                . '<div style="font-size:12px;line-height:1.5;">' . implode('<br>', $lines) . '</div>';
-    }
-    $rows[] = '<div style="font-size:12px;margin-top:3px;">DATE: ' . $h(date('j M Y, g:i a', strtotime($sale['created_at']))) . '</div>';
-    $rows[] = '<div style="font-size:12px;">Served by: ' . $h($staff) . '</div>';
+    $rows[] = '<div style="font-size:24px;font-weight:900;">' . $h($biz['name']) . '</div>';
+    if (!empty($biz['tagline']))  { $rows[] = '<div style="font-size:15px;font-weight:900;letter-spacing:.5px;">' . $h($biz['tagline']) . '</div>'; }
+    if (!empty($biz['po_box']))   { $rows[] = '<div style="font-size:15px;">' . $h($biz['po_box']) . '</div>'; }
+    if (!empty($biz['location'])) { $rows[] = '<div style="font-size:15px;">LOCATION: ' . $h($biz['location']) . '</div>'; }
+    if (!empty($biz['phones']))   { $rows[] = '<div style="font-size:16px;color:#000;">TEL: ' . $h(implode(' & ', array_filter($biz['phones']))) . '</div>'; }
+    if (!empty($biz['pin']))      { $rows[] = '<div style="font-size:15px;">PIN: ' . $h($biz['pin']) . '</div>'; }
+    $rows[] = '<div style="font-size:15px;margin-top:4px;">' . $h(date('j M Y, g:i a', strtotime($sale['created_at']))) . '</div>';
+    $rows[] = '<div style="font-size:15px;">Served by: ' . $h($staff) . '</div>';
     return '<div style="text-align:center;border-bottom:2px dashed #cbd5e1;padding-bottom:10px;margin-bottom:10px;">'
         . implode('', $rows) . '</div>';
 }
@@ -74,21 +68,23 @@ function receipt_inner(array $sale, array $items, string $shop, string $staff, a
 
     // Item table: ITEM | QTY | PRICE | AMT
     $rows = '';
-    foreach ($items as $it) {
+    foreach ($items as $idx => $it) {
         $qty = rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.');
         $rows .= '<tr>'
+            . '<td style="padding:4px 4px 4px 0;vertical-align:top;white-space:nowrap;">' . ((int) $idx + 1) . '</td>'
             . '<td style="padding:4px 4px 4px 0;vertical-align:top;">' . $h($it['product_name'])
-            . (!empty($it['unit']) ? ' <span style="color:#64748b;">(' . $h($it['unit']) . ')</span>' : '') . '</td>'
+            . (!empty($it['unit']) ? ' <span style="color:#000;">(' . $h($it['unit']) . ')</span>' : '') . '</td>'
             . '<td style="padding:4px;text-align:center;vertical-align:top;white-space:nowrap;">' . $h($qty) . '</td>'
             . '<td style="padding:4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($it['unit_price']) . '</td>'
             . '<td style="padding:4px 0 4px 4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($it['line_total']) . '</td>'
             . '</tr>';
     }
     $thead = '<tr style="border-bottom:1px solid #cbd5e1;">'
-        . '<th style="text-align:left;padding:0 4px 4px 0;font-size:12px;">ITEM</th>'
-        . '<th style="text-align:center;padding:0 4px 4px;font-size:12px;">QTY</th>'
-        . '<th style="text-align:right;padding:0 4px 4px;font-size:12px;">PRICE</th>'
-        . '<th style="text-align:right;padding:0 0 4px 4px;font-size:12px;">AMT</th>'
+        . '<th style="text-align:left;padding:0 4px 5px 0;font-size:16px;font-weight:900;">NO.</th>'
+        . '<th style="text-align:left;padding:0 4px 5px 0;font-size:16px;font-weight:900;">ITEM</th>'
+        . '<th style="text-align:center;padding:0 4px 5px;font-size:16px;font-weight:900;">QTY</th>'
+        . '<th style="text-align:right;padding:0 4px 5px;font-size:16px;font-weight:900;">PRICE</th>'
+        . '<th style="text-align:right;padding:0 0 5px 4px;font-size:16px;font-weight:900;">AMT</th>'
         . '</tr>';
 
     // Payment lines (unchanged behaviour)
@@ -132,18 +128,29 @@ function receipt_inner(array $sale, array $items, string $shop, string $staff, a
         }
     }
     $cust = '';
+    $identityBlock = trim(implode("\n", array_filter([
+        $biz['name'] ?? '',
+        $biz['po_box'] ?? '',
+        $biz['location'] ?? '',
+    ])));
+    $paymentCredentials = trim((string) ($biz['payment_credentials'] ?? ''));
+    $showPaymentCredentials = $paymentCredentials !== ''
+        && preg_replace('/\s+/', '', strtolower($paymentCredentials)) !== preg_replace('/\s+/', '', strtolower($identityBlock));
+    if ($showPaymentCredentials) {
+        $payLine = '<tr><td style="color:#64748b;vertical-align:top;">Payment mode</td><td style="text-align:right;white-space:pre-line;">' . $h($paymentCredentials) . '</td></tr>' . $payLine;
+    }
     if (!empty($sale['customer_name']) || !empty($sale['customer_phone'])) {
         $cust = '<p style="margin:10px 0 0;font-size:12px;color:#64748b;">Customer: ' . $h($sale['customer_name'] ?: '—')
               . (!empty($sale['customer_phone']) ? ' · ' . $h($sale['customer_phone']) : '') . '</p>';
     }
 
-    return '<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:360px;margin:0 auto;color:#0f172a;">'
+    return '<div class="receipt-inner" style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:360px;margin:0 auto;color:#000;font-size:16px;font-weight:900;">'
         . receipt_header($biz, $sale, $staff)
-        . '<div style="font-size:12px;color:#64748b;margin-bottom:6px;">Invoice / Receipt ' . $h($sale['receipt_number']) . ' · ' . $h($stype) . ' sale</div>'
-        . '<table style="width:100%;border-collapse:collapse;font-size:13px;">' . $thead . $rows . '</table>'
-        . '<table style="width:100%;border-collapse:collapse;font-size:14px;border-top:2px dashed #cbd5e1;margin-top:8px;padding-top:8px;">'
+        . '<div style="font-size:17px;color:#000;margin-bottom:6px;">Invoice / Receipt ' . $h($sale['receipt_number']) . ' · ' . $h($stype) . ' sale</div>'
+        . '<table style="width:100%;border-collapse:collapse;font-size:16px;">' . $thead . $rows . '</table>'
+        . '<table style="width:100%;border-collapse:collapse;font-size:17px;border-top:2px dashed #000;margin-top:8px;padding-top:8px;">'
         . $totals
-        . '<tr><td style="font-weight:700;padding-top:8px;">Total</td><td style="text-align:right;font-weight:700;padding-top:8px;">' . money($sale['total']) . '</td></tr>'
+        . '<tr><td style="font-weight:900;padding-top:8px;font-size:20px;">Total</td><td style="text-align:right;font-weight:900;padding-top:8px;font-size:20px;">' . money($sale['total']) . '</td></tr>'
         . $payLine . '</table>'
         . $cust
         . ReceiptFooter::html($tenant, $sale['receipt_number'] ?? null)
@@ -198,9 +205,19 @@ $backLinks = $isStaffViewer
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <style>
   body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;}
-  .sheet{background:#fff;max-width:420px;margin:0 auto 18px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);padding:24px;}
+  .sheet{background:#fff;max-width:420px;margin:0 auto 18px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);padding:24px;font-weight:700;position:relative;overflow:hidden;}
+  .sheet::before{content:"";position:absolute;inset:42px 18px;background:url('<?php echo htmlspecialchars($RECEIPT_BUSINESS['watermark_logo'], ENT_QUOTES); ?>') center 48%/82% auto no-repeat;opacity:.38;pointer-events:none;}
+  .sheet > *{position:relative;z-index:1;}
+  .sheet, .sheet *{font-weight:900 !important;color:#000 !important;}
+  .sheet table, .sheet th, .sheet td{font-weight:900 !important;color:#000 !important;}
   .actions{max-width:420px;margin:0 auto;}
-  @media print { body{background:#fff;padding:0;} .actions,.noprint{display:none !important;} .sheet{box-shadow:none;border-radius:0;margin:0;} }
+  @page{margin:8mm;}
+  @media print {
+    body{background:#fff;padding:0;margin:0;}
+    .actions,.noprint{display:none !important;}
+    .sheet{box-shadow:none;border-radius:0;margin:0 auto !important;width:80mm;max-width:80mm;padding:10px 12px;}
+    .receipt-inner{max-width:100% !important;font-size:16px !important;}
+  }
 </style>
 </head>
 <body>

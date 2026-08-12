@@ -3,7 +3,16 @@
 
 class ReceiptFooter
 {
+    public const SHOP_NAME = 'DUAQABE GENERAL STORE LIMITED';
+    public const SHOP_BOX = 'P.O.BOX 631-00610, NAIROBI';
+    public const SHOP_LOCATION = 'Haji adar plaza WAJIR';
+    public const SHOP_EMAIL = 'duaqabegeneralstore@gmail.com';
+    public const SHOP_PHONE = '0721713350,0711257332';
+
     public const DEFAULT_LINES = [
+        'For questions and enquiries:',
+        self::SHOP_EMAIL,
+        self::SHOP_PHONE,
         'GOODS ONCE SOLD ARE NOT REACCEPTED',
         '!THANK YOU FOR VISITING OUR BUSINESS!',
         '!!WELCOME!!',
@@ -25,10 +34,6 @@ class ReceiptFooter
         $h = static fn($s) => htmlspecialchars((string) $s, ENT_QUOTES);
         $lines = preg_split("/\r\n|\n|\r/", self::text($tenant)) ?: [];
         $parts = [];
-        if ($invoiceNumber) {
-            $parts[] = '<div style="font-size:12px;font-weight:700;margin-bottom:6px;">Invoice: '
-                . $h($invoiceNumber) . '</div>';
-        }
         foreach ($lines as $line) {
             $line = trim($line);
             if ($line === '') {

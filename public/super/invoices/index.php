@@ -1,0 +1,294 @@
+<?php
+require_once __DIR__ . '/../../../app/app.php';
+PageGuard::capability(Capabilities::SALES_RECORD);
+
+$pdo = Database::pdo();
+$O = new Models\OrderModel($pdo);
+$P = new Models\ProductModel($pdo);
+$products = $P->sellable();
+$customerSearchUrl = public_url('api/customers/search.php');
+$error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+    if ($action === 'create_invoice') {
+        $items = [];
+        foreach ($_POST['items'] ?? [] as $row) {
+            $pid = (int) ($row['product_id'] ?? 0);
+            $qty = (float) ($row['quantity'] ?? 0);
+            if ($pid > 0 && $qty > 0) {
+                $items[] = [
+                    'product_id' => $pid,
+                    'quantity' => $qty,
+                    'price_type' => (($row['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                ];
+            }
+        }
+        $res = $O->open([
+            'table_name' => $_POST['customer_name'] ?? '',
+            'opened_by' => TenantContext::userId(),
+            'items' => $items,
+            'channel' => 'tab',
+            'sale_type' => ($_POST['sale_type'] ?? 'retail') === 'wholesale' ? 'wholesale' : 'retail',
+            'discount_amount' => $_POST['discount_amount'] ?? 0,
+            'customer_id' => $_POST['customer_id'] ?? 0,
+            'customer_email' => $_POST['customer_email'] ?? '',
+            'customer_phone' => $_POST['customer_phone'] ?? '',
+            'credit_duration_days' => $_POST['credit_duration_days'] ?? 0,
+        ]);
+        if ($res['ok']) {
+            $_SESSION['flash']['success'] = 'Invoice ' . $res['receipt_number'] . ' created. Products have been deducted from stock.';
+            header('Location: ' . public_url('super/orders/receipt.php?id=' . (int) $res['order_id']));
+            exit;
+        }
+        $error = $res['errors']['_'] ?? (reset($res['errors']) ?: 'Could not create invoice.');
+    } elseif ($action === 'delete_invoice') {
+        $res = $O->void((int) ($_POST['order_id'] ?? 0), TenantContext::userId());
+        if ($res['ok']) {
+            $_SESSION['flash']['success'] = 'Invoice deleted and products returned to stock.';
+            header('Location: ' . public_url('super/invoices/'));
+            exit;
+        }
+        $error = $res['error'] ?? 'Could not delete invoice.';
+    }
+}
+
+$invoices = $O->documentOrders(100);
+$itemsByOrder = $O->itemsForMany(array_column($invoices, 'id'));
+$page_title = 'Invoices';
+ob_start();
+?>
+<?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+  <div>
+    <h1 class="h5 fw-bold mb-1"><i class="fas fa-file-invoice me-2 text-primary"></i>Invoices</h1>
+    <p class="text-muted small mb-0">Generate customer invoices directly from products. Stock is deducted immediately; unpaid balances are collected from Payments.</p>
+  </div>
+  <a class="btn btn-sm btn-outline-success" href="<?php echo public_url('super/payments/'); ?>"><i class="fas fa-cash-register me-1"></i>Payments</a>
+</div>
+
+<form method="post" id="invoiceForm" class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+  <input type="hidden" name="action" value="create_invoice">
+  <div class="card-body p-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+      <h2 class="h6 fw-bold mb-0">New customer invoice</h2>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="addInvoiceRow"><i class="fas fa-plus me-1"></i>Add product</button>
+    </div>
+    <div class="row g-3 mb-3">
+      <input type="hidden" name="customer_id" id="customerIdInput" value="">
+      <div class="col-md-4 customer-lookup-wrap"><label class="form-label small">Customer name</label><input name="customer_name" id="customerName" class="form-control" required placeholder="Customer / company" autocomplete="off"><div class="customer-suggest-menu" id="customerSuggestMenu"></div></div>
+      <div class="col-md-4"><label class="form-label small">Phone</label><input name="customer_phone" id="customerPhone" class="form-control" placeholder="Optional"></div>
+      <div class="col-md-4"><label class="form-label small">Email</label><input type="email" name="customer_email" id="customerEmail" class="form-control" placeholder="Optional"></div>
+      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" id="saleType" class="form-select"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
+      <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select"><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>"><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
+      <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" id="discountAmount" class="form-control" value="0"></div>
+    </div>
+    <div id="invoiceRows"></div>
+    <div class="d-flex justify-content-between align-items-center border-top pt-3 mt-2">
+      <div class="text-muted small">Invoice total: <strong id="invoiceTotal">KES 0</strong></div>
+      <button class="btn btn-primary"><i class="fas fa-file-invoice me-1"></i>Generate invoice</button>
+    </div>
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm" style="border-radius:14px;overflow:hidden;">
+  <div class="px-4 py-3 border-bottom bg-white"><h2 class="h6 fw-bold mb-0">Customer invoices</h2></div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>Customer</th><th>Products</th><th>Status</th><th class="text-end">Paid</th><th class="text-end">Balance</th><th></th></tr></thead>
+      <tbody>
+        <?php if (!$invoices): ?><tr><td colspan="7" class="text-center text-muted py-4">No invoices yet.</td></tr><?php endif; ?>
+        <?php foreach ($invoices as $inv):
+            $paid = max(0, (float) ($inv['amount_paid'] ?? 0));
+            $due = (float) ($inv['amount_due'] ?? 0);
+            if (($inv['status'] ?? '') === 'open' && $due <= 0.0001) { $due = max(0, (float) $inv['total'] - $paid); }
+            $orderItems = $itemsByOrder[(int) $inv['id']] ?? [];
+        ?>
+        <tr>
+          <td>
+            <div class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number']); ?></div>
+            <div class="text-muted small"><?php echo date('j M Y, g:i a', strtotime($inv['created_at'])); ?></div>
+          </td>
+          <td><?php echo htmlspecialchars($inv['table_name']); ?></td>
+          <td class="small">
+            <?php echo htmlspecialchars(implode(', ', array_map(fn($it) => $it['name'] . ' x' . rtrim(rtrim(number_format((float) $it['qty'], 2), '0'), '.'), array_slice($orderItems, 0, 3)))); ?>
+            <?php if (count($orderItems) > 3): ?> ...<?php endif; ?>
+          </td>
+          <td><?php echo $inv['status'] === 'paid' ? '<span class="badge bg-success">Paid</span>' : '<span class="badge bg-warning text-dark">Unpaid</span>'; ?></td>
+          <td class="text-end">KES <?php echo number_format($paid, 0); ?></td>
+          <td class="text-end fw-semibold <?php echo $due > 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($inv['status'] === 'paid' ? 0 : $due, 0); ?></td>
+          <td class="text-end invoice-actions">
+            <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/orders/receipt.php?id=' . (int) $inv['id']); ?>">Print</a>
+            <?php if ($inv['status'] === 'open'): ?>
+              <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/invoices/edit.php?id=' . (int) $inv['id']); ?>">Edit</a>
+              <a class="btn btn-sm btn-outline-success" href="<?php echo public_url('super/payments/?receipt=' . urlencode($inv['receipt_number'])); ?>">Pay</a>
+              <form method="post" class="d-inline" onsubmit="return confirm('Delete this invoice and return its products to stock?');">
+                <input type="hidden" name="action" value="delete_invoice">
+                <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">
+                <button class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            <?php endif; ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<template id="invoiceRowTpl">
+  <div class="invoice-row row g-2 align-items-end mb-2">
+    <div class="col-md-5">
+      <label class="form-label small mb-1">Product</label>
+      <select name="items[__I__][product_id]" class="form-select product-select">
+        <option value="">Choose product</option>
+        <?php foreach ($products as $p): ?>
+          <?php $eff = Models\ProductModel::effectivePrice($p); ?>
+          <?php
+            $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
+            $packUnit = (string) ($p['pack_unit'] ?? '');
+            $packPrice = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float) $p['pack_price'] : 0;
+          ?>
+          <option value="<?php echo (int) $p['id']; ?>"
+            data-retail="<?php echo (float) $eff['price']; ?>"
+            data-wholesale="<?php echo (float) ($p['wholesale_price'] ?: $eff['price']); ?>"
+            data-stock="<?php echo (float) $p['quantity']; ?>"
+            data-units-per-pack="<?php echo $unitsPerPack; ?>"
+            data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
+            data-pack-price="<?php echo $packPrice; ?>">
+            <?php echo htmlspecialchars($p['name'] . ' - stock ' . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' ' . ($p['unit'] ?? '')); ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-2"><label class="form-label small mb-1 qty-label">Qty</label><input type="hidden" name="items[__I__][quantity]" class="stock-qty" value=""><input type="number" step="0.01" min="0" class="form-control invoice-qty" placeholder="0"></div>
+    <div class="col-md-2"><label class="form-label small mb-1">Price type</label><select name="items[__I__][price_type]" class="form-select invoice-price-type"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
+    <div class="col-md-2"><label class="form-label small mb-1">Line</label><div class="form-control bg-light line-total">KES 0</div></div>
+    <div class="col-md-1"><button type="button" class="btn btn-outline-danger w-100 remove-invoice-row"><i class="fas fa-trash"></i></button></div>
+  </div>
+</template>
+
+<style>
+.customer-lookup-wrap{position:relative;}
+.customer-suggest-menu{position:absolute;left:calc(var(--bs-gutter-x) * .5);right:calc(var(--bs-gutter-x) * .5);top:100%;z-index:70;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:240px;overflow:auto;}
+.customer-suggest-menu.show{display:block;}
+.customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
+.customer-suggest-menu button:hover{background:#f8fafc;}
+.customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
+.invoice-actions{white-space:nowrap;}
+.invoice-actions .btn{margin:.1rem;}
+@media (max-width: 576px){
+  #invoiceForm .card-body{padding:1rem!important;}
+  .invoice-row{border:1px solid #e2e8f0;border-radius:10px;padding:.7rem;margin-bottom:.8rem!important;}
+  .invoice-actions{display:grid;grid-template-columns:1fr;gap:.35rem;white-space:normal;}
+  .invoice-actions .btn,.invoice-actions form,.invoice-actions button{width:100%;margin:0;}
+}
+</style>
+<script>
+(function(){
+  var rows = document.getElementById('invoiceRows');
+  var tpl = document.getElementById('invoiceRowTpl').innerHTML;
+  var idx = 0;
+  var customerUrl = <?php echo json_encode($customerSearchUrl); ?>;
+  function money(n){ return 'KES ' + (Math.round(n * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits:2}); }
+  function attachCustomerLookup(){
+    var input = document.getElementById('customerName');
+    var menu = document.getElementById('customerSuggestMenu');
+    var id = document.getElementById('customerIdInput');
+    if (!input || !menu || !id) return;
+    var timer = null, picked = '';
+    function hide(){ menu.classList.remove('show'); }
+    function render(items){
+      menu.innerHTML = '';
+      if (!items.length) { hide(); return; }
+      items.forEach(function(c){
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.innerHTML = '<strong>' + (c.name || '') + '</strong><span class="meta">' + [c.phone, c.email, c.company_name].filter(Boolean).join(' · ') + '</span>';
+        b.addEventListener('mousedown', function(e){
+          e.preventDefault();
+          picked = c.name || '';
+          id.value = c.id || '';
+          input.value = picked;
+          document.getElementById('customerPhone').value = c.phone || '';
+          document.getElementById('customerEmail').value = c.email || '';
+          hide();
+        });
+        menu.appendChild(b);
+      });
+      menu.classList.add('show');
+    }
+    input.addEventListener('input', function(){
+      if (picked && input.value !== picked) { id.value = ''; picked = ''; }
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (!q) { hide(); return; }
+      timer = setTimeout(function(){
+        fetch(customerUrl + '?q=' + encodeURIComponent(q) + '&limit=8')
+          .then(function(r){ return r.json(); })
+          .then(function(data){ render(data.items || []); })
+          .catch(function(){});
+      }, 180);
+    });
+    input.addEventListener('blur', function(){ setTimeout(hide, 160); });
+  }
+  function addRow(){
+    rows.insertAdjacentHTML('beforeend', tpl.replaceAll('__I__', idx++));
+    var row = rows.lastElementChild;
+    row.querySelector('.invoice-price-type').value = document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail';
+    wire(row);
+    recalc();
+  }
+  function rowSaleType(row) {
+    var el = row.querySelector('.invoice-price-type');
+    return el && el.value === 'wholesale' ? 'wholesale' : 'retail';
+  }
+  function rowPrice(row){
+    var opt = row.querySelector('.product-select').selectedOptions[0];
+    if (!opt) return 0;
+    var type = rowSaleType(row);
+    if (type === 'wholesale' && opt.dataset.packUnit && parseFloat(opt.dataset.unitsPerPack) > 1 && parseFloat(opt.dataset.packPrice) > 0) {
+      return parseFloat(opt.dataset.packPrice) || 0;
+    }
+    return parseFloat(type === 'wholesale' ? opt.dataset.wholesale : opt.dataset.retail) || 0;
+  }
+  function recalc(){
+    var total = 0;
+    rows.querySelectorAll('.invoice-row').forEach(function(row){
+      var opt = row.querySelector('.product-select').selectedOptions[0];
+      var qty = parseFloat(row.querySelector('.invoice-qty').value) || 0;
+      var byPack = opt && rowSaleType(row) === 'wholesale' && opt.dataset.packUnit && parseFloat(opt.dataset.unitsPerPack) > 1 && parseFloat(opt.dataset.packPrice) > 0;
+      var perPack = opt ? (parseFloat(opt.dataset.unitsPerPack) || 1) : 1;
+      var stock = opt ? (parseFloat(opt.dataset.stock) || 0) : 0;
+      var max = byPack ? Math.floor((stock / perPack) * 100) / 100 : stock;
+      if (qty > max) { qty = max; row.querySelector('.invoice-qty').value = max; }
+      row.querySelector('.qty-label').textContent = byPack ? ('Qty (' + opt.dataset.packUnit + ')') : 'Qty';
+      row.querySelector('.stock-qty').value = qty > 0 ? (qty * (byPack ? perPack : 1)).toFixed(2) : '';
+      var line = qty * rowPrice(row);
+      row.querySelector('.line-total').textContent = money(line);
+      total += line;
+    });
+    total = Math.max(0, total - (parseFloat(document.getElementById('discountAmount').value) || 0));
+    document.getElementById('invoiceTotal').textContent = money(total);
+  }
+  function wire(row){
+    row.querySelector('.product-select').addEventListener('change', recalc);
+    row.querySelector('.invoice-qty').addEventListener('input', recalc);
+    row.querySelector('.invoice-price-type').addEventListener('change', recalc);
+    row.querySelector('.remove-invoice-row').addEventListener('click', function(){ row.remove(); recalc(); });
+  }
+  document.getElementById('addInvoiceRow').addEventListener('click', addRow);
+  document.getElementById('saleType').addEventListener('change', function(){
+    var type = document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail';
+    rows.querySelectorAll('.invoice-price-type').forEach(function(select){ select.value = type; });
+    recalc();
+  });
+  document.getElementById('discountAmount').addEventListener('input', recalc);
+  attachCustomerLookup();
+  addRow();
+})();
+</script>
+<?php
+$content = ob_get_clean();
+include __DIR__ . '/../../templates/tenants/layout.php';

@@ -122,10 +122,18 @@ ob_start();
               <td class="small"><?php echo Models\SaleModel::itemsSummaryHtml($s['items']); ?></td>
               <td class="small"><?php
                 $pm = $s['payment_method'] ?? 'cash';
-                echo $pm === 'split' ? '<span class="badge bg-secondary">Split</span>' : ($pm === 'mpesa' ? '<span class="badge bg-success">M-Pesa</span>' : '<span class="badge bg-light text-dark">Cash</span>');
+                $class = ['mpesa' => 'bg-success', 'split' => 'bg-secondary', 'card' => 'bg-dark', 'bank' => 'bg-info text-dark', 'sacco' => 'bg-primary', 'credit' => 'bg-warning text-dark'][$pm] ?? 'bg-light text-dark';
+                echo '<span class="badge ' . $class . '">' . htmlspecialchars(PaymentOptions::label($s)) . '</span>';
               ?></td>
               <td class="text-end fw-semibold small">KES <?php echo number_format((float) $s['total'], 0); ?></td>
-              <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a></td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                  <a class="btn btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a>
+                  <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
+                    <a class="btn btn-outline-primary" href="<?php echo public_url('staff/returns/?receipt=' . urlencode($s['receipt_number'])); ?>">Return</a>
+                  <?php endif; ?>
+                </div>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>

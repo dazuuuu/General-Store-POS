@@ -1,6 +1,6 @@
 <?php
 // public/super/stock/new.php — bulk product intake for a general shop:
-// product name, category, brand, colors, unit (kg/bale/carton…), good qty,
+// product name, category, brand, unit (kg/bale/carton…), good qty,
 // faulty/broken qty, prices, barcode. Same UI card styles as before.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::STOCK_ENTER);
@@ -55,9 +55,42 @@ function stock_handle_image(array $file): array
     return ['ok' => true, 'path' => public_url('assets/uploads/products/' . $name)];
 }
 
-function stock_split_colors(string $csv): array
+function stock_package_fields(array $row, array $units): array
 {
-    return array_values(array_filter(array_map('trim', explode(',', $csv))));
+    $receiveUnit = in_array($row['unit'] ?? '', $units, true) ? $row['unit'] : 'piece';
+    $packageQty = max(0, (float) ($row['package_quantity'] ?? 0));
+    $inside = max(0, (float) ($row['units_per_package'] ?? 0));
+    if ($packageQty <= 0 || $inside <= 0) {
+        return [
+            'quantity' => (float) ($row['quantity'] ?? 0),
+            'faulty_quantity' => max(0, (float) ($row['faulty_quantity'] ?? 0)),
+            'unit' => $receiveUnit,
+            'buying_price' => (float) ($row['buying_price'] ?? 0),
+            'wholesale_price' => $row['wholesale_price'] ?? '',
+            'package_unit' => null,
+            'package_quantity' => null,
+            'units_per_package' => 1,
+            'package_price' => null,
+        ];
+    }
+
+    $qty = round($packageQty * $inside, 2);
+    $faultyPackages = max(0, (float) ($row['faulty_quantity'] ?? 0));
+    $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
+    $packageWholesale = ($row['wholesale_price'] ?? '') !== '' ? max(0, (float) $row['wholesale_price']) : null;
+    $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
+
+    return [
+        'quantity' => $qty,
+        'faulty_quantity' => round($faultyPackages * $inside, 2),
+        'unit' => $innerUnit,
+        'buying_price' => round($packageCost / $inside, 2),
+        'wholesale_price' => $packageWholesale !== null ? round($packageWholesale / $inside, 2) : '',
+        'package_unit' => $receiveUnit,
+        'package_quantity' => $packageQty,
+        'units_per_package' => $inside > 0 ? $inside : 1,
+        'package_price' => $packageWholesale,
+    ];
 }
 
 $error = '';
@@ -69,16 +102,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$error) {
         $items = [];
         foreach ($rows as $i => $row) {
-            $qty = (float) ($row['quantity'] ?? 0);
-            $faulty = max(0, (float) ($row['faulty_quantity'] ?? 0));
+            $pkg = stock_package_fields($row, $units);
+            $qty = (float) $pkg['quantity'];
+            $faulty = (float) $pkg['faulty_quantity'];
             if ($qty <= 0 && $faulty <= 0) { continue; }
             if ($qty <= 0 && $faulty > 0) { $qty = 0; } // allow recording only damaged goods on restock path via remark
             if ($qty <= 0) { continue; } // sellable qty still required for new/restock stock bump
 
             $remark = trim($row['remark'] ?? '');
             $productChoice = trim($row['product_choice'] ?? '');
-            $unit = in_array($row['unit'] ?? '', $units, true) ? $row['unit'] : 'piece';
-            $colors = stock_split_colors($row['colors'] ?? '');
+            $unit = $pkg['unit'];
 
             if ($productChoice !== '') {
                 $items[] = [
@@ -87,8 +120,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'quantity'        => $qty,
                     'faulty_quantity' => $faulty,
                     'unit'            => $unit,
-                    'colors'          => $colors,
-                    'buying_price'    => (float) ($row['buying_price'] ?? 0),
+                    'package_unit'    => $pkg['package_unit'],
+                    'package_quantity' => $pkg['package_quantity'],
+                    'units_per_package' => $pkg['units_per_package'],
+                    'package_price'   => $pkg['package_price'],
+                    'buying_price'    => $pkg['buying_price'],
                     'remark'          => $remark,
                 ];
                 continue;
@@ -108,12 +144,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'brand_id'        => (int) $BA->findOrCreate('brand', $row['brand'] ?? ''),
                 'barcode'         => trim($row['barcode'] ?? ''),
                 'unit'            => $unit,
-                'colors'          => $colors,
+                'package_unit'    => $pkg['package_unit'],
+                'package_quantity' => $pkg['package_quantity'],
+                'units_per_package' => $pkg['units_per_package'],
+                'package_price'   => $pkg['package_price'],
+                'colors'          => [],
                 'quantity'        => $qty,
                 'faulty_quantity' => $faulty,
-                'buying_price'    => (float) ($row['buying_price'] ?? 0),
+                'buying_price'    => $pkg['buying_price'],
                 'selling_price'   => $row['selling_price'] ?? 0,
-                'wholesale_price' => $row['wholesale_price'] ?? '',
+                'wholesale_price' => $pkg['wholesale_price'],
+                'offer_price'     => $row['offer_price'] ?? '',
+                'offer_starts_at' => $row['offer_starts_at'] ?? '',
+                'offer_ends_at'   => $row['offer_ends_at'] ?? '',
                 'image_path'      => $img['path'] ?? '',
                 'remark'          => $remark,
             ];
@@ -223,17 +266,41 @@ ob_start();
           <div class="ta-menu"></div>
         </div>
       </div>
-      <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Colors <span class="text-muted">(comma-separated)</span></label>
-        <input type="text" name="items[__I__][colors]" class="form-control form-control-sm" placeholder="e.g. Red, Blue, White">
-      </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Unit</label>
+        <label class="form-label small mb-1">Received as</label>
         <select name="items[__I__][unit]" class="form-select form-select-sm unitSelect">
           <?php foreach ($units as $u): ?>
             <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
           <?php endforeach; ?>
         </select>
+      </div>
+
+      <div class="col-12 mt-2 packageFields" style="display:none;">
+        <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
+          <div class="small fw-semibold mb-2"><i class="fas fa-boxes-stacked me-1 text-primary"></i>Package contents</div>
+          <div class="row g-2">
+            <div class="col-6 col-sm-3">
+              <label class="form-label small mb-1 packageQtyLabel">Number of packages</label>
+              <input type="number" step="0.01" min="0" name="items[__I__][package_quantity]" class="form-control form-control-sm packageQty" placeholder="0">
+            </div>
+            <div class="col-6 col-sm-3">
+              <label class="form-label small mb-1 unitsPerPackageLabel">Items inside each package</label>
+              <input type="number" step="0.01" min="0" name="items[__I__][units_per_package]" class="form-control form-control-sm unitsPerPackage" placeholder="0">
+            </div>
+            <div class="col-6 col-sm-3">
+              <label class="form-label small mb-1">Inside unit</label>
+              <select name="items[__I__][inner_unit]" class="form-select form-select-sm">
+                <?php foreach ($units as $u): ?>
+                  <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-6 col-sm-3">
+              <label class="form-label small mb-1">Total items</label>
+              <div class="form-control form-control-sm bg-light totalItems">0</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="col-6 col-sm-3 mt-2">
@@ -245,7 +312,7 @@ ob_start();
         <input type="number" step="0.01" min="0" name="items[__I__][faulty_quantity]" class="form-control form-control-sm" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Buying price (KES)</label>
+        <label class="form-label small mb-1 buyingLabel">Buying price (KES)</label>
         <input type="number" step="0.01" min="0" name="items[__I__][buying_price]" class="form-control form-control-sm buyingPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
@@ -253,8 +320,30 @@ ob_start();
         <input type="number" step="0.01" min="0" name="items[__I__][selling_price]" class="form-control form-control-sm" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Wholesale <span class="text-muted">(optional)</span></label>
+        <label class="form-label small mb-1 wholesaleLabel">Wholesale <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm" placeholder="0">
+      </div>
+      <div class="col-12 mt-2 newProductFields">
+        <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
+          <div class="form-check">
+            <input class="form-check-input offerToggle" type="checkbox" id="offerToggle__I__">
+            <label class="form-check-label small fw-semibold" for="offerToggle__I__"><i class="fas fa-tag me-1 text-warning"></i>Offer for this product</label>
+          </div>
+          <div class="row g-2 mt-1 offerFields" style="display:none;">
+            <div class="col-12 col-sm-4">
+              <label class="form-label small mb-1">Offer price</label>
+              <input type="number" step="0.01" min="0" name="items[__I__][offer_price]" class="form-control form-control-sm" placeholder="0">
+            </div>
+            <div class="col-12 col-sm-4">
+              <label class="form-label small mb-1">Starts</label>
+              <input type="datetime-local" name="items[__I__][offer_starts_at]" class="form-control form-control-sm">
+            </div>
+            <div class="col-12 col-sm-4">
+              <label class="form-label small mb-1">Ends</label>
+              <input type="datetime-local" name="items[__I__][offer_ends_at]" class="form-control form-control-sm">
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="col-6 col-sm-4 mt-2">
@@ -471,9 +560,26 @@ ob_start();
       if (el) attachTypeahead(el, field);
     });
 
-    row.querySelectorAll('.qty, .buyingPrice').forEach(function (el) {
+    row.querySelectorAll('.qty, .buyingPrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
       el.addEventListener('input', recalc);
+      el.addEventListener('change', recalc);
     });
+
+    var offerToggle = row.querySelector('.offerToggle');
+    if (offerToggle) {
+      offerToggle.addEventListener('change', function () {
+        var fields = row.querySelector('.offerFields');
+        fields.style.display = offerToggle.checked ? 'flex' : 'none';
+        var price = fields.querySelector('[name$="[offer_price]"]');
+        var ends = fields.querySelector('[name$="[offer_ends_at]"]');
+        if (offerToggle.checked && !ends.value) {
+          var d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+          d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+          ends.value = d.toISOString().slice(0, 16);
+        }
+        if (!offerToggle.checked && price) { price.value = ''; }
+      });
+    }
 
     var photo = row.querySelector('.photoInput');
     if (photo) {
@@ -490,9 +596,36 @@ ob_start();
   function recalc() {
     var grand = 0;
     document.querySelectorAll('.stock-row').forEach(function (row) {
-      var qty = parseFloat(row.querySelector('.qty').value) || 0;
+      var unit = row.querySelector('.unitSelect').value;
+      var isPackageUnit = unit !== 'piece';
+      var pkgFields = row.querySelector('.packageFields');
+      var qtyInput = row.querySelector('.qty');
+      var pkgQty = parseFloat((row.querySelector('.packageQty') || {}).value) || 0;
+      var perPkg = parseFloat((row.querySelector('.unitsPerPackage') || {}).value) || 0;
+      var hasPackage = isPackageUnit && pkgQty > 0 && perPkg > 0;
+      var qty = hasPackage ? (pkgQty * perPkg) : (parseFloat(qtyInput.value) || 0);
       var buy = parseFloat(row.querySelector('.buyingPrice').value) || 0;
-      var total = qty * buy;
+      if (pkgFields) pkgFields.style.display = isPackageUnit ? 'block' : 'none';
+      var packageLabel = unit.charAt(0).toUpperCase() + unit.slice(1);
+      var packageQtyLabel = row.querySelector('.packageQtyLabel');
+      var unitsPerPackageLabel = row.querySelector('.unitsPerPackageLabel');
+      if (packageQtyLabel) packageQtyLabel.textContent = 'Number of ' + unit + 's';
+      if (unitsPerPackageLabel) unitsPerPackageLabel.textContent = 'Items inside each ' + unit;
+      if (hasPackage) {
+        qtyInput.value = qty > 0 ? (Math.round(qty * 100) / 100) : '';
+        qtyInput.readOnly = true;
+        row.querySelector('.qtyLabel').textContent = 'Total items received';
+        row.querySelector('.buyingLabel').textContent = 'Buying price per ' + unit;
+        row.querySelector('.wholesaleLabel').innerHTML = 'Wholesale per ' + unit + ' <span class="text-muted">(optional)</span>';
+        var totalItems = row.querySelector('.totalItems');
+        if (totalItems) totalItems.textContent = Math.round(qty * 100) / 100;
+      } else {
+        qtyInput.readOnly = false;
+        row.querySelector('.qtyLabel').textContent = isPackageUnit ? ('Good ' + unit + ' qty received') : (row.classList.contains('is-restock') ? 'Qty to add' : 'Good qty received');
+        row.querySelector('.buyingLabel').textContent = isPackageUnit ? ('Buying price per ' + unit) : 'Buying price (KES)';
+        row.querySelector('.wholesaleLabel').innerHTML = (isPackageUnit ? ('Wholesale per ' + unit) : 'Wholesale') + ' <span class="text-muted">(optional)</span>';
+      }
+      var total = hasPackage ? (pkgQty * buy) : (qty * buy);
       var el = row.querySelector('.rowTotal');
       el.dataset.value = total;
       el.textContent = money(total);

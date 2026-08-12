@@ -5,6 +5,10 @@ PageGuard::capability(Capabilities::INVENTORY_VIEW);
 
 $pdo = Database::pdo();
 $P = new Models\ProductModel($pdo);
+$R = new Models\ReturnModel($pdo);
+$tenantModel = new Models\TenantModel($pdo);
+$tenantModel->ensureShopSchema();
+$tenant = $tenantModel->find(TenantContext::tenantId()) ?: [];
 $canEdit = TenantContext::can(Capabilities::INVENTORY_EDIT);
 
 if ($canEdit && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -23,6 +27,9 @@ if ($canEdit && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'delete') {
         $P->deleteSafe($id);
         $_SESSION['flash']['success'] = 'Product deleted.';
+    } elseif ($action === 'migrate_return') {
+        $res = $R->migrateToInventory((int) ($_POST['return_id'] ?? 0), TenantContext::userId());
+        $_SESSION['flash'][$res['ok'] ? 'success' : 'error'] = $res['ok'] ? 'Returned product migrated to inventory.' : ($res['error'] ?? 'Could not migrate return.');
     }
     header('Location: ' . public_url('super/inventory/') . '?group=' . urlencode($_GET['group'] ?? 'category'));
     exit;
@@ -46,9 +53,13 @@ $grouped = match ($groupBy) {
 $editBase = public_url('super/products/');
 $stockUrl = public_url('super/stock/new.php');
 $productUrl = public_url('super/stationery/new.php');
+$storeUrl = public_url('super/store/');
 $groupUrl = fn(string $g) => public_url('super/inventory/') . '?group=' . $g;
+$pendingReturns = $R->pendingForInventory();
 
 $totals = ['products' => 0, 'stock_value' => 0.0, 'retail_value' => 0.0, 'faulty' => 0.0];
+$vatRate = (float) ($tenant['vat_rate'] ?? 0);
+$vatMode = !empty($tenant['vat_inclusive']) ? 'inclusive' : 'exclusive';
 foreach ($grouped as $items) {
     foreach ($items as $p) {
         $totals['products']++;
@@ -65,9 +76,10 @@ ob_start();
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
   <div>
     <h1 class="h5 fw-bold mb-1">Inventory by <?php echo $groupLabels[$groupBy]; ?></h1>
-    <p class="text-muted small mb-0">Sellable stock, units, colors, and faulty/broken quantities.</p>
+    <p class="text-muted small mb-0">Sellable stock, units, colors, VAT, and faulty/broken quantities.</p>
   </div>
   <?php if ($canEdit): ?>
+    <a href="<?php echo $storeUrl; ?>" class="btn btn-outline-secondary btn-sm"><i class="fas fa-box-archive me-1"></i>Store</a>
     <a href="<?php echo $productUrl; ?>" class="btn btn-outline-primary btn-sm"><i class="fas fa-box-open me-1"></i>Record product</a>
     <a href="<?php echo $stockUrl; ?>" class="btn btn-primary btn-sm"><i class="fas fa-boxes-stacked me-1"></i>Record in bulk</a>
   <?php endif; ?>
@@ -114,6 +126,68 @@ ob_start();
   </div>
 </div>
 
+<div class="alert alert-light border small py-2 mb-4">
+  VAT ratio: <strong><?php echo number_format($vatRate, 2); ?>%</strong>
+  <span class="text-muted">(<?php echo htmlspecialchars($vatMode); ?> by default on sales; staff can turn it off at checkout)</span>
+</div>
+
+<?php if ($pendingReturns): ?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
+  <div class="px-4 py-3 d-flex align-items-center justify-content-between" style="background:#fff7ed;border-bottom:1px solid #fed7aa;">
+    <div>
+      <h2 class="h6 fw-bold mb-0"><i class="fas fa-rotate-left me-2 text-warning"></i>Returned products waiting for inventory</h2>
+      <span class="text-muted small"><?php echo count($pendingReturns); ?> return<?php echo count($pendingReturns) !== 1 ? 's' : ''; ?> pending migration</span>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr class="text-muted small text-uppercase">
+          <th>Receipt</th>
+          <th>Product</th>
+          <th class="text-end">Returned</th>
+          <th class="text-end">Used</th>
+          <th class="text-end">Sellable</th>
+          <th>Reason</th>
+          <th>By</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($pendingReturns as $ret):
+            $fmt = fn($n) => rtrim(rtrim(number_format((float) $n, 2), '0'), '.');
+            $canMigrate = !empty($ret['product_id']);
+        ?>
+        <tr>
+          <td class="fw-semibold small"><?php echo htmlspecialchars($ret['receipt_number']); ?></td>
+          <td>
+            <div class="fw-semibold small"><?php echo htmlspecialchars($ret['product_name']); ?></div>
+            <div class="text-muted" style="font-size:.75rem;">Current stock: <?php echo $ret['current_quantity'] !== null ? $fmt($ret['current_quantity']) : 'product missing'; ?></div>
+          </td>
+          <td class="text-end small"><?php echo $fmt($ret['returned_quantity']); ?></td>
+          <td class="text-end small"><?php echo $fmt($ret['used_quantity']); ?></td>
+          <td class="text-end fw-semibold small text-success"><?php echo $fmt($ret['restocked_quantity']); ?></td>
+          <td class="small"><?php echo htmlspecialchars($ret['reason'] ?: '—'); ?></td>
+          <td class="small"><?php echo htmlspecialchars($ret['processed_by_name'] ?? '—'); ?></td>
+          <td class="text-end">
+            <?php if ($canEdit && $canMigrate): ?>
+              <form method="post" class="d-inline">
+                <input type="hidden" name="action" value="migrate_return">
+                <input type="hidden" name="return_id" value="<?php echo (int) $ret['id']; ?>">
+                <button class="btn btn-sm btn-outline-success"><i class="fas fa-arrow-up-from-bracket me-1"></i>Migrate to stock</button>
+              </form>
+            <?php elseif (!$canMigrate): ?>
+              <span class="badge bg-secondary">No product link</span>
+            <?php endif; ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
+<?php endif; ?>
+
 <?php if (!$grouped): ?>
   <div class="card border-0 shadow-sm" style="border-radius:14px;">
     <div class="card-body p-5 text-center text-muted">
@@ -147,6 +221,8 @@ ob_start();
             <th class="text-end">Faulty</th>
             <th class="text-end">Buy</th>
             <th class="text-end">Sell</th>
+            <th class="text-end">VAT</th>
+            <th class="text-end">Credit limit</th>
             <th>Status</th>
             <?php if ($canEdit): ?><th></th><?php endif; ?>
           </tr>
@@ -193,6 +269,10 @@ ob_start();
               <?php else: ?>
                 KES <?php echo number_format($retail, 0); ?>
               <?php endif; ?>
+            </td>
+            <td class="text-end text-muted"><?php echo number_format($vatRate, 2); ?>%</td>
+            <td class="text-end text-muted">
+              <?php echo ($p['credit_limit'] ?? null) !== null && $p['credit_limit'] !== '' ? 'KES ' . number_format((float) $p['credit_limit'], 0) : '—'; ?>
             </td>
             <td>
               <?php if ($p['status'] === 'active'): ?><span class="badge bg-success">Active</span>

@@ -26,13 +26,14 @@ if (!function_exists('navIsActive')) {
     }
 }
 
-// Brand contact details (single source of truth — used here and in the footer).
-$ismanPhone = '072 411 4555';
-$ismanEmail = 'info@isman.co.ke';
-$ismanLoc   = 'Nairobi, Kenya';
-
 // Logo path (falls back to an inline gear mark if the file is missing).
 require_once __DIR__ . '/../../../app/helpers/PathConfig.php';
+require_once __DIR__ . '/../../../app/helpers/ReceiptFooter.php';
+
+// Brand contact details (single source of truth — used here and in the footer).
+$ismanPhone = ReceiptFooter::SHOP_PHONE;
+$ismanEmail = ReceiptFooter::SHOP_EMAIL;
+$ismanLoc   = ReceiptFooter::SHOP_LOCATION;
 
 $logoPath = public_url('assets/images/logo/logo.png');
 $logoExists = isset($_SERVER['DOCUMENT_ROOT'])

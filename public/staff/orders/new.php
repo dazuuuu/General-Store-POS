@@ -4,6 +4,7 @@
 // Place Order (opens a real tab and generates the invoice — payment is a
 // separate step, done later on Payments by whoever has that permission).
 require_once __DIR__ . '/../../../app/app.php';
+require_once ROOT_PATH . '/app/services/emails/order_invoice_email.php';
 PageGuard::capability(Capabilities::SALES_RECORD);
 
 $pdo = Database::pdo();
@@ -12,15 +13,26 @@ $P  = new Models\ProductModel($pdo);
 $C  = new Models\CategoryModel($pdo);
 $BA = new Models\BookAttributeModel($pdo);
 $HO = new Models\HeldOrderModel($pdo);
+$CM = new Models\CustomerModel($pdo);
 $products   = $P->sellable();
 $categories = $C->all(['type' => 'product'], 'name ASC');
 if (!$categories) { $categories = $C->all(['type' => 'subject'], 'name ASC'); }
 $brands     = $BA->all(['type' => 'brand'], 'name ASC');
 if (!$brands) { $brands = $BA->all(['type' => 'publisher'], 'name ASC'); }
+$loyalCustomers = $CM->search('', 200);
+$customerSearchUrl = public_url('api/customers/search.php');
+$tenant = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: [];
+$isStaffViewer = TenantContext::role() === 'staff';
+$ordersViewBase = $isStaffViewer ? public_url('staff/orders/view.php') : public_url('super/orders/view.php');
+$heldBase = $isStaffViewer ? public_url('staff/orders/held.php') : public_url('super/orders/held.php');
 
 $error   = '';
 $cartJson = '[]';
 $customerName = '';
+$customerId = 0;
+$customerEmail = '';
+$customerPhone = '';
+$creditDurationDays = 14;
 $heldOrderId = 0;
 
 // Resuming a held order? Prefill the cart + customer name.
@@ -34,7 +46,11 @@ if ($resumeId > 0) {
         $cart = [];
         foreach ($HO->items($resumeId) as $it) {
             if ($it['product_id'] && in_array((int) $it['product_id'], $validIds, true)) {
-                $cart[] = ['product_id' => (int) $it['product_id'], 'quantity' => (float) $it['quantity']];
+                $cart[] = [
+                    'product_id' => (int) $it['product_id'],
+                    'quantity' => (float) $it['quantity'],
+                    'price_type' => (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                ];
             }
         }
         $cartJson = json_encode($cart);
@@ -46,11 +62,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $cart = json_decode($_POST['cart'] ?? '[]', true);
     $cartJson = $_POST['cart'] ?? '[]';
     $customerName = $_POST['table_name'] ?? '';
+    $customerId = (int) ($_POST['customer_id'] ?? 0);
+    $customerEmail = trim($_POST['customer_email'] ?? '');
+    $customerPhone = trim($_POST['customer_phone'] ?? '');
+    $creditDurationDays = max(0, (int) ($_POST['credit_duration_days'] ?? 0));
     $heldOrderId = (int) ($_POST['held_order_id'] ?? 0);
     if (!is_array($cart)) { $cart = []; }
     $items = [];
     foreach ($cart as $c) {
-        $items[] = ['product_id' => (int) ($c['product_id'] ?? 0), 'quantity' => (float) ($c['quantity'] ?? 0)];
+        $items[] = [
+            'product_id' => (int) ($c['product_id'] ?? 0),
+            'quantity' => (float) ($c['quantity'] ?? 0),
+            'price_type' => (($c['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+        ];
     }
 
     if ($action === 'hold') {
@@ -63,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // A resumed-then-re-held order becomes a new hold; drop the old one.
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
             $_SESSION['flash']['success'] = 'Order held for ' . $customerName . '.';
-            header('Location: ' . public_url('staff/orders/held.php'));
+            header('Location: ' . $heldBase);
             exit;
         }
         $error = $res['errors']['_'] ?? ($res['errors']['customer_name'] ?? 'Could not hold this order.');
@@ -73,7 +97,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($items as $it) {
             $prod = null;
             foreach ($products as $p) { if ((int) $p['id'] === $it['product_id']) { $prod = $p; break; } }
-            if ($prod) { $subtotal += (float) ($prod['retail_price'] ?: $prod['selling_price']) * $it['quantity']; }
+            $lineSaleType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+            if ($prod) { $subtotal += \Pricing::unitPriceForQty($prod, (float) $it['quantity'], $lineSaleType) * $it['quantity']; }
         }
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), round($subtotal, 2));
 
@@ -82,13 +107,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'opened_by'       => TenantContext::userId(),
             'items'           => $items,
             'discount_amount' => $discount,
-            'customer_email'  => trim($_POST['customer_email'] ?? ''),
-            'customer_phone'  => trim($_POST['customer_phone'] ?? ''),
+            'credit_override_amount' => $_POST['credit_override_amount'] ?? 0,
+            'customer_id'     => $customerId,
+            'customer_email'  => $customerEmail,
+            'customer_phone'  => $customerPhone,
+            'credit_duration_days' => $creditDurationDays,
         ]);
         if ($res['ok']) {
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-            $_SESSION['flash']['success'] = 'Tab opened — ' . $res['receipt_number'] . '.';
-            header('Location: ' . public_url('staff/orders/view.php?id=' . $res['order_id']));
+            $opened = (new Models\OrderModel($pdo))->find((int) $res['order_id']);
+            $mailNote = '';
+            if ($opened) {
+                $opened['opened_by_name'] = $_SESSION['username'] ?? '';
+                (new Models\NotificationModel($pdo))->creditSaleCreated($opened, TenantContext::userId());
+                if (!empty($opened['customer_email'])) {
+                    $shop = [
+                        'name' => $tenant['name'] ?? 'the shop',
+                        'phone' => $tenant['phone'] ?? '',
+                        'po_box' => $tenant['po_box'] ?? '',
+                        'email' => $tenant['business_email'] ?? '',
+                        'address' => $tenant['address'] ?? '',
+                        'kra_pin' => $tenant['kra_pin'] ?? '',
+                        'logo' => Branding::tenantLogo($tenant),
+                        'payment_credentials' => $tenant['payment_credentials'] ?? '',
+                    ];
+                    $msg = build_order_invoice_email($opened, (new Models\OrderModel($pdo))->items((int) $res['order_id']), $shop);
+                    $mailNote = (new MailService())->send($opened['customer_email'], $msg['subject'], $msg['html'], $msg['text'])
+                        ? ' Invoice emailed.'
+                        : ' Invoice email failed: ' . (MailService::lastError() ?: 'unknown error');
+                    if (strpos($mailNote, ' Invoice emailed') === 0) {
+                        (new Models\OrderModel($pdo))->markInvoiceSent((int) $res['order_id']);
+                    }
+                }
+            }
+            $_SESSION['flash']['success'] = 'Credit sale opened - ' . $res['receipt_number'] . '.' . $mailNote;
+            header('Location: ' . $ordersViewBase . '?id=' . $res['order_id']);
             exit;
         }
         $error = $res['errors']['_'] ?? ($res['errors']['table_name'] ?? 'Could not open this tab.');
@@ -107,6 +160,7 @@ ob_start();
 <input type="hidden" name="action" id="formAction" value="checkout">
 <input type="hidden" name="cart" id="cartInput" value="">
 <input type="hidden" name="held_order_id" value="<?php echo (int) $heldOrderId; ?>">
+<input type="hidden" name="customer_id" id="customerIdInput" value="<?php echo (int) $customerId; ?>">
 
 <div class="pos-grid">
   <div class="pos-main">
@@ -168,6 +222,10 @@ ob_start();
     <div class="pos-prod-grid" id="productList">
       <?php foreach ($products as $p):
           $price = (float) ($p['retail_price'] ?: $p['selling_price']);
+          $wholesale = (float) ($p['wholesale_price'] ?: $price);
+          $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
+          $packUnit = (string) ($p['pack_unit'] ?? '');
+          $packPrice = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float) $p['pack_price'] : 0;
           $colorBits = !empty($p['colors']) ? (is_array($p['colors']) ? $p['colors'] : []) : [];
           $faulty = (float) ($p['faulty_quantity'] ?? 0);
           $sub = implode(' · ', array_filter([
@@ -179,7 +237,10 @@ ob_start();
           $label = $p['name'] . ($sub ? " ({$sub})" : '');
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
-             data-price="<?php echo $price; ?>" data-stock="<?php echo (float) $p['quantity']; ?>"
+             data-price="<?php echo $price; ?>" data-wholesale="<?php echo $wholesale; ?>" data-stock="<?php echo (float) $p['quantity']; ?>"
+             data-units-per-pack="<?php echo $unitsPerPack; ?>"
+             data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
+             data-pack-price="<?php echo $packPrice; ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -216,17 +277,43 @@ ob_start();
     <div class="pos-customer">
       <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
       <input type="text" name="table_name" id="customerName" class="pos-customer-input" placeholder="Customer name"
-             value="<?php echo htmlspecialchars($customerName); ?>" required>
+             value="<?php echo htmlspecialchars($customerName); ?>" autocomplete="off" required>
+      <div class="customer-suggest-menu" id="customerSuggestMenu"></div>
     </div>
+    <?php if ($loyalCustomers): ?>
+    <div class="mb-2">
+      <label class="form-label small mb-1">Loyal customer</label>
+      <select id="loyalCustomerSelect" class="form-select form-select-sm">
+        <option value="">Choose customer / type manually</option>
+        <?php foreach ($loyalCustomers as $c): ?>
+          <option value="<?php echo (int) $c['id']; ?>"
+                  data-name="<?php echo htmlspecialchars($c['name'], ENT_QUOTES); ?>"
+                  data-email="<?php echo htmlspecialchars($c['email'] ?? '', ENT_QUOTES); ?>"
+                  data-phone="<?php echo htmlspecialchars($c['phone'] ?? '', ENT_QUOTES); ?>"
+                  <?php echo $customerId === (int) $c['id'] ? 'selected' : ''; ?>>
+            <?php echo htmlspecialchars($c['name']); ?><?php echo !empty($c['phone']) ? ' - ' . htmlspecialchars($c['phone']) : ''; ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <?php endif; ?>
 
     <div class="mb-2">
       <button type="button" class="btn btn-sm btn-link p-0" id="creditToggle"><i class="fas fa-envelope me-1"></i>This is a credit sale — add their email/phone</button>
       <div id="creditFields" style="display:none;" class="row g-2 mt-1">
         <div class="col-12">
-          <input type="email" name="customer_email" class="form-control form-control-sm" placeholder="Email (to send the invoice)">
+          <input type="email" name="customer_email" id="customerEmail" class="form-control form-control-sm" placeholder="Email (to send the invoice)" value="<?php echo htmlspecialchars($customerEmail); ?>">
         </div>
         <div class="col-12">
-          <input type="text" name="customer_phone" class="form-control form-control-sm" placeholder="Phone (optional)">
+          <input type="text" name="customer_phone" id="customerPhone" class="form-control form-control-sm" placeholder="Phone (optional)" value="<?php echo htmlspecialchars($customerPhone); ?>">
+        </div>
+        <div class="col-12">
+          <label class="form-label small mb-1">Credit duration</label>
+          <select name="credit_duration_days" class="form-select form-select-sm">
+            <?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?>
+              <option value="<?php echo $days; ?>" <?php echo $creditDurationDays === $days ? 'selected' : ''; ?>><?php echo $label; ?></option>
+            <?php endforeach; ?>
+          </select>
         </div>
       </div>
     </div>
@@ -236,12 +323,25 @@ ob_start();
     </div>
 
     <div class="pos-totals">
+      <div class="d-flex justify-content-between align-items-center py-1">
+        <span>Set cart price</span>
+        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:120px;">
+          <option value="retail">Retail</option>
+          <option value="wholesale">Wholesale</option>
+        </select>
+      </div>
       <div class="d-flex justify-content-between"><span>Sub Total</span><span id="subtotalOut">KES 0</span></div>
       <div class="d-flex justify-content-between align-items-center py-1">
         <span>Discount <span class="text-muted small">(if they negotiate)</span></span>
         <input type="number" step="0.01" min="0" id="discountInput" name="discount_amount" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
       </div>
       <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
+    </div>
+
+    <div class="mt-3">
+      <label class="form-label small mb-1">Loyal customer credit override</label>
+      <input type="number" step="0.01" min="0" name="credit_override_amount" class="form-control form-control-sm" placeholder="Optional higher product limit">
+      <div class="form-text">Use only when a trusted customer is allowed above a product's credit limit.</div>
     </div>
 
     <div class="pos-actions">
@@ -294,10 +394,15 @@ ob_start();
 
 .pos-side{background:#fff;border:1px solid #eef0f4;border-radius:16px;padding:20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow-y:auto;}
 .pos-side-title{font-size:1.1rem;font-weight:800;margin-bottom:14px;}
-.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:6px;}
+.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:6px;position:relative;}
 .pos-customer-icon{width:34px;height:34px;border-radius:50%;background:var(--pos-green-light);color:var(--pos-green);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .pos-customer-input{border:0;background:transparent;flex:1;font-weight:600;font-size:.9rem;}
 .pos-customer-input:focus{outline:none;}
+.customer-suggest-menu{position:absolute;left:12px;right:12px;top:calc(100% + 4px);z-index:70;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:240px;overflow:auto;}
+.customer-suggest-menu.show{display:block;}
+.customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
+.customer-suggest-menu button:hover{background:#f8fafc;}
+.customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
 .pos-cart{max-height:320px;overflow-y:auto;margin:14px 0;}
 .pos-cart-line{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f7;}
 .pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;}
@@ -305,6 +410,7 @@ ob_start();
 .pos-cart-price{color:#9aa0ac;font-size:.76rem;}
 .pos-qty{display:flex;align-items:center;gap:6px;}
 .pos-qty button{width:24px;height:24px;border-radius:6px;border:1px solid #eef0f4;background:#fff;font-weight:700;line-height:1;}
+.pos-qty-input{width:72px;height:28px;border:1px solid #eef0f4;border-radius:7px;text-align:center;font-weight:700;font-size:.82rem;}
 .pos-cart-del{color:#64748b;background:none;border:0;font-size:.85rem;}
 .pos-totals{border-top:1px dashed #eef0f4;padding-top:12px;font-size:.9rem;color:#5b6070;}
 .pos-total-line{font-weight:800;font-size:1.05rem;color:#1f2330;margin-top:6px;}
@@ -325,28 +431,136 @@ var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
     var img = el.querySelector('.pos-card-img img');
     PRODUCTS[el.dataset.id] = {
-        name: el.dataset.name, price: parseFloat(el.dataset.price), stock: parseFloat(el.dataset.stock),
+        name: el.dataset.name,
+        price: parseFloat(el.dataset.price),
+        wholesale: parseFloat(el.dataset.wholesale),
+        stock: parseFloat(el.dataset.stock),
+        unitsPerPack: parseFloat(el.dataset.unitsPerPack) || 1,
+        packUnit: el.dataset.packUnit || '',
+        packPrice: parseFloat(el.dataset.packPrice) || 0,
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
 });
 var cart = {};
-try { (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) { cart[c.product_id] = c.quantity; }); } catch (e) {}
+try {
+    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) {
+        cart[c.product_id] = {
+            qty: parseFloat(c.quantity) || 0,
+            priceType: c.price_type === 'wholesale' ? 'wholesale' : 'retail'
+        };
+    });
+} catch (e) {}
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
+function defaultSaleType() { return document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail'; }
+function lineType(id) { return cart[id] && cart[id].priceType === 'wholesale' ? 'wholesale' : 'retail'; }
+function sellsByPack(p, type) { return type === 'wholesale' && p.packUnit && p.unitsPerPack > 1 && p.packPrice > 0; }
+function saleStockQty(p, saleQty, type) { return sellsByPack(p, type) ? saleQty * p.unitsPerPack : saleQty; }
+function maxSaleQty(p, type) { return sellsByPack(p, type) ? Math.floor((p.stock / p.unitsPerPack) * 100) / 100 : p.stock; }
+function saleUnitLabel(p, type) { return sellsByPack(p, type) ? p.packUnit : ''; }
+function productPrice(p, type) { return sellsByPack(p, type) ? p.packPrice : (type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price); }
+var CUSTOMER_SEARCH_URL = <?php echo json_encode($customerSearchUrl); ?>;
+var loyalSelect = document.getElementById('loyalCustomerSelect');
+function fillCustomer(c) {
+    document.getElementById('customerIdInput').value = c.id || '';
+    document.getElementById('customerName').value = c.name || '';
+    document.getElementById('customerEmail').value = c.email || '';
+    document.getElementById('customerPhone').value = c.phone || '';
+    document.getElementById('creditFields').style.display = 'flex';
+    if (loyalSelect) loyalSelect.value = String(c.id || '');
+}
+function attachCustomerLookup() {
+    var input = document.getElementById('customerName');
+    var menu = document.getElementById('customerSuggestMenu');
+    var hidden = document.getElementById('customerIdInput');
+    if (!input || !menu || !hidden) return;
+    var timer = null, pickedName = '';
+    function hide(){ menu.classList.remove('show'); }
+    function render(items) {
+        menu.innerHTML = '';
+        if (!items.length) { hide(); return; }
+        items.forEach(function(c){
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.innerHTML = '<strong>' + (c.name || '') + '</strong><span class="meta">' + [c.phone, c.email, c.company_name].filter(Boolean).join(' · ') + '</span>';
+            b.addEventListener('mousedown', function(e){
+                e.preventDefault();
+                pickedName = c.name || '';
+                fillCustomer(c);
+                hide();
+            });
+            menu.appendChild(b);
+        });
+        menu.classList.add('show');
+    }
+    input.addEventListener('input', function(){
+        if (pickedName && input.value !== pickedName) {
+            hidden.value = '';
+            pickedName = '';
+            if (loyalSelect) loyalSelect.value = '';
+        }
+        clearTimeout(timer);
+        var q = input.value.trim();
+        if (!q) { hide(); return; }
+        timer = setTimeout(function(){
+            fetch(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8')
+                .then(function(r){ return r.json(); })
+                .then(function(data){ render(data.items || []); })
+                .catch(function(){});
+        }, 180);
+    });
+    input.addEventListener('blur', function(){ setTimeout(hide, 160); });
+}
+if (loyalSelect) {
+    loyalSelect.addEventListener('change', function () {
+        var opt = loyalSelect.options[loyalSelect.selectedIndex];
+        document.getElementById('customerIdInput').value = loyalSelect.value || '';
+        if (loyalSelect.value && opt) {
+            fillCustomer({id: loyalSelect.value, name: opt.dataset.name || '', email: opt.dataset.email || '', phone: opt.dataset.phone || ''});
+        }
+    });
+    document.getElementById('customerName').addEventListener('input', function () {
+        if (!loyalSelect.value) return;
+        var opt = loyalSelect.options[loyalSelect.selectedIndex];
+        if (opt && this.value !== (opt.dataset.name || '')) {
+            loyalSelect.value = '';
+            document.getElementById('customerIdInput').value = '';
+        }
+    });
+}
+attachCustomerLookup();
 
 function setQty(id, val) {
     var p = PRODUCTS[id]; if (!p) return;
-    val = Math.round(val);
+    var type = lineType(id);
+    val = Math.round((parseFloat(val) || 0) * 100) / 100;
     if (val <= 0) { delete cart[id]; render(); return; }
-    if (val > p.stock) { val = p.stock; }
-    cart[id] = val;
+    var max = maxSaleQty(p, type);
+    if (val > max) { val = max; }
+    cart[id] = { qty: val, priceType: type };
     render();
 }
-function add(id) { setQty(id, (cart[id] || 0) + 1); }
+function add(id) {
+    if (!cart[id]) { cart[id] = { qty: 0, priceType: defaultSaleType() }; }
+    setQty(id, cart[id].qty + 1);
+}
+function setLineType(id, type) {
+    var p = PRODUCTS[id];
+    if (!p || !cart[id]) return;
+    var oldType = lineType(id);
+    var nextType = type === 'wholesale' ? 'wholesale' : 'retail';
+    var stockQty = saleStockQty(p, cart[id].qty, oldType);
+    cart[id].priceType = nextType;
+    cart[id].qty = sellsByPack(p, nextType) ? Math.floor((stockQty / p.unitsPerPack) * 100) / 100 : stockQty;
+    var max = maxSaleQty(p, nextType);
+    if (cart[id].qty > max) cart[id].qty = max;
+    if (cart[id].qty <= 0) delete cart[id];
+    render();
+}
 
 function updateTotals() {
     var sub = 0;
-    Object.keys(cart).forEach(function (id) { sub += PRODUCTS[id].price * cart[id]; });
+    Object.keys(cart).forEach(function (id) { sub += productPrice(PRODUCTS[id], lineType(id)) * cart[id].qty; });
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
     if (d < 0) d = 0;
     if (d > sub) d = sub;
@@ -359,18 +573,21 @@ function render() {
     wrap.innerHTML = '';
     if (!ids.length) { wrap.innerHTML = '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it.</div>'; }
     ids.forEach(function (id) {
-        var p = PRODUCTS[id], qty = cart[id];
+        var p = PRODUCTS[id], qty = cart[id].qty, type = lineType(id);
+        var unit = saleUnitLabel(p, type);
+        var max = maxSaleQty(p, type);
         var line = document.createElement('div');
         line.className = 'pos-cart-line';
         line.innerHTML =
             (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
           + '<div class="flex-grow-1">'
           +   '<div class="pos-cart-name">' + p.name + '</div>'
-          +   '<div class="pos-cart-price">' + money(p.price) + '</div>'
+          +   '<div class="pos-cart-price">' + money(productPrice(p, type)) + (unit ? ' / ' + unit : '') + '</div>'
+          +   '<select class="form-select form-select-sm mt-1 pos-price-type" data-price-type="' + id + '"><option value="retail"' + (type === 'retail' ? ' selected' : '') + '>Retail</option><option value="wholesale"' + (type === 'wholesale' ? ' selected' : '') + '>Wholesale</option></select>'
           + '</div>'
           + '<div class="pos-qty">'
           +   '<button type="button" data-dec="' + id + '">−</button>'
-          +   '<span>' + qty + '</span>'
+          +   '<input type="number" step="0.01" min="0" max="' + max + '" class="pos-qty-input" data-qty="' + id + '" value="' + qty + '">'
           +   '<button type="button" data-inc="' + id + '">+</button>'
           + '</div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
@@ -378,10 +595,41 @@ function render() {
     });
     document.getElementById('holdBtn').disabled = ids.length === 0;
     document.getElementById('checkoutBtn').disabled = ids.length === 0;
-    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) { return { product_id: parseInt(id, 10), quantity: cart[id] }; }));
+    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) {
+        return { product_id: parseInt(id, 10), quantity: saleStockQty(PRODUCTS[id], cart[id].qty, lineType(id)), price_type: lineType(id) };
+    }));
+    updateTotals();
+}
+function syncTypedQty(input) {
+    var id = input.dataset.qty;
+    var p = PRODUCTS[id]; if (!p) return;
+    var val = Math.round((parseFloat(input.value) || 0) * 100) / 100;
+    var max = maxSaleQty(p, lineType(id));
+    if (val > max) { val = max; input.value = val; }
+    if (val > 0) { cart[id].qty = val; } else { delete cart[id]; }
+    var ids = Object.keys(cart);
+    document.getElementById('holdBtn').disabled = ids.length === 0;
+    document.getElementById('checkoutBtn').disabled = ids.length === 0;
+    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (cid) {
+        return { product_id: parseInt(cid, 10), quantity: saleStockQty(PRODUCTS[cid], cart[cid].qty, lineType(cid)), price_type: lineType(cid) };
+    }));
     updateTotals();
 }
 document.getElementById('discountInput').addEventListener('input', updateTotals);
+document.getElementById('saleType').addEventListener('change', function () {
+    var type = defaultSaleType();
+    Object.keys(cart).forEach(function (id) {
+        if (!cart[id] || !PRODUCTS[id]) return;
+        var oldType = lineType(id);
+        var stockQty = saleStockQty(PRODUCTS[id], cart[id].qty, oldType);
+        cart[id].priceType = type;
+        cart[id].qty = sellsByPack(PRODUCTS[id], type) ? Math.floor((stockQty / PRODUCTS[id].unitsPerPack) * 100) / 100 : stockQty;
+        var max = maxSaleQty(PRODUCTS[id], type);
+        if (cart[id].qty > max) cart[id].qty = max;
+        if (cart[id].qty <= 0) delete cart[id];
+    });
+    render();
+});
 document.getElementById('creditToggle').addEventListener('click', function () {
     var box = document.getElementById('creditFields');
     box.style.display = box.style.display === 'none' ? 'flex' : 'none';
@@ -393,8 +641,27 @@ document.querySelectorAll('.pos-card .pos-add').forEach(function (b) {
 document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
     if (t.dataset.inc) add(t.dataset.inc);
-    else if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] || 0) - 1);
+    else if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] ? cart[t.dataset.dec].qty : 0) - 1);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
+});
+document.getElementById('cartRows').addEventListener('change', function (e) {
+    var priceType = e.target.closest('[data-price-type]');
+    if (priceType) {
+        setLineType(priceType.dataset.priceType, priceType.value);
+        return;
+    }
+    var input = e.target.closest('[data-qty]');
+    if (input) setQty(input.dataset.qty, input.value);
+});
+document.getElementById('cartRows').addEventListener('input', function (e) {
+    var input = e.target.closest('[data-qty]');
+    if (input) syncTypedQty(input);
+});
+document.getElementById('cartRows').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.closest('[data-qty]')) {
+        e.preventDefault();
+        e.target.blur();
+    }
 });
 
 var searchInput = document.getElementById('search');
@@ -477,7 +744,7 @@ if (barcodeScan) {
         var id = BARCODES[code];
         if (!id) { flashScan('No product with that barcode.', false); return; }
         var p = PRODUCTS[id];
-        if (p && p.stock <= (cart[id] || 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
+        if (p && maxSaleQty(p, cart[id] ? lineType(id) : defaultSaleType()) <= (cart[id] ? cart[id].qty : 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
         add(id);
         flashScan((p ? p.name : 'Book') + ' added.', true);
     });
@@ -492,4 +759,4 @@ render();
 <?php endif; ?>
 <?php
 $content = ob_get_clean();
-include __DIR__ . '/../../templates/staff/layout.php';
+include __DIR__ . '/../../templates/' . ($isStaffViewer ? 'staff' : 'tenants') . '/layout.php';

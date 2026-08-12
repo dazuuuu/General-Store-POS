@@ -60,7 +60,7 @@ class StockIntakeModel extends Model
             $intakeId = (int) $db->lastInsertId();
 
             $bump = $db->prepare(
-                'UPDATE products SET quantity = quantity + ?, buying_price = ? WHERE id = ? AND tenant_id = ?'
+                'UPDATE products SET quantity = quantity + ?, buying_price = ?, unit = ?, units_per_pack = ?, pack_unit = ?, pack_price = ? WHERE id = ? AND tenant_id = ?'
             );
 
             foreach ($items as $i) {
@@ -70,6 +70,10 @@ class StockIntakeModel extends Model
                     return ['ok' => false, 'intake_id' => null, 'errors' => ['_' => 'Every product needs a quantity greater than zero.']];
                 }
                 $buying = (float) ($i['buying_price'] ?? 0);
+                $unit = $i['unit'] ?? 'piece';
+                $unitsPerPackage = max(0.01, (float) ($i['units_per_package'] ?? $i['units_per_pack'] ?? 1));
+                $packageUnit = trim((string) ($i['package_unit'] ?? '')) ?: null;
+                $packagePrice = ($i['package_price'] ?? '') !== '' ? max(0, (float) $i['package_price']) : null;
 
                 if (($i['mode'] ?? '') === 'restock') {
                     $productId = (int) ($i['product_id'] ?? 0);
@@ -78,7 +82,7 @@ class StockIntakeModel extends Model
                         $db->rollBack();
                         return ['ok' => false, 'intake_id' => null, 'errors' => ['_' => 'One of the selected products was not found.']];
                     }
-                    $bump->execute([$qty, $buying, $productId, $tid]);
+                    $bump->execute([$qty, $buying, $unit, $unitsPerPackage, $packageUnit, $packagePrice, $productId, $tid]);
                     $productName = $prod['name'];
                     $faulty = max(0, (float) ($i['faulty_quantity'] ?? 0));
                     if ($faulty > 0) {
@@ -101,6 +105,9 @@ class StockIntakeModel extends Model
                         'barcode'         => $i['barcode'] ?? '',
                         'supplier_id'     => $supplierId,
                         'unit'            => $i['unit'] ?? 'piece',
+                        'units_per_pack'  => $unitsPerPackage,
+                        'pack_unit'       => $packageUnit,
+                        'pack_price'      => $packagePrice,
                         'size_value'      => $i['size_value'] ?? '',
                         'size_unit'       => $i['size_unit'] ?? '',
                         'colors'          => $i['colors'] ?? [],
@@ -127,14 +134,18 @@ class StockIntakeModel extends Model
                 $remark = trim((string) ($i['remark'] ?? ''));
                 try {
                     $insItem = $db->prepare(
-                        'INSERT INTO stock_intake_items (tenant_id, stock_intake_id, product_id, product_name, quantity, faulty_quantity, unit, colors, buying_price, remark)
-                         VALUES (?,?,?,?,?,?,?,?,?,?)'
+                        'INSERT INTO stock_intake_items (tenant_id, stock_intake_id, product_id, product_name, quantity, faulty_quantity, unit, colors, package_unit, package_quantity, units_per_package, package_price, buying_price, remark)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
                     );
                     $insItem->execute([
                         $tid, $intakeId, $productId, $productName, $qty,
                         max(0, (float) ($i['faulty_quantity'] ?? 0)),
                         $i['unit'] ?? null,
                         is_array($i['colors'] ?? null) ? implode(', ', $i['colors']) : ($i['colors'] ?? null),
+                        $packageUnit,
+                        ($i['package_quantity'] ?? '') !== '' ? max(0, (float) $i['package_quantity']) : null,
+                        $unitsPerPackage,
+                        $packagePrice,
                         $buying,
                         $remark !== '' ? $remark : null,
                     ]);
@@ -220,6 +231,10 @@ class StockIntakeModel extends Model
         $this->ensureColumn('stock_intake_items', 'faulty_quantity', "ALTER TABLE stock_intake_items ADD COLUMN faulty_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER quantity");
         $this->ensureColumn('stock_intake_items', 'unit', "ALTER TABLE stock_intake_items ADD COLUMN unit VARCHAR(20) NULL AFTER faulty_quantity");
         $this->ensureColumn('stock_intake_items', 'colors', "ALTER TABLE stock_intake_items ADD COLUMN colors VARCHAR(255) NULL AFTER unit");
+        $this->ensureColumn('stock_intake_items', 'package_unit', "ALTER TABLE stock_intake_items ADD COLUMN package_unit VARCHAR(20) NULL AFTER colors");
+        $this->ensureColumn('stock_intake_items', 'package_quantity', "ALTER TABLE stock_intake_items ADD COLUMN package_quantity DECIMAL(12,2) NULL AFTER package_unit");
+        $this->ensureColumn('stock_intake_items', 'units_per_package', "ALTER TABLE stock_intake_items ADD COLUMN units_per_package DECIMAL(12,2) NULL AFTER package_quantity");
+        $this->ensureColumn('stock_intake_items', 'package_price', "ALTER TABLE stock_intake_items ADD COLUMN package_price DECIMAL(12,2) NULL AFTER units_per_package");
     }
 
     private function ensureTable(string $table, string $sql): void

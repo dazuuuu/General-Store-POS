@@ -3,15 +3,23 @@
 // either Hold it, or Checkout → Pay Now (paid immediately, no invoice/tab —
 // that's what Orders is for, for customers staying to drink).
 require_once __DIR__ . '/../../../app/app.php';
-PageGuard::staff();
+PageGuard::capability(Capabilities::SALES_RECORD);
 
 $pdo = Database::pdo();
 $canSell = TenantContext::can(Capabilities::SALES_RECORD);
+$isSuperShop = TenantContext::role() !== 'staff';
+$shopUrl = $isSuperShop ? public_url('super/shop/') : public_url('staff/dashboard/');
+$receiptBase = $isSuperShop ? public_url('super/orders/receipt.php') : public_url('staff/orders/receipt.php');
+$ordersBase = $isSuperShop ? public_url('super/orders/') : public_url('staff/orders/');
+$paymentsUrl = $isSuperShop ? public_url('super/payments/') : public_url('staff/payments/');
+$bulkUrl = $isSuperShop ? public_url('super/bulk/') : public_url('staff/bulk/');
+$documentsUrl = $isSuperShop ? public_url('super/documents/') : public_url('staff/documents/');
+$layoutName = $isSuperShop ? 'tenants' : 'staff';
 
 if (!$canSell) {
     // No selling permission — a light landing page instead of the POS screen.
     $__tenant = (new Models\TenantModel($pdo))->find(TenantContext::tenantId());
-    $page_title = 'Home';
+    $page_title = $isSuperShop ? 'Shop' : 'Home';
     $who = $_SESSION['username'] ?? 'there';
     ob_start();
     ?>
@@ -21,14 +29,14 @@ if (!$canSell) {
         <p class="text-muted mb-0">
           You're signed in at <strong><?php echo htmlspecialchars($__tenant['name'] ?? 'your shop'); ?></strong>.
           <?php if (TenantContext::can(Capabilities::PAYMENTS_PROCESS)): ?>
-            Use <a href="<?php echo public_url('staff/payments/'); ?>">Payments</a> to settle invoices.
+            Use <a href="<?php echo $paymentsUrl; ?>">Payments</a> to settle invoices.
           <?php endif; ?>
         </p>
       </div>
     </div>
     <?php
     $content = ob_get_clean();
-    include __DIR__ . '/../../templates/staff/layout.php';
+    include __DIR__ . '/../../templates/' . $layoutName . '/layout.php';
     exit;
 }
 
@@ -47,12 +55,17 @@ $categories = $C->all(['type' => 'product'], 'name ASC');
 if (!$categories) { $categories = $C->all(['type' => 'subject'], 'name ASC'); }
 $brands     = $BA->all(['type' => 'brand'], 'name ASC');
 if (!$brands) { $brands = $BA->all(['type' => 'publisher'], 'name ASC'); }
+$customerSearchUrl = public_url('api/customers/search.php');
+$cardTypes  = PaymentOptions::cardTypes();
+$banks      = PaymentOptions::kenyaBanks();
+$saccos     = PaymentOptions::kenyaSaccos();
 $byId = [];
 foreach ($products as $p) { $byId[(int) $p['id']] = $p; }
 
 $error = '';
 $cartJson = '[]';
-$customerName = 'Walk-in Customer';
+$customerName = '';
+$customerId = 0;
 $heldOrderId = 0;
 
 $resumeId = (int) ($_GET['resume'] ?? 0);
@@ -64,7 +77,11 @@ if ($resumeId > 0) {
         $cart = [];
         foreach ($HO->items($resumeId) as $it) {
             if ($it['product_id'] && isset($byId[(int) $it['product_id']])) {
-                $cart[] = ['product_id' => (int) $it['product_id'], 'quantity' => (float) $it['quantity']];
+                $cart[] = [
+                    'product_id' => (int) $it['product_id'],
+                    'quantity' => (float) $it['quantity'],
+                    'price_type' => (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                ];
             }
         }
         $cartJson = json_encode($cart);
@@ -75,19 +92,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'pay';
     $cart = json_decode($_POST['cart'] ?? '[]', true);
     $cartJson = $_POST['cart'] ?? '[]';
-    $customerName = trim($_POST['table_name'] ?? '') !== '' ? trim($_POST['table_name']) : 'Walk-in Customer';
+    $customerName = trim((string) ($_POST['table_name'] ?? ''));
+    $customerId = (int) ($_POST['customer_id'] ?? 0);
     $heldOrderId = (int) ($_POST['held_order_id'] ?? 0);
     if (!is_array($cart)) { $cart = []; }
     $items = [];
     foreach ($cart as $c) {
-        $items[] = ['product_id' => (int) ($c['product_id'] ?? 0), 'quantity' => (float) ($c['quantity'] ?? 0)];
+        $items[] = [
+            'product_id' => (int) ($c['product_id'] ?? 0),
+            'quantity' => (float) ($c['quantity'] ?? 0),
+            'price_type' => (($c['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+        ];
     }
 
     if ($action === 'hold') {
         $res = $HO->hold(['customer_name' => $customerName, 'staff_id' => TenantContext::userId(), 'items' => $items]);
         if ($res['ok']) {
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-            $_SESSION['flash']['success'] = 'Sale held for ' . $customerName . '.';
+            $_SESSION['flash']['success'] = 'Sale held' . ($customerName !== '' ? ' for ' . $customerName : '') . '.';
             header('Location: ' . public_url('staff/orders/held.php'));
             exit;
         }
@@ -100,12 +122,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $subtotal = 0.0;
         foreach ($items as $it) {
             $prod = $byId[$it['product_id']] ?? null;
-            if ($prod) { $subtotal += (float) ($prod['retail_price'] ?: $prod['selling_price']) * $it['quantity']; }
+            $lineSaleType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+            if ($prod) { $subtotal += Pricing::unitPriceForQty($prod, (float) $it['quantity'], $lineSaleType) * $it['quantity']; }
         }
         $subtotal = round($subtotal, 2);
         // Negotiated discount — clamp so a typo can't produce a negative total.
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), $subtotal);
-        $saleType = (($_POST['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
         $postVatRate = max(0, round((float) ($_POST['vat_rate'] ?? $vatRate), 2));
         $postVatInc = array_key_exists('vat_inclusive', $_POST) ? (bool) (int) $_POST['vat_inclusive'] : $vatInclusive;
         $priced = Pricing::totals($subtotal, $discount, $postVatRate, $postVatInc);
@@ -114,7 +136,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $tendered = round((float) ($_POST['amount_tendered'] ?? 0), 2);
         $cashAmt  = round((float) ($_POST['cash_amount'] ?? 0), 2);
         $mpesaAmt = round((float) ($_POST['mpesa_amount'] ?? 0), 2);
-        $allowedPay = ['cash', 'mpesa', 'split', 'card', 'bank', 'credit'];
+        $provider = trim((string) ($_POST['payment_provider'] ?? ''));
+        $accountName = trim((string) ($_POST['payment_account_name'] ?? ''));
+        $reference = trim((string) ($_POST['payment_reference'] ?? ''));
+        $allowedPay = ['cash', 'mpesa', 'split', 'card', 'bank', 'sacco', 'credit'];
 
         if (!$items) {
             $error = 'Add at least one item.';
@@ -135,32 +160,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'discount_amount' => $discount,
                 'vat_rate' => $postVatRate,
                 'vat_inclusive' => $postVatInc,
-                'sale_type' => $saleType,
+                'sale_type' => 'retail',
+                'customer_id' => $customerId,
             ]);
             if (!$openRes['ok']) {
                 $error = $openRes['errors']['_'] ?? 'Could not record this sale.';
             } else {
                 $payRes = $OR->markPaid($openRes['order_id'], [
-                    'method' => $method, 'cash_amount' => $cashAmt, 'mpesa_amount' => $mpesaAmt, 'amount_tendered' => $tendered,
+                    'method' => $method,
+                    'cash_amount' => $cashAmt,
+                    'mpesa_amount' => $mpesaAmt,
+                    'amount_tendered' => $tendered,
+                    'provider' => $provider,
+                    'account_name' => $accountName,
+                    'reference' => $reference,
                 ], TenantContext::userId());
                 if ($payRes['ok']) {
                     if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-                    $_SESSION['flash']['success'] = 'Sale recorded — ' . $openRes['receipt_number'] . '.';
-                    header('Location: ' . public_url('staff/orders/receipt.php?id=' . $openRes['order_id']));
+                    if ($isSuperShop) {
+                        header('Location: ' . $receiptBase . '?id=' . (int) $openRes['order_id'] . '&print=1&return=shop');
+                        exit;
+                    }
+                    $_SESSION['flash']['sale_success'] = [
+                        'receipt' => $openRes['receipt_number'],
+                        'order_id' => (int) $openRes['order_id'],
+                    ];
+                    header('Location: ' . $shopUrl);
                     exit;
                 }
-                // Rare: opened fine but settling failed. It's now a normal open
-                // tab, recoverable from Credit sales/Payments — not lost.
-                $error = ($payRes['error'] ?? 'Could not complete the payment.') . ' The sale was saved as a credit sale — settle it from Payments.';
+                $OR->void((int) $openRes['order_id'], TenantContext::userId());
+                $error = $payRes['error'] ?? 'Could not complete the payment. No stock was deducted.';
             }
         }
     }
 }
 
-$page_title = 'Home';
+$page_title = $isSuperShop ? 'Shop' : 'Home';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+
+<?php if ($isSuperShop): ?>
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <a class="btn btn-sm btn-outline-primary" href="<?php echo $bulkUrl; ?>"><i class="fas fa-boxes-stacked me-1"></i>Bulk sale</a>
+  <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-file-invoice-dollar me-1"></i>Credit sales</a>
+  <a class="btn btn-sm btn-outline-secondary" href="<?php echo $documentsUrl; ?>"><i class="fas fa-file-lines me-1"></i>Documents</a>
+  <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+  <?php if (TenantContext::can(Capabilities::STOCK_ENTER)): ?>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/stationery/new.php'); ?>"><i class="fas fa-box-open me-1"></i>Record product</a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/stock/new.php'); ?>"><i class="fas fa-boxes-stacked me-1"></i>Record stock in bulk</a>
+  <?php endif; ?>
+</div>
+<?php endif; ?>
 
 <?php if (!$products): ?>
   <div class="alert alert-warning">No products in stock to sell. Ask the owner to record stock first.</div>
@@ -173,6 +224,10 @@ ob_start();
 <input type="hidden" name="amount_tendered" id="amountTendered" value="">
 <input type="hidden" name="cash_amount" id="cashAmount" value="">
 <input type="hidden" name="mpesa_amount" id="mpesaAmount" value="">
+<input type="hidden" name="payment_provider" id="paymentProvider" value="">
+<input type="hidden" name="payment_account_name" id="paymentAccountName" value="">
+<input type="hidden" name="payment_reference" id="paymentReference" value="">
+<input type="hidden" name="customer_id" id="customerIdInput" value="<?php echo (int) $customerId; ?>">
 
 <div class="pos-grid">
   <div class="pos-main">
@@ -234,6 +289,10 @@ ob_start();
     <div class="pos-prod-grid" id="productList">
       <?php foreach ($products as $p):
           $price = (float) ($p['retail_price'] ?: $p['selling_price']);
+          $wholesale = (float) ($p['wholesale_price'] ?: $price);
+          $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
+          $packUnit = (string) ($p['pack_unit'] ?? '');
+          $packPrice = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float) $p['pack_price'] : 0;
           $colorBits = !empty($p['colors']) ? (is_array($p['colors']) ? $p['colors'] : []) : [];
           $faulty = (float) ($p['faulty_quantity'] ?? 0);
           $sub = implode(' · ', array_filter([
@@ -245,7 +304,11 @@ ob_start();
           $label = $p['name'] . ($sub ? " ({$sub})" : '');
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
-             data-price="<?php echo $price; ?>" data-stock="<?php echo (float) $p['quantity']; ?>"
+             data-price="<?php echo $price; ?>" data-wholesale="<?php echo $wholesale; ?>"
+             data-stock="<?php echo (float) $p['quantity']; ?>"
+             data-units-per-pack="<?php echo $unitsPerPack; ?>"
+             data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
+             data-pack-price="<?php echo $packPrice; ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -278,7 +341,8 @@ ob_start();
     <h2 class="pos-side-title">Sale Details</h2>
     <div class="pos-customer">
       <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
-      <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>">
+      <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>" autocomplete="off" placeholder="Search customer">
+      <div class="customer-suggest-menu" id="customerSuggestMenu"></div>
     </div>
     <div class="pos-cart" id="cartRows"><div class="text-muted small text-center py-4">Tap a product to add it.</div></div>
 
@@ -293,7 +357,13 @@ ob_start();
         <span id="vatOut">KES 0</span>
       </div>
       <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Sale type</span>
+        <label class="form-check-label small" for="vatEnabledInput">Apply VAT</label>
+        <div class="form-check form-switch m-0">
+          <input class="form-check-input" type="checkbox" id="vatEnabledInput" <?php echo $vatRate > 0 ? 'checked' : ''; ?>>
+        </div>
+      </div>
+      <div class="d-flex justify-content-between align-items-center py-1">
+        <span>Set cart price</span>
         <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:120px;">
           <option value="retail">Retail</option>
           <option value="wholesale">Wholesale</option>
@@ -320,6 +390,8 @@ ob_start();
         <label class="btn btn-outline-dark btn-sm" for="pmCard"><i class="fas fa-credit-card me-1"></i>Card</label>
         <input type="radio" class="btn-check" name="pm" id="pmBank" value="bank">
         <label class="btn btn-outline-secondary btn-sm" for="pmBank"><i class="fas fa-building-columns me-1"></i>Bank</label>
+        <input type="radio" class="btn-check" name="pm" id="pmSacco" value="sacco">
+        <label class="btn btn-outline-secondary btn-sm" for="pmSacco"><i class="fas fa-landmark me-1"></i>SACCO</label>
         <input type="radio" class="btn-check" name="pm" id="pmSplit" value="split">
         <label class="btn btn-outline-secondary btn-sm" for="pmSplit"><i class="fas fa-divide me-1"></i>Split</label>
       </div>
@@ -331,6 +403,39 @@ ob_start();
         <div class="col-6"><label class="form-label small mb-1">Cash portion</label><input type="number" step="0.01" min="0" id="cashPortionInput" class="form-control form-control-sm"></div>
         <div class="col-6"><label class="form-label small mb-1">M-Pesa portion</label><input type="number" step="0.01" min="0" id="mpesaPortionInput" class="form-control form-control-sm"></div>
       </div>
+      <div id="mpesaBox" style="display:none;" class="row g-2 mb-2">
+        <div class="col-12">
+          <label class="form-label small mb-1">Name shown on M-Pesa</label>
+          <input type="text" id="mpesaNameInput" class="form-control form-control-sm" placeholder="Optional">
+        </div>
+      </div>
+      <div id="cardBox" style="display:none;" class="row g-2 mb-2">
+        <div class="col-12">
+          <label class="form-label small mb-1">Card type</label>
+          <select id="cardTypeInput" class="form-select form-select-sm">
+            <option value="">Choose card type</option>
+            <?php foreach ($cardTypes as $type): ?><option value="<?php echo htmlspecialchars($type); ?>"><?php echo htmlspecialchars($type); ?></option><?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div id="bankBox" style="display:none;" class="row g-2 mb-2">
+        <div class="col-12">
+          <label class="form-label small mb-1">Bank</label>
+          <input type="text" id="bankInput" class="form-control form-control-sm" list="kenyaBanks" placeholder="Choose or type bank">
+        </div>
+      </div>
+      <div id="saccoBox" style="display:none;" class="row g-2 mb-2">
+        <div class="col-12">
+          <label class="form-label small mb-1">SACCO</label>
+          <input type="text" id="saccoInput" class="form-control form-control-sm" list="kenyaSaccos" placeholder="Choose or type SACCO">
+        </div>
+      </div>
+      <div id="referenceBox" style="display:none;" class="row g-2 mb-2">
+        <div class="col-12">
+          <label class="form-label small mb-1">Transaction reference</label>
+          <input type="text" id="referenceInput" class="form-control form-control-sm" placeholder="Optional">
+        </div>
+      </div>
       <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
         <span class="text-muted small">Total Payable</span>
         <span class="fw-bold fs-5" id="payableOut">KES 0</span>
@@ -341,12 +446,42 @@ ob_start();
 </div>
 </form>
 
+<datalist id="kenyaBanks">
+  <?php foreach ($banks as $bank): ?><option value="<?php echo htmlspecialchars($bank); ?>"></option><?php endforeach; ?>
+</datalist>
+<datalist id="kenyaSaccos">
+  <?php foreach ($saccos as $sacco): ?><option value="<?php echo htmlspecialchars($sacco); ?>"></option><?php endforeach; ?>
+</datalist>
+
+<?php if (!empty($_SESSION['flash']['sale_success'])):
+    $saleFlash = $_SESSION['flash']['sale_success'];
+    unset($_SESSION['flash']['sale_success']);
+    $saleOrderId = (int) ($saleFlash['order_id'] ?? 0);
+    $receiptUrl = $receiptBase . '?id=' . $saleOrderId;
+    $printReceiptUrl = $receiptUrl . '&print=1&return=shop';
+?>
+<div class="modal fade" id="saleSuccessModal" tabindex="-1" aria-hidden="true" data-print-url="<?php echo htmlspecialchars($printReceiptUrl, ENT_QUOTES); ?>">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content border-0" style="border-radius:14px;">
+      <div class="modal-body text-center p-4">
+        <div class="mx-auto mb-3 d-flex align-items-center justify-content-center" style="width:52px;height:52px;border-radius:50%;background:var(--pos-green-light);color:var(--pos-green);"><i class="fas fa-check"></i></div>
+        <h2 class="h6 fw-bold mb-1">Sale recorded</h2>
+        <p class="text-muted small mb-3"><?php echo htmlspecialchars($saleFlash['receipt'] ?? 'Receipt'); ?></p>
+        <a id="printReceiptBtn" class="btn btn-sm btn-primary w-100 mb-2" href="<?php echo htmlspecialchars($printReceiptUrl); ?>" target="_blank" rel="noopener"><i class="fas fa-print me-1"></i>Print receipt</a>
+        <a class="btn btn-sm btn-outline-secondary w-100 mb-2" href="<?php echo htmlspecialchars($receiptUrl); ?>" target="_blank" rel="noopener">Open receipt</a>
+        <button type="button" class="btn btn-sm btn-success w-100" data-bs-dismiss="modal">Continue selling</button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <style>
 .pos-grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;}
 .pos-search{position:relative;margin-bottom:14px;}
 .pos-search i{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#b7bac3;}
 .pos-search input{width:100%;padding:12px 14px 12px 40px;border:1px solid #eef0f4;border-radius:12px;background:#fff;font-size:.92rem;}
-.pos-search input:focus{outline:none;border-color:var(--pos-green);box-shadow:0 0 0 .2rem rgba(22,163,74,.1);}
+.pos-search input:focus{outline:none;border-color:var(--pos-green);box-shadow:0 0 0 .2rem rgba(75,0,110,.14);}
 .pos-scan input{border-color:var(--pos-green-light);background:var(--pos-green-light);}
 .pos-scan i{color:var(--pos-green);}
 .pos-dim-tabs{display:flex;gap:8px;margin-bottom:12px;}
@@ -381,11 +516,17 @@ ob_start();
 .pos-add:hover{background:var(--pos-green-dark);}
 
 .pos-side{background:#fff;border:1px solid #eef0f4;border-radius:16px;padding:20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow-y:auto;}
+.pos-side.pay-open{max-height:none;overflow:visible;}
 .pos-side-title{font-size:1.1rem;font-weight:800;margin-bottom:14px;}
-.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:6px;}
+.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:6px;position:relative;}
 .pos-customer-icon{width:34px;height:34px;border-radius:50%;background:var(--pos-green-light);color:var(--pos-green);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .pos-customer-input{border:0;background:transparent;flex:1;font-weight:600;font-size:.9rem;}
 .pos-customer-input:focus{outline:none;}
+.customer-suggest-menu{position:absolute;left:12px;right:12px;top:calc(100% + 4px);z-index:70;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:240px;overflow:auto;}
+.customer-suggest-menu.show{display:block;}
+.customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
+.customer-suggest-menu button:hover{background:#f8fafc;}
+.customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
 .pos-cart{max-height:280px;overflow-y:auto;margin:14px 0;}
 .pos-cart-line{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f7;}
 .pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;}
@@ -393,6 +534,7 @@ ob_start();
 .pos-cart-price{color:#9aa0ac;font-size:.76rem;}
 .pos-qty{display:flex;align-items:center;gap:6px;}
 .pos-qty button{width:24px;height:24px;border-radius:6px;border:1px solid #eef0f4;background:#fff;font-weight:700;line-height:1;}
+.pos-qty-input{width:72px;height:28px;border:1px solid #eef0f4;border-radius:7px;text-align:center;font-weight:700;font-size:.82rem;}
 .pos-cart-del{color:#64748b;background:none;border:0;font-size:.85rem;}
 .pos-totals{border-top:1px dashed #eef0f4;padding-top:12px;font-size:.9rem;color:#5b6070;}
 .pos-total-line{font-weight:800;font-size:1.05rem;color:#1f2330;margin-top:6px;}
@@ -406,7 +548,10 @@ ob_start();
   /* Cart stays put — pinned to the top of the screen, not lost below a long
      product list. It scrolls its own contents (bounded height) while the
      product grid scrolls with the page underneath it. */
-  .pos-side{position:sticky;top:0;order:-1;max-height:46vh;z-index:20;box-shadow:0 6px 16px rgba(16,24,40,.1);margin-bottom:14px;}
+  .pos-side{position:static;top:auto;order:-1;max-height:none;overflow:visible;z-index:20;box-shadow:0 6px 16px rgba(16,24,40,.1);margin-bottom:14px;}
+  .pos-actions{grid-template-columns:1fr;}
+  #payPanel .btn-group{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+  #payPanel .btn-group>.btn{border-radius:8px!important;margin:0!important;}
 }
 </style>
 
@@ -415,22 +560,106 @@ var PRODUCTS = {};
 var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
     var img = el.querySelector('.pos-card-img img');
-    PRODUCTS[el.dataset.id] = { name: el.dataset.name, price: parseFloat(el.dataset.price), stock: parseFloat(el.dataset.stock), img: img ? img.getAttribute('src') : null };
+    PRODUCTS[el.dataset.id] = {
+        name: el.dataset.name,
+        price: parseFloat(el.dataset.price),
+        wholesale: parseFloat(el.dataset.wholesale),
+        stock: parseFloat(el.dataset.stock),
+        unitsPerPack: parseFloat(el.dataset.unitsPerPack) || 1,
+        packUnit: el.dataset.packUnit || '',
+        packPrice: parseFloat(el.dataset.packPrice) || 0,
+        img: img ? img.getAttribute('src') : null
+    };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
 });
 var cart = {};
-try { (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) { cart[c.product_id] = c.quantity; }); } catch (e) {}
+try {
+    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) {
+        cart[c.product_id] = {
+            qty: parseFloat(c.quantity) || 0,
+            priceType: c.price_type === 'wholesale' ? 'wholesale' : 'retail'
+        };
+    });
+} catch (e) {}
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
+function defaultSaleType() { return document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail'; }
+function lineType(id) { return cart[id] && cart[id].priceType === 'wholesale' ? 'wholesale' : 'retail'; }
+function sellsByPack(p, type) { return type === 'wholesale' && p.packUnit && p.unitsPerPack > 1 && p.packPrice > 0; }
+function saleStockQty(p, saleQty, type) { return sellsByPack(p, type) ? saleQty * p.unitsPerPack : saleQty; }
+function maxSaleQty(p, type) { return sellsByPack(p, type) ? Math.floor((p.stock / p.unitsPerPack) * 100) / 100 : p.stock; }
+function saleUnitLabel(p, type) { return sellsByPack(p, type) ? p.packUnit : ''; }
+function productPrice(p, type) { return sellsByPack(p, type) ? p.packPrice : (type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price); }
+var CUSTOMER_SEARCH_URL = <?php echo json_encode($customerSearchUrl); ?>;
+function attachCustomerLookup() {
+    var input = document.getElementById('customerName');
+    var menu = document.getElementById('customerSuggestMenu');
+    var hidden = document.getElementById('customerIdInput');
+    if (!input || !menu || !hidden) return;
+    var timer = null, pickedName = '';
+    function hide(){ menu.classList.remove('show'); }
+    function render(items) {
+        menu.innerHTML = '';
+        if (!items.length) { hide(); return; }
+        items.forEach(function(c){
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.innerHTML = '<strong>' + (c.name || '') + '</strong><span class="meta">' + [c.phone, c.email, c.company_name].filter(Boolean).join(' · ') + '</span>';
+            b.addEventListener('mousedown', function(e){
+                e.preventDefault();
+                hidden.value = c.id || '';
+                pickedName = c.name || '';
+                input.value = pickedName;
+                hide();
+            });
+            menu.appendChild(b);
+        });
+        menu.classList.add('show');
+    }
+    input.addEventListener('input', function(){
+        if (pickedName && input.value !== pickedName) {
+            hidden.value = '';
+            pickedName = '';
+        }
+        clearTimeout(timer);
+        var q = input.value.trim();
+        if (!q) { hide(); return; }
+        timer = setTimeout(function(){
+            fetch(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8')
+                .then(function(r){ return r.json(); })
+                .then(function(data){ render(data.items || []); })
+                .catch(function(){});
+        }, 180);
+    });
+    input.addEventListener('blur', function(){ setTimeout(hide, 160); });
+}
+attachCustomerLookup();
 
 function setQty(id, val) {
     var p = PRODUCTS[id]; if (!p) return;
-    val = Math.round(val);
+    var type = lineType(id);
+    val = Math.round((parseFloat(val) || 0) * 100) / 100;
     if (val <= 0) { delete cart[id]; render(); return; }
-    if (val > p.stock) { val = p.stock; }
-    cart[id] = val; render();
+    var max = maxSaleQty(p, type);
+    if (val > max) { val = max; }
+    cart[id] = { qty: val, priceType: type }; render();
 }
-function add(id) { setQty(id, (cart[id] || 0) + 1); }
-function subtotal() { var t = 0; for (var id in cart) { t += PRODUCTS[id].price * cart[id]; } return t; }
+function add(id) {
+    if (!cart[id]) { cart[id] = { qty: 0, priceType: defaultSaleType() }; }
+    setQty(id, cart[id].qty + 1);
+}
+function setLineType(id, type) {
+    var p = PRODUCTS[id]; if (!p || !cart[id]) return;
+    var oldType = lineType(id);
+    var nextType = type === 'wholesale' ? 'wholesale' : 'retail';
+    var stockQty = saleStockQty(p, cart[id].qty, oldType);
+    cart[id].priceType = nextType;
+    cart[id].qty = sellsByPack(p, nextType) ? Math.floor((stockQty / p.unitsPerPack) * 100) / 100 : stockQty;
+    var max = maxSaleQty(p, nextType);
+    if (cart[id].qty > max) cart[id].qty = max;
+    if (cart[id].qty <= 0) delete cart[id];
+    render();
+}
+function subtotal() { var t = 0; for (var id in cart) { t += productPrice(PRODUCTS[id], lineType(id)) * cart[id].qty; } return t; }
 function total() {
     var sub = subtotal();
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
@@ -460,28 +689,87 @@ function render() {
     var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
     wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4">Tap a product to add it.</div>';
     ids.forEach(function (id) {
-        var p = PRODUCTS[id], qty = cart[id];
+        var p = PRODUCTS[id], qty = cart[id].qty, type = lineType(id);
+        var unit = saleUnitLabel(p, type);
+        var max = maxSaleQty(p, type);
         var line = document.createElement('div');
         line.className = 'pos-cart-line';
         line.innerHTML = (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
-          + '<div class="flex-grow-1"><div class="pos-cart-name">' + p.name + '</div><div class="pos-cart-price">' + money(p.price) + '</div></div>'
-          + '<div class="pos-qty"><button type="button" data-dec="' + id + '">−</button><span>' + qty + '</span><button type="button" data-inc="' + id + '">+</button></div>'
+          + '<div class="flex-grow-1"><div class="pos-cart-name">' + p.name + '</div><div class="pos-cart-price">' + money(productPrice(p, type)) + (unit ? ' / ' + unit : '') + '</div>'
+          + '<select class="form-select form-select-sm mt-1 pos-price-type" data-price-type="' + id + '"><option value="retail"' + (type === 'retail' ? ' selected' : '') + '>Retail</option><option value="wholesale"' + (type === 'wholesale' ? ' selected' : '') + '>Wholesale</option></select></div>'
+          + '<div class="pos-qty"><button type="button" data-dec="' + id + '">−</button><input type="number" step="0.01" min="0" max="' + max + '" class="pos-qty-input" data-qty="' + id + '" value="' + qty + '"><button type="button" data-inc="' + id + '">+</button></div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);
     });
     document.getElementById('holdBtn').disabled = ids.length === 0;
     document.getElementById('checkoutBtn').disabled = ids.length === 0;
-    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) { return { product_id: parseInt(id, 10), quantity: cart[id] }; }));
+    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) {
+        return { product_id: parseInt(id, 10), quantity: saleStockQty(PRODUCTS[id], cart[id].qty, lineType(id)), price_type: lineType(id) };
+    }));
+    updateTotals();
+}
+function syncTypedQty(input) {
+    var id = input.dataset.qty;
+    var p = PRODUCTS[id]; if (!p) return;
+    var val = Math.round((parseFloat(input.value) || 0) * 100) / 100;
+    var max = maxSaleQty(p, lineType(id));
+    if (val > max) { val = max; input.value = val; }
+    if (val > 0) { cart[id].qty = val; } else { delete cart[id]; }
+    var ids = Object.keys(cart);
+    document.getElementById('holdBtn').disabled = ids.length === 0;
+    document.getElementById('checkoutBtn').disabled = ids.length === 0;
+    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (cid) {
+        return { product_id: parseInt(cid, 10), quantity: saleStockQty(PRODUCTS[cid], cart[cid].qty, lineType(cid)), price_type: lineType(cid) };
+    }));
     updateTotals();
 }
 document.getElementById('discountInput').addEventListener('input', updateTotals);
+document.getElementById('saleType').addEventListener('change', function () {
+    var type = defaultSaleType();
+    Object.keys(cart).forEach(function (id) {
+        if (!cart[id] || !PRODUCTS[id]) return;
+        var oldType = lineType(id);
+        var stockQty = saleStockQty(PRODUCTS[id], cart[id].qty, oldType);
+        cart[id].priceType = type;
+        cart[id].qty = sellsByPack(PRODUCTS[id], type) ? Math.floor((stockQty / PRODUCTS[id].unitsPerPack) * 100) / 100 : stockQty;
+        var max = maxSaleQty(PRODUCTS[id], type);
+        if (cart[id].qty > max) cart[id].qty = max;
+        if (cart[id].qty <= 0) delete cart[id];
+    });
+    render();
+});
+document.getElementById('vatEnabledInput').addEventListener('change', function () {
+    var enabled = document.getElementById('vatEnabledInput').checked;
+    document.getElementById('vatRateInput').value = enabled ? (window.SHOP_VAT_RATE || 0) : 0;
+    updateVatLabel();
+    updateTotals();
+});
 
 document.querySelectorAll('.pos-card .pos-add').forEach(function (b) { b.addEventListener('click', function () { add(b.closest('.pos-card').dataset.id); }); });
 document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
     if (t.dataset.inc) add(t.dataset.inc);
-    else if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] || 0) - 1);
+    else if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] ? cart[t.dataset.dec].qty : 0) - 1);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
+});
+document.getElementById('cartRows').addEventListener('change', function (e) {
+    var priceType = e.target.closest('[data-price-type]');
+    if (priceType) {
+        setLineType(priceType.dataset.priceType, priceType.value);
+        return;
+    }
+    var input = e.target.closest('[data-qty]');
+    if (input) setQty(input.dataset.qty, input.value);
+});
+document.getElementById('cartRows').addEventListener('input', function (e) {
+    var input = e.target.closest('[data-qty]');
+    if (input) syncTypedQty(input);
+});
+document.getElementById('cartRows').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.closest('[data-qty]')) {
+        e.preventDefault();
+        e.target.blur();
+    }
 });
 
 var searchInput = document.getElementById('search');
@@ -543,6 +831,11 @@ document.getElementById('checkoutBtn').addEventListener('click', function () {
     document.getElementById('formAction').value = 'pay';
     document.getElementById('cartButtons').style.display = 'none';
     document.getElementById('payPanel').style.display = 'block';
+    var side = document.querySelector('.pos-side');
+    if (side) {
+        side.classList.add('pay-open');
+        side.scrollIntoView({block: 'start', behavior: 'smooth'});
+    }
 });
 
 function payMethod() { return document.querySelector('input[name=pm]:checked').value; }
@@ -551,11 +844,25 @@ function updatePayFields() {
     var needsCash = (m === 'cash' || m === 'split');
     document.getElementById('cashBox').style.display = needsCash ? 'flex' : 'none';
     document.getElementById('splitBox').style.display = m === 'split' ? 'flex' : 'none';
+    document.getElementById('mpesaBox').style.display = (m === 'mpesa' || m === 'split') ? 'flex' : 'none';
+    document.getElementById('cardBox').style.display = m === 'card' ? 'flex' : 'none';
+    document.getElementById('bankBox').style.display = m === 'bank' ? 'flex' : 'none';
+    document.getElementById('saccoBox').style.display = m === 'sacco' ? 'flex' : 'none';
+    document.getElementById('referenceBox').style.display = (m === 'cash' || m === 'credit') ? 'none' : 'flex';
     var due = m === 'split' ? (parseFloat(document.getElementById('cashPortionInput').value) || 0) : t;
     var given = parseFloat(document.getElementById('cashGivenInput').value) || 0;
     document.getElementById('balanceOut').textContent = needsCash ? (given >= due ? money(given - due) : 'short') : '—';
 
     document.getElementById('paymentMethod').value = m;
+    var provider = '';
+    var accountName = '';
+    if (m === 'mpesa' || m === 'split') { accountName = document.getElementById('mpesaNameInput').value || ''; provider = m === 'split' ? 'Cash + M-Pesa' : 'M-Pesa'; }
+    if (m === 'card') { provider = document.getElementById('cardTypeInput').value || ''; }
+    if (m === 'bank') { provider = document.getElementById('bankInput').value || ''; }
+    if (m === 'sacco') { provider = document.getElementById('saccoInput').value || ''; }
+    document.getElementById('paymentProvider').value = provider;
+    document.getElementById('paymentAccountName').value = accountName;
+    document.getElementById('paymentReference').value = document.getElementById('referenceInput').value || '';
     if (m === 'cash') { document.getElementById('amountTendered').value = given; document.getElementById('cashAmount').value = ''; document.getElementById('mpesaAmount').value = ''; }
     else if (m === 'split') {
         document.getElementById('cashAmount').value = document.getElementById('cashPortionInput').value || 0;
@@ -568,8 +875,9 @@ function updatePayFields() {
     }
 }
 document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventListener('change', updatePayFields); });
-['cashGivenInput', 'cashPortionInput', 'mpesaPortionInput'].forEach(function (id) {
+['cashGivenInput', 'cashPortionInput', 'mpesaPortionInput', 'mpesaNameInput', 'cardTypeInput', 'bankInput', 'saccoInput', 'referenceInput'].forEach(function (id) {
     document.getElementById(id).addEventListener('input', updatePayFields);
+    document.getElementById(id).addEventListener('change', updatePayFields);
 });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
@@ -588,18 +896,25 @@ document.getElementById('orderForm').addEventListener('submit', function (e) {
 (function () {
     var rate = <?php echo json_encode($vatRate); ?>;
     var inclusive = <?php echo $vatInclusive ? 'true' : 'false'; ?>;
-    document.getElementById('vatRateInput').value = rate;
+    window.SHOP_VAT_RATE = rate;
+    document.getElementById('vatRateInput').value = document.getElementById('vatEnabledInput').checked ? rate : 0;
     document.getElementById('vatInclusiveInput').value = inclusive ? '1' : '0';
-    var label = document.getElementById('vatRateLabel');
-    if (label) label.textContent = rate > 0 ? '(' + rate + '%' + (inclusive ? ' incl.' : ' excl.') + ')' : '(off)';
+    updateVatLabel();
 })();
+
+function updateVatLabel() {
+    var activeRate = parseFloat(document.getElementById('vatRateInput').value) || 0;
+    var inclusive = document.getElementById('vatInclusiveInput').value === '1';
+    var label = document.getElementById('vatRateLabel');
+    if (label) label.textContent = activeRate > 0 ? '(' + activeRate + '%' + (inclusive ? ' incl.' : ' excl.') + ')' : '(off)';
+}
 
 var barcodeScan = document.getElementById('barcodeScan');
 var scanMsg = document.getElementById('scanMsg');
 function flashScan(text, ok) {
     scanMsg.textContent = text;
     scanMsg.style.display = 'block';
-    scanMsg.style.color = ok ? 'var(--pos-green-dark, #15803d)' : '#b91c1c';
+    scanMsg.style.color = ok ? 'var(--pos-green-dark, #32004b)' : '#b91c1c';
     setTimeout(function () { scanMsg.style.display = 'none'; }, 2200);
 }
 if (barcodeScan) {
@@ -612,22 +927,32 @@ if (barcodeScan) {
         var id = BARCODES[code];
         if (!id) { flashScan('No product with that barcode.', false); return; }
         var p = PRODUCTS[id];
-        if (p && p.stock <= (cart[id] || 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
+        if (p && maxSaleQty(p, cart[id] ? lineType(id) : defaultSaleType()) <= (cart[id] ? cart[id].qty : 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
         add(id);
         flashScan((p ? p.name : 'Product') + ' added.', true);
     });
     // Keep the scanner's keystrokes landing here even after other clicks,
     // as long as no other field is being typed into.
     document.addEventListener('click', function (e) {
-        if (e.target === barcodeScan || e.target.closest('input, textarea, button')) { return; }
+        if (e.target === barcodeScan || e.target.closest('input, textarea, select, option, label, button, .btn-group')) { return; }
         barcodeScan.focus();
     });
 }
 
 render();
 applyFilters();
+var saleSuccessModal = document.getElementById('saleSuccessModal');
+if (saleSuccessModal && window.bootstrap) {
+    new bootstrap.Modal(saleSuccessModal).show();
+    var receiptPrintUrl = saleSuccessModal.getAttribute('data-print-url');
+    if (receiptPrintUrl) {
+        setTimeout(function () {
+            window.open(receiptPrintUrl, '_blank', 'noopener');
+        }, 350);
+    }
+}
 </script>
 <?php endif; ?>
 <?php
 $content = ob_get_clean();
-include __DIR__ . '/../../templates/staff/layout.php';
+include __DIR__ . '/../../templates/' . $layoutName . '/layout.php';

@@ -8,13 +8,25 @@ function build_order_remembrance_email(array $order, array $items, array $shop):
     $money = fn($n) => 'KES ' . number_format((float) $n, 2);
     $customer = $order['table_name'] ?? 'valued customer';
     $isOpen = ($order['status'] ?? '') === 'open';
+    $amountPaid = max(0, (float) ($order['amount_paid'] ?? 0));
+    $amountDue = (float) ($order['amount_due'] ?? 0);
+    if ($isOpen && $amountDue <= 0.0001) {
+        $amountDue = max(0, (float) ($order['total'] ?? 0) - $amountPaid);
+    }
+    $dueText = '';
+    if (!empty($order['credit_due_at'])) {
+        $dueText = ' Payment was due by ' . date('j M Y', strtotime($order['credit_due_at'])) . '.';
+    } elseif (!empty($order['credit_duration_days'])) {
+        $dueText = ' Payment duration: ' . (int) $order['credit_duration_days'] . ' day(s).';
+    }
 
     $subject = ($isOpen ? 'Friendly reminder — invoice ' : 'We remember you — ')
         . ($order['receipt_number'] ?? '') . ' from ' . $shopName;
 
     $body = $isOpen
         ? "This is a friendly remembrance note about invoice {$h($order['receipt_number'])} "
-          . "for {$money($order['total'] ?? 0)}. Please arrange payment when you can — we're happy to help."
+          . "for {$money($order['total'] ?? 0)}. Balance remaining: {$money($amountDue)}.{$h($dueText)} "
+          . "Please arrange payment when you can — we're happy to help."
         : "Just a short note to say we remember your visit on {$h(date('j M Y', strtotime($order['created_at'] ?? 'now')))}. "
           . "We would love to welcome you back anytime.";
 

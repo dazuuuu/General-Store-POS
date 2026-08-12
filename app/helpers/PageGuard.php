@@ -65,6 +65,9 @@ class PageGuard
     public static function capability(string $cap): void
     {
         self::requireFullAuth();
+        if (TenantContext::role() === 'tenant_owner') {
+            return;
+        }
         if (!TenantContext::can($cap)) {
             self::deny();
         }

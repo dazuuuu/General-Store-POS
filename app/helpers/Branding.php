@@ -2,7 +2,7 @@
 // app/helpers/Branding.php
 // Logo display rules (single-shop deployment):
 //  - Everywhere (login page, dashboards, receipts) -> the shop's uploaded
-//    logo from Settings, falling back to the default Modern logo if none
+//    logo from Settings, falling back to the default Duaqabe logo if none
 //    has been uploaded yet.
 // All paths are resolved through public_url() so they work regardless of
 // whether the web server's document root points at the project root or
@@ -10,8 +10,8 @@
 
 class Branding
 {
-    // Default Modern logo, relative to the public web root.
-    const DEFAULT_LOGO_REL = 'assets/images/logo/logo.png';
+    // Default Duaqabe logo, relative to the public web root.
+    const DEFAULT_LOGO_REL = 'assets/images/logo/duaqabe-general-logo-black.png';
 
     /** The default Modern logo (used when no tenant logo has been uploaded). */
     public static function loginLogo(): string
