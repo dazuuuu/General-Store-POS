@@ -105,6 +105,19 @@ if ($isDepositReceipt && $latestPayment) {
       <?php if ($customerName !== ''): ?>
       <div style="font-size:15px;">Customer: <strong><?php echo htmlspecialchars($customerName); ?></strong></div>
       <?php endif; ?>
+      <?php if (!$isWalkin && (!empty($order['credit_due_at']) || !empty($order['credit_duration_days']))): ?>
+      <div style="font-size:15px;">
+        Credit:
+        <?php if (!empty($order['credit_due_at'])): ?>
+          due <strong><?php echo htmlspecialchars(date('j M Y', strtotime($order['credit_due_at']))); ?></strong>
+          <?php if (!empty($order['credit_duration_days'])): ?>
+            (<?php echo (int) $order['credit_duration_days']; ?> day<?php echo (int) $order['credit_duration_days'] === 1 ? '' : 's'; ?>)
+          <?php endif; ?>
+        <?php else: ?>
+          <strong><?php echo (int) $order['credit_duration_days']; ?> day<?php echo (int) $order['credit_duration_days'] === 1 ? '' : 's'; ?></strong>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
       <div style="font-size:15px;"><?php echo $isWalkin ? 'Served by' : 'Opened by'; ?>: <?php echo htmlspecialchars($openedBy ?: '—'); ?></div>
     </div>
 

@@ -104,6 +104,14 @@ $balanceOf = static function (array $o): float {
                 <?php echo (int) ($o['item_count'] ?? 0); ?> item<?php echo (int) ($o['item_count'] ?? 0) === 1 ? '' : 's'; ?>
                 · <?php echo date('j M, g:i a', strtotime($o['created_at'])); ?>
               </div>
+              <?php if (!empty($o['credit_due_at'])): ?>
+                <div class="small <?php echo strtotime($o['credit_due_at']) < time() ? 'text-danger' : 'text-muted'; ?>">
+                  Due <?php echo date('j M Y', strtotime($o['credit_due_at'])); ?>
+                  <?php if (!empty($o['credit_duration_days'])): ?> · <?php echo (int) $o['credit_duration_days']; ?> days<?php endif; ?>
+                </div>
+              <?php elseif (!empty($o['credit_duration_days'])): ?>
+                <div class="small text-muted">Credit <?php echo (int) $o['credit_duration_days']; ?> days</div>
+              <?php endif; ?>
               <?php if ($paid > 0): ?><div class="small text-success">KES <?php echo number_format($paid, 0); ?> paid so far</div><?php endif; ?>
             </td>
             <td class="text-end">

@@ -130,6 +130,17 @@ ob_start();
   <div>
     <h1 class="h5 mb-1 fw-bold"><?php echo htmlspecialchars($order['table_name']); ?> <?php echo $statusBadge; ?></h1>
     <div class="small text-muted">Invoice <?php echo htmlspecialchars($order['receipt_number']); ?> · opened <?php echo date('j M Y, g:i a', strtotime($order['created_at'])); ?></div>
+    <?php if (!empty($order['credit_due_at']) || !empty($order['credit_duration_days'])): ?>
+      <div class="small <?php echo !empty($order['credit_due_at']) && strtotime($order['credit_due_at']) < time() && $order['status'] === 'open' ? 'text-danger' : 'text-muted'; ?>">
+        Credit duration:
+        <?php if (!empty($order['credit_duration_days'])): ?>
+          <?php echo (int) $order['credit_duration_days']; ?> day<?php echo (int) $order['credit_duration_days'] === 1 ? '' : 's'; ?>
+        <?php endif; ?>
+        <?php if (!empty($order['credit_due_at'])): ?>
+          · due <?php echo date('j M Y', strtotime($order['credit_due_at'])); ?>
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-arrow-left me-1"></i>Credit sales</a>

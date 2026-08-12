@@ -317,21 +317,24 @@ ob_start();
     <?php endif; ?>
 
     <div class="mb-2">
-      <button type="button" class="btn btn-sm btn-link p-0" id="creditToggle"><i class="fas fa-envelope me-1"></i>This is a credit sale — add their email/phone</button>
+      <label class="form-label small mb-1">Credit duration</label>
+      <select name="credit_duration_days" id="creditDurationDays" class="form-select form-select-sm">
+        <option value="0" <?php echo $creditDurationDays === 0 ? 'selected' : ''; ?>>No due date</option>
+        <?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?>
+          <option value="<?php echo $days; ?>" <?php echo $creditDurationDays === $days ? 'selected' : ''; ?>><?php echo $label; ?></option>
+        <?php endforeach; ?>
+      </select>
+      <div class="form-text">How long the customer has to clear this invoice.</div>
+    </div>
+
+    <div class="mb-2">
+      <button type="button" class="btn btn-sm btn-link p-0" id="creditToggle"><i class="fas fa-envelope me-1"></i>Add email/phone to send invoice</button>
       <div id="creditFields" style="display:none;" class="row g-2 mt-1">
         <div class="col-12">
           <input type="email" name="customer_email" id="customerEmail" class="form-control form-control-sm" placeholder="Email (to send the invoice)" value="<?php echo htmlspecialchars($customerEmail); ?>">
         </div>
         <div class="col-12">
           <input type="text" name="customer_phone" id="customerPhone" class="form-control form-control-sm" placeholder="Phone (optional)" value="<?php echo htmlspecialchars($customerPhone); ?>">
-        </div>
-        <div class="col-12">
-          <label class="form-label small mb-1">Credit duration</label>
-          <select name="credit_duration_days" class="form-select form-select-sm">
-            <?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?>
-              <option value="<?php echo $days; ?>" <?php echo $creditDurationDays === $days ? 'selected' : ''; ?>><?php echo $label; ?></option>
-            <?php endforeach; ?>
-          </select>
         </div>
       </div>
     </div>
