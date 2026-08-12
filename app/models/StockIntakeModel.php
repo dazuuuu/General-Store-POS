@@ -60,7 +60,7 @@ class StockIntakeModel extends Model
             $intakeId = (int) $db->lastInsertId();
 
             $bump = $db->prepare(
-                'UPDATE products SET quantity = quantity + ?, buying_price = ?, unit = ?, units_per_pack = ?, pack_unit = ?, pack_price = ? WHERE id = ? AND tenant_id = ?'
+                'UPDATE products SET quantity = quantity + ?, buying_price = ?, package_buying_price = ?, unit = ?, units_per_pack = ?, pack_unit = ?, pack_price = ? WHERE id = ? AND tenant_id = ?'
             );
 
             foreach ($items as $i) {
@@ -82,7 +82,8 @@ class StockIntakeModel extends Model
                         $db->rollBack();
                         return ['ok' => false, 'intake_id' => null, 'errors' => ['_' => 'One of the selected products was not found.']];
                     }
-                    $bump->execute([$qty, $buying, $unit, $unitsPerPackage, $packageUnit, $packagePrice, $productId, $tid]);
+                    $packageBuying = ($i['package_buying_price'] ?? '') !== '' ? (float) $i['package_buying_price'] : null;
+                    $bump->execute([$qty, $buying, $packageBuying, $unit, $unitsPerPackage, $packageUnit, $packagePrice, $productId, $tid]);
                     $productName = $prod['name'];
                     $faulty = max(0, (float) ($i['faulty_quantity'] ?? 0));
                     if ($faulty > 0) {
@@ -115,6 +116,7 @@ class StockIntakeModel extends Model
                         'quantity'        => $qty,
                         'faulty_quantity' => (float) ($i['faulty_quantity'] ?? 0),
                         'buying_price'    => $buying,
+                        'package_buying_price' => $i['package_buying_price'] ?? '',
                         'retail_price'    => $i['selling_price'] ?? 0,
                         'wholesale_price' => $i['wholesale_price'] ?? '',
                         'offer_price'     => $i['offer_price'] ?? '',

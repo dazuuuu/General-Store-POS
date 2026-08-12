@@ -36,8 +36,8 @@ class Pricing
     }
 
     /**
-     * Pick the best unit price for a qty: tier break → wholesale (if wholesale
-     * sale) → pack price when buying full packs → retail/offer.
+     * Pick the best unit price for a qty: tier break → wholesale/package
+     * pricing for wholesale lines → retail/offer.
      */
     public static function unitPriceForQty(array $product, float $qty, string $saleType = 'retail', array $tiers = []): float
     {
@@ -61,14 +61,14 @@ class Pricing
             return round($best, 2);
         }
 
-        $unitsPerPack = (float) ($product['units_per_pack'] ?? 1);
-        $packPrice = $product['pack_price'] ?? null;
-        if ($packPrice !== null && $packPrice !== '' && $unitsPerPack > 1
-            && abs(fmod($qty, $unitsPerPack)) < 0.0001) {
-            return round(((float) $packPrice) / $unitsPerPack, 2);
-        }
-
         if ($saleType === 'wholesale') {
+            $unitsPerPack = (float) ($product['units_per_pack'] ?? 1);
+            $packPrice = $product['pack_price'] ?? null;
+            if ($packPrice !== null && $packPrice !== '' && $unitsPerPack > 1
+                && abs(fmod($qty, $unitsPerPack)) < 0.0001) {
+                return ((float) $packPrice) / $unitsPerPack;
+            }
+
             $w = (float) ($product['wholesale_price'] ?? 0);
             if ($w > 0) {
                 return round($w, 2);

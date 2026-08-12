@@ -1053,6 +1053,7 @@ class OrderModel extends Model
         $tid = \TenantContext::tenantId();
         if ($tid === null) { return []; }
 
+        $this->ensureColumn('products', 'package_buying_price', "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $periodSql = match ($period) {
             'today' => "AND DATE(o.paid_at) = CURDATE()",
             'week'  => "AND o.paid_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
@@ -1064,7 +1065,28 @@ class OrderModel extends Model
                        MAX(oi.product_name) AS product_name,
                        SUM(GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0)) AS qty,
                        SUM(oi.line_total) AS revenue,
-                       SUM(GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)) AS cost
+                       SUM(
+                           CASE
+                               WHEN oi.price_type = 'wholesale'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                       ) AS cost,
+                       SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total ELSE 0 END)
+                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total ELSE 0 END)
+                       - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
+                           CASE
+                               WHEN COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                         ELSE 0 END) AS wholesale_profit
                   FROM order_items oi
                   JOIN orders o    ON o.id = oi.order_id AND o.tenant_id = oi.tenant_id
              LEFT JOIN products p  ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id
@@ -1089,6 +1111,8 @@ class OrderModel extends Model
             $r['qty']        = (float) $r['qty'];
             $r['revenue']    = $rev;
             $r['cost']       = $cost;
+            $r['retail_profit'] = round((float) ($r['retail_profit'] ?? 0), 2);
+            $r['wholesale_profit'] = round((float) ($r['wholesale_profit'] ?? 0), 2);
             $r['profit']     = round($rev - $cost, 2);
             $r['margin']     = $rev > 0 ? round(($rev - $cost) / $rev * 100, 1) : 0.0;
         }

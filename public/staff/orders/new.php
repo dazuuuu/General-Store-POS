@@ -43,13 +43,26 @@ if ($resumeId > 0) {
         $customerName = $held['customer_name'];
         $heldOrderId  = $resumeId;
         $validIds = array_column($products, 'id');
+        $productsById = [];
+        foreach ($products as $p) {
+            $productsById[(int) $p['id']] = $p;
+        }
         $cart = [];
         foreach ($HO->items($resumeId) as $it) {
             if ($it['product_id'] && in_array((int) $it['product_id'], $validIds, true)) {
+                $product = $productsById[(int) $it['product_id']];
+                $priceType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+                $quantity = (float) $it['quantity'];
+                $unitsPerPack = max(1, (float) ($product['units_per_pack'] ?? 1));
+                $packUnit = trim((string) ($product['pack_unit'] ?? ''));
+                $packPrice = ($product['pack_price'] ?? '') !== '' && $product['pack_price'] !== null ? (float) $product['pack_price'] : 0.0;
+                if ($priceType === 'wholesale' && $packUnit !== '' && $unitsPerPack > 1 && $packPrice > 0) {
+                    $quantity = round($quantity / $unitsPerPack, 2);
+                }
                 $cart[] = [
                     'product_id' => (int) $it['product_id'],
-                    'quantity' => (float) $it['quantity'],
-                    'price_type' => (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                    'quantity' => $quantity,
+                    'price_type' => $priceType,
                 ];
             }
         }
@@ -458,7 +471,10 @@ function sellsByPack(p, type) { return type === 'wholesale' && p.packUnit && p.u
 function saleStockQty(p, saleQty, type) { return sellsByPack(p, type) ? saleQty * p.unitsPerPack : saleQty; }
 function maxSaleQty(p, type) { return sellsByPack(p, type) ? Math.floor((p.stock / p.unitsPerPack) * 100) / 100 : p.stock; }
 function saleUnitLabel(p, type) { return sellsByPack(p, type) ? p.packUnit : ''; }
-function productPrice(p, type) { return sellsByPack(p, type) ? p.packPrice : (type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price); }
+function productPrice(p, type) {
+    if (sellsByPack(p, type)) return p.packPrice;
+    return type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price;
+}
 var CUSTOMER_SEARCH_URL = <?php echo json_encode($customerSearchUrl); ?>;
 var loyalSelect = document.getElementById('loyalCustomerSelect');
 function fillCustomer(c) {

@@ -65,6 +65,7 @@ function store_package_fields(array $row, array $units): array
             'faulty_quantity' => max(0, (float) ($row['faulty_quantity'] ?? 0)),
             'unit' => $receiveUnit,
             'buying_price' => (float) ($row['buying_price'] ?? 0),
+            'package_buying_price' => null,
             'wholesale_price' => $row['wholesale_price'] ?? '',
             'package_unit' => null,
             'package_quantity' => null,
@@ -81,6 +82,7 @@ function store_package_fields(array $row, array $units): array
         'faulty_quantity' => round(max(0, (float) ($row['faulty_quantity'] ?? 0)) * $inside, 2),
         'unit' => $innerUnit,
         'buying_price' => round($packageCost / $inside, 2),
+        'package_buying_price' => $packageCost,
         'wholesale_price' => $packageWholesale !== null ? round($packageWholesale / $inside, 2) : '',
         'package_unit' => $receiveUnit,
         'package_quantity' => $packageQty,
@@ -98,6 +100,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $items = [];
         foreach ($_POST['items'] ?? [] as $i => $row) {
             $pkg = store_package_fields($row, $units);
+            if ($pkg['package_unit'] !== null) {
+                if (($pkg['package_buying_price'] ?? 0) <= 0) {
+                    $error = 'Enter the package buying price for packaged products.';
+                    break;
+                }
+                if (($pkg['package_price'] ?? 0) <= 0) {
+                    $error = 'Enter the package wholesale price for packaged products.';
+                    break;
+                }
+            }
             $qty = (float) $pkg['quantity'];
             if ($qty <= 0) {
                 continue;
@@ -144,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'quantity' => $qty,
                 'faulty_quantity' => $pkg['faulty_quantity'],
                 'buying_price' => ($row['buying_price'] ?? '') !== '' ? $pkg['buying_price'] : ($existing['buying_price'] ?? 0),
+                'package_buying_price' => ($row['buying_price'] ?? '') !== '' ? $pkg['package_buying_price'] : ($existing['package_buying_price'] ?? null),
                 'retail_price' => ($row['selling_price'] ?? '') !== '' ? $row['selling_price'] : ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
                 'wholesale_price' => ($row['wholesale_price'] ?? '') !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? $existing['selling_price'] ?? 0),
                 'offer_price' => $existing ? '' : ($row['offer_price'] ?? ''),
@@ -263,7 +276,14 @@ ob_start();
       </div>
       <div id="rows"></div>
       <div class="d-flex justify-content-end pt-2 border-top mt-2">
-        <div class="text-muted small">Grand total (stored stock cost): <strong id="grandTotal">KES 0</strong></div>
+        <div class="text-muted small">
+          Grand totals:
+          Cost <strong id="grandTotal">KES 0</strong>
+          · Wholesale return <strong id="grandWholesaleTotal">KES 0</strong>
+          (<strong id="grandWholesaleProfit">KES 0</strong>, <span id="grandWholesaleMargin">0.0%</span>)
+          · Retail return <strong id="grandRetailTotal">KES 0</strong>
+          (<strong id="grandRetailProfit">KES 0</strong>, <span id="grandRetailMargin">0.0%</span>)
+        </div>
       </div>
     </div>
   </div>
@@ -494,16 +514,16 @@ ob_start();
         <input type="number" step="0.01" min="0" name="items[__I__][faulty_quantity]" class="form-control form-control-sm" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1 buyingLabel">Buying price (KES)</label>
+        <label class="form-label small mb-1 buyingLabel">Buying price of the package</label>
         <input type="number" step="0.01" min="0" name="items[__I__][buying_price]" class="form-control form-control-sm buyingPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Selling price</label>
-        <input type="number" step="0.01" min="0" name="items[__I__][selling_price]" class="form-control form-control-sm" placeholder="0">
+        <label class="form-label small mb-1 retailLabel">Selling price of items inside (retail price)</label>
+        <input type="number" step="0.01" min="0" name="items[__I__][selling_price]" class="form-control form-control-sm retailPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 wholesaleLabel">Wholesale <span class="text-muted">(optional)</span></label>
-        <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm" placeholder="0">
+        <label class="form-label small mb-1 wholesaleLabel">Selling price of the package (wholesale price)</label>
+        <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" placeholder="0">
       </div>
       <div class="col-12 mt-2 newProductFields">
         <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
@@ -528,8 +548,8 @@ ob_start();
         </div>
       </div>
       <div class="col-6 col-sm-4 mt-2">
-        <label class="form-label small mb-1">Line total (good stock)</label>
-        <div class="form-control form-control-sm bg-light rowTotal" data-value="0">KES 0</div>
+        <label class="form-label small mb-1">Expected return</label>
+        <div class="form-control form-control-sm bg-light rowTotal" data-value="0" data-wholesale-value="0" data-retail-value="0" style="height:auto;min-height:31px;">Cost: KES 0</div>
       </div>
       <div class="col-6 col-sm-8 mt-2">
         <label class="form-label small mb-1">Remark <span class="text-muted">(optional)</span></label>
@@ -638,6 +658,8 @@ ob_start();
       titleInput.value = item.name;
       if (item.barcode) { barcodeInput.value = item.barcode; }
       if (item.buying_price) { row.querySelector('.buyingPrice').value = item.buying_price; }
+      if (item.retail_price) { row.querySelector('.retailPrice').value = item.retail_price; }
+      if (item.wholesale_price) { row.querySelector('.wholesalePrice').value = item.pack_price && item.pack_price > 0 ? item.pack_price : item.wholesale_price; }
       row.querySelector('.qtyLabel').textContent = 'Qty to store';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';
@@ -752,7 +774,7 @@ ob_start();
       if (el) attachTypeahead(el, field);
     });
 
-    row.querySelectorAll('.qty, .buyingPrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
+    row.querySelectorAll('.qty, .buyingPrice, .retailPrice, .wholesalePrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
       el.addEventListener('input', recalc);
       el.addEventListener('change', recalc);
     });
@@ -786,7 +808,7 @@ ob_start();
   }
 
   function recalc() {
-    var grand = 0;
+    var grand = 0, grandWholesale = 0, grandRetail = 0;
     document.querySelectorAll('.store-row').forEach(function (row) {
       var unit = row.querySelector('.unitSelect').value;
       var isPackageUnit = unit !== 'piece';
@@ -797,6 +819,8 @@ ob_start();
       var hasPackage = isPackageUnit && pkgQty > 0 && perPkg > 0;
       var qty = hasPackage ? (pkgQty * perPkg) : (parseFloat(qtyInput.value) || 0);
       var buy = parseFloat(row.querySelector('.buyingPrice').value) || 0;
+      var retail = parseFloat(row.querySelector('.retailPrice').value) || 0;
+      var wholesale = parseFloat(row.querySelector('.wholesalePrice').value) || 0;
       if (pkgFields) pkgFields.style.display = isPackageUnit ? 'block' : 'none';
       var packageQtyLabel = row.querySelector('.packageQtyLabel');
       var unitsPerPackageLabel = row.querySelector('.unitsPerPackageLabel');
@@ -806,23 +830,47 @@ ob_start();
         qtyInput.value = qty > 0 ? (Math.round(qty * 100) / 100) : '';
         qtyInput.readOnly = true;
         row.querySelector('.qtyLabel').textContent = 'Total items received';
-        row.querySelector('.buyingLabel').textContent = 'Buying price per ' + unit;
-        row.querySelector('.wholesaleLabel').innerHTML = 'Wholesale per ' + unit + ' <span class="text-muted">(optional)</span>';
+        row.querySelector('.buyingLabel').textContent = 'Buying price of the package';
+        row.querySelector('.wholesaleLabel').textContent = 'Selling price of the package (wholesale price)';
+        row.querySelector('.retailLabel').textContent = 'Selling price of items inside (retail price)';
         var totalItems = row.querySelector('.totalItems');
         if (totalItems) totalItems.textContent = Math.round(qty * 100) / 100;
       } else {
         qtyInput.readOnly = false;
         row.querySelector('.qtyLabel').textContent = isPackageUnit ? ('Good ' + unit + ' qty received') : (row.classList.contains('is-restock') ? 'Qty to store' : 'Good qty received');
-        row.querySelector('.buyingLabel').textContent = isPackageUnit ? ('Buying price per ' + unit) : 'Buying price (KES)';
-        row.querySelector('.wholesaleLabel').innerHTML = (isPackageUnit ? ('Wholesale per ' + unit) : 'Wholesale') + ' <span class="text-muted">(optional)</span>';
+        row.querySelector('.buyingLabel').textContent = isPackageUnit ? 'Buying price of the package' : 'Buying price per item';
+        row.querySelector('.wholesaleLabel').innerHTML = isPackageUnit ? 'Selling price of the package (wholesale price)' : 'Selling price wholesale <span class="text-muted">(optional)</span>';
+        row.querySelector('.retailLabel').textContent = 'Selling price of items inside (retail price)';
       }
       var total = hasPackage ? (pkgQty * buy) : (qty * buy);
+      var wholesaleReturn = hasPackage ? (pkgQty * wholesale) : (qty * wholesale);
+      var retailReturn = qty * retail;
+      var wholesaleProfit = wholesaleReturn - total;
+      var retailProfit = retailReturn - total;
+      var wholesaleMargin = wholesaleReturn > 0 ? (wholesaleProfit / wholesaleReturn * 100) : 0;
+      var retailMargin = retailReturn > 0 ? (retailProfit / retailReturn * 100) : 0;
       var el = row.querySelector('.rowTotal');
       el.dataset.value = total;
-      el.textContent = money(total);
+      el.dataset.wholesaleValue = wholesaleReturn;
+      el.dataset.retailValue = retailReturn;
+      el.innerHTML = 'Cost: <strong>' + money(total) + '</strong>'
+        + '<br><span class="text-muted">Package wholesale return:</span> <strong>' + money(wholesaleReturn) + '</strong>'
+        + ' <span class="' + (wholesaleProfit < 0 ? 'text-danger' : 'text-success') + '">Profit ' + money(wholesaleProfit) + ' · ' + wholesaleMargin.toFixed(1) + '%</span>'
+        + '<br><span class="text-muted">Retail return:</span> <strong>' + money(retailReturn) + '</strong>'
+        + ' <span class="' + (retailProfit < 0 ? 'text-danger' : 'text-success') + '">Profit ' + money(retailProfit) + ' · ' + retailMargin.toFixed(1) + '%</span>';
       grand += total;
+      grandWholesale += wholesaleReturn;
+      grandRetail += retailReturn;
     });
     document.getElementById('grandTotal').textContent = money(grand);
+    document.getElementById('grandWholesaleTotal').textContent = money(grandWholesale);
+    document.getElementById('grandRetailTotal').textContent = money(grandRetail);
+    var grandWholesaleProfit = grandWholesale - grand;
+    var grandRetailProfit = grandRetail - grand;
+    document.getElementById('grandWholesaleProfit').textContent = money(grandWholesaleProfit);
+    document.getElementById('grandRetailProfit').textContent = money(grandRetailProfit);
+    document.getElementById('grandWholesaleMargin').textContent = (grandWholesale > 0 ? (grandWholesaleProfit / grandWholesale * 100) : 0).toFixed(1) + '%';
+    document.getElementById('grandRetailMargin').textContent = (grandRetail > 0 ? (grandRetailProfit / grandRetail * 100) : 0).toFixed(1) + '%';
   }
 
   function refreshSelectedTotal(){

@@ -658,6 +658,7 @@ class SaleModel extends Model
         $tid = \TenantContext::tenantId();
         if ($tid === null) { return []; }
 
+        $this->ensureColumn('products', 'package_buying_price', "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $costCol = $this->resolveCostColumn($costCol);
         if ($costCol === null) {
             throw new \RuntimeException('NO_COST_COLUMN');
@@ -675,7 +676,28 @@ class SaleModel extends Model
                        MAX(si.unit) AS unit,
                        SUM(GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0)) AS qty,
                        SUM(si.line_total) AS revenue,
-                       SUM(GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)) AS cost
+                       SUM(
+                           CASE
+                               WHEN si.price_type = 'wholesale'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                       ) AS cost,
+                       SUM(CASE WHEN si.price_type = 'retail' THEN si.line_total ELSE 0 END)
+                       - SUM(CASE WHEN si.price_type = 'retail' THEN GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN si.price_type = 'wholesale' THEN si.line_total ELSE 0 END)
+                       - SUM(CASE WHEN si.price_type = 'wholesale' THEN
+                           CASE
+                               WHEN COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                         ELSE 0 END) AS wholesale_profit
                   FROM sale_items si
                   JOIN sales s     ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
              LEFT JOIN products p  ON p.id = si.product_id AND p.tenant_id = si.tenant_id
@@ -700,6 +722,8 @@ class SaleModel extends Model
             $r['qty']        = (float) $r['qty'];
             $r['revenue']    = $rev;
             $r['cost']       = $cost;
+            $r['retail_profit'] = round((float) ($r['retail_profit'] ?? 0), 2);
+            $r['wholesale_profit'] = round((float) ($r['wholesale_profit'] ?? 0), 2);
             $r['profit']     = round($rev - $cost, 2);
             $r['margin']     = $rev > 0 ? round(($rev - $cost) / $rev * 100, 1) : 0.0;
         }

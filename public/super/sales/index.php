@@ -98,12 +98,16 @@ try {
             $byProduct[$pid]['qty']     += $op['qty'];
             $byProduct[$pid]['revenue'] += $op['revenue'];
             $byProduct[$pid]['cost']    += $op['cost'];
+            $byProduct[$pid]['retail_profit'] = ($byProduct[$pid]['retail_profit'] ?? 0) + ($op['retail_profit'] ?? 0);
+            $byProduct[$pid]['wholesale_profit'] = ($byProduct[$pid]['wholesale_profit'] ?? 0) + ($op['wholesale_profit'] ?? 0);
         } else {
             $byProduct[$pid] = $op;
         }
     }
     foreach ($byProduct as &$bp) {
         $bp['profit'] = round($bp['revenue'] - $bp['cost'], 2);
+        $bp['retail_profit'] = round((float) ($bp['retail_profit'] ?? 0), 2);
+        $bp['wholesale_profit'] = round((float) ($bp['wholesale_profit'] ?? 0), 2);
         $bp['margin'] = $bp['revenue'] > 0 ? round($bp['profit'] / $bp['revenue'] * 100, 1) : 0.0;
     }
     unset($bp);
@@ -367,7 +371,9 @@ ob_start();
             <th class="text-end">Sold</th>
             <th class="text-end">Revenue</th>
             <th class="text-end">Cost</th>
-            <th class="text-end">Profit</th>
+            <th class="text-end">Retail Profit</th>
+            <th class="text-end">Wholesale Profit</th>
+            <th class="text-end">Total Profit</th>
             <th class="text-end">Margin</th>
           </tr></thead>
           <tbody>
@@ -379,6 +385,8 @@ ob_start();
               <td class="text-end small text-nowrap"><?php echo $qtyLabel; ?><?php echo $pp['unit'] ? ' '.htmlspecialchars($pp['unit']) : ''; ?></td>
               <td class="text-end small">KES <?php echo number_format($pp['revenue'],0); ?></td>
               <td class="text-end small text-muted"><?php echo $pp['cost'] > 0 ? 'KES '.number_format($pp['cost'],0) : '—'; ?></td>
+              <td class="text-end fw-semibold <?php echo ($pp['retail_profit'] ?? 0) < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format((float)($pp['retail_profit'] ?? 0),0); ?></td>
+              <td class="text-end fw-semibold <?php echo ($pp['wholesale_profit'] ?? 0) < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format((float)($pp['wholesale_profit'] ?? 0),0); ?></td>
               <td class="text-end fw-semibold <?php echo $pp['profit'] < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($pp['profit'],0); ?></td>
               <td class="text-end small">
                 <?php if ($pp['cost'] <= 0): ?>
@@ -396,6 +404,8 @@ ob_start();
               <td></td>
               <td class="text-end">KES <?php echo number_format($grossRevenue,0); ?></td>
               <td class="text-end text-muted">KES <?php echo number_format($cogs,0); ?></td>
+              <td class="text-end <?php echo array_sum(array_column($productProfit, 'retail_profit')) < 0 ? 'text-danger':'text-success'; ?>">KES <?php echo number_format(array_sum(array_column($productProfit, 'retail_profit')),0); ?></td>
+              <td class="text-end <?php echo array_sum(array_column($productProfit, 'wholesale_profit')) < 0 ? 'text-danger':'text-success'; ?>">KES <?php echo number_format(array_sum(array_column($productProfit, 'wholesale_profit')),0); ?></td>
               <td class="text-end <?php echo $grossProfit < 0 ? 'text-danger':'text-success'; ?>">KES <?php echo number_format($grossProfit,0); ?></td>
               <td class="text-end small text-muted"><?php echo $grossRevenue > 0 ? number_format($grossProfit / $grossRevenue * 100, 1).'%' : '—'; ?></td>
             </tr>

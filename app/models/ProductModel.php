@@ -277,7 +277,9 @@ class ProductModel extends Model
         $productType = in_array($productType, self::PRODUCT_TYPES, true) ? $productType : 'product';
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $stmt = $this->db->prepare(
-            "SELECT p.id, p.name, p.quantity, p.faulty_quantity, p.unit, p.colors, p.buying_price, p.image_path, p.barcode,
+            "SELECT p.id, p.name, p.quantity, p.faulty_quantity, p.unit, p.colors, p.buying_price,
+                    p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price,
+                    p.package_buying_price, p.image_path, p.barcode,
                     c.name AS category_name, c.name AS subject_name,
                     pu.name AS publisher_name, br.name AS brand_name
                FROM products p
@@ -455,6 +457,7 @@ class ProductModel extends Model
             'units_per_pack' => "ALTER TABLE `products` ADD COLUMN `units_per_pack` DECIMAL(12,2) NOT NULL DEFAULT 1.00 AFTER `unit`",
             'pack_unit' => "ALTER TABLE `products` ADD COLUMN `pack_unit` VARCHAR(20) NULL AFTER `units_per_pack`",
             'pack_price' => "ALTER TABLE `products` ADD COLUMN `pack_price` DECIMAL(12,2) NULL AFTER `pack_unit`",
+            'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`",
             'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
         ];
 
@@ -536,12 +539,27 @@ class ProductModel extends Model
         if ($sizeValue !== '' && !in_array($sizeUnit, self::SIZE_UNITS, true)) {
             $errors['size_unit'] = 'Choose ML or L.';
         }
-        if (!is_numeric($in['buying_price'] ?? null) || (float) $in['buying_price'] < 0) {
+        $hasBuying = ($in['buying_price'] ?? '') !== '';
+        $hasPackageBuying = ($in['package_buying_price'] ?? '') !== '';
+        $unitsPerPackIn = (float) ($in['units_per_pack'] ?? 1);
+        $hasPack = trim((string) ($in['pack_unit'] ?? '')) !== '' && $unitsPerPackIn > 1;
+        if ((!$hasBuying && !$hasPackageBuying) || ($hasBuying && (!is_numeric($in['buying_price']) || (float) $in['buying_price'] < 0))) {
             $errors['buying_price'] = 'Enter a valid buying price.';
+        }
+        if ($hasPackageBuying && (!is_numeric($in['package_buying_price']) || (float) $in['package_buying_price'] < 0)) {
+            $errors['package_buying_price'] = 'Enter a valid package buying price.';
         }
         $wholesaleIn = $in['wholesale_price'] ?? '';
         if ($wholesaleIn !== '' && (!is_numeric($wholesaleIn) || (float) $wholesaleIn < 0)) {
             $errors['wholesale_price'] = 'Enter a valid wholesale price.';
+        }
+        if ($hasPack) {
+            if (!$hasPackageBuying || (float) ($in['package_buying_price'] ?? 0) <= 0) {
+                $errors['package_buying_price'] = 'Buying price of the package is required.';
+            }
+            if (($in['pack_price'] ?? '') === '' || !is_numeric($in['pack_price']) || (float) $in['pack_price'] <= 0) {
+                $errors['pack_price'] = 'Selling price of the package (wholesale price) is required.';
+            }
         }
         if (!is_numeric($in['retail_price'] ?? null) || (float) $in['retail_price'] < 0) {
             $errors['retail_price'] = 'Enter a valid retail price.';
@@ -583,8 +601,6 @@ class ProductModel extends Model
         $status = $in['status'] ?? 'active';
         $status = in_array($status, ['active', 'draft', 'archived'], true) ? $status : 'active';
         $retail = (float) ($in['retail_price'] ?? $in['selling_price'] ?? 0);
-        // Wholesale is optional — default it to the selling price rather than 0.
-        $wholesale = ($in['wholesale_price'] ?? '') !== '' ? (float) $in['wholesale_price'] : $retail;
         $sizeValue = ($in['size_value'] ?? '') !== '' ? (float) $in['size_value'] : null;
         $sizeUnit  = $sizeValue !== null ? ($in['size_unit'] ?? null) : null;
         // Clearing the offer price clears the whole offer (start/end go with it).
@@ -597,6 +613,16 @@ class ProductModel extends Model
         $unitsPerPack = max(0.01, (float) ($in['units_per_pack'] ?? 1));
         $packUnit = trim((string) ($in['pack_unit'] ?? '')) ?: null;
         $packPrice = ($in['pack_price'] ?? '') !== '' ? (float) $in['pack_price'] : null;
+        // For packaged products the wholesale selling price is the package
+        // price; this per-content value is derived for legacy line-item math.
+        $wholesale = ($packUnit !== null && $packPrice !== null && $unitsPerPack > 1)
+            ? round($packPrice / $unitsPerPack, 2)
+            : (($in['wholesale_price'] ?? '') !== '' ? (float) $in['wholesale_price'] : $retail);
+        $packageBuying = ($in['package_buying_price'] ?? '') !== '' ? (float) $in['package_buying_price'] : null;
+        $buyingPrice = (float) ($in['buying_price'] ?? 0);
+        if ($packageBuying !== null && $packUnit !== null && $unitsPerPack > 0) {
+            $buyingPrice = round($packageBuying / $unitsPerPack, 2);
+        }
         return [
             'product_type'        => $productType,
             'category_id'         => $catId > 0 ? $catId : null,
@@ -618,7 +644,8 @@ class ProductModel extends Model
             'pack_price'          => $packPrice,
             'size_value'          => $sizeValue,
             'size_unit'           => $sizeUnit,
-            'buying_price'        => (float) ($in['buying_price'] ?? 0),
+            'buying_price'        => $buyingPrice,
+            'package_buying_price' => $packageBuying,
             'selling_price'       => $retail,
             'wholesale_price'     => $wholesale,
             'retail_price'        => $retail,

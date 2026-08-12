@@ -219,8 +219,9 @@ ob_start();
             <th>Unit</th>
             <th class="text-end">Good qty</th>
             <th class="text-end">Faulty</th>
-            <th class="text-end">Buy</th>
-            <th class="text-end">Sell</th>
+            <th class="text-end">Buying Prices</th>
+            <th class="text-end">Selling Prices</th>
+            <th class="text-end">Profit Totals</th>
             <th class="text-end">VAT</th>
             <th class="text-end">Credit limit</th>
             <th>Status</th>
@@ -233,6 +234,16 @@ ob_start();
               $qty = (float)$p['quantity'];
               $faulty = (float)($p['faulty_quantity'] ?? 0);
               $retail = (float)($p['retail_price'] ?? $p['selling_price']);
+              $unitsPerPack = max(1, (float)($p['units_per_pack'] ?? 1));
+              $packUnit = trim((string)($p['pack_unit'] ?? ''));
+              $packBuy = ($p['package_buying_price'] ?? '') !== '' && $p['package_buying_price'] !== null ? (float)$p['package_buying_price'] : 0.0;
+              $packSell = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float)$p['pack_price'] : 0.0;
+              $hasPack = $packUnit !== '' && $unitsPerPack > 1;
+              $packageCount = $hasPack ? floor(($qty / $unitsPerPack) * 100) / 100 : $qty;
+              $retailProfitTotal = ($retail - $buy) * $qty;
+              $wholesaleProfitTotal = ($hasPack && $packBuy > 0 && $packSell > 0)
+                  ? (($packSell - $packBuy) * $packageCount)
+                  : (((float)($p['wholesale_price'] ?? 0) - $buy) * $qty);
               $low = $qty <= (int)$p['low_stock_threshold'];
               $colors = $p['colors'] ? (is_array($p['colors']) ? $p['colors'] : (json_decode($p['colors'], true) ?: [])) : [];
               if (is_string($p['colors'] ?? null) && !$colors && $p['colors'] !== '') {
@@ -261,14 +272,26 @@ ob_start();
             <td class="text-end <?php echo $faulty > 0 ? 'text-warning fw-semibold' : 'text-muted'; ?>">
               <?php echo rtrim(rtrim(number_format($faulty, 2), '0'), '.'); ?>
             </td>
-            <td class="text-end text-muted">KES <?php echo number_format($buy, 0); ?></td>
+            <td class="text-end">
+              <div class="text-muted small">Content: KES <?php echo number_format($buy, 0); ?></div>
+              <?php if ($hasPack): ?>
+                <div class="small">Package: <?php echo $packBuy > 0 ? 'KES ' . number_format($packBuy, 0) : '<span class="text-danger">missing</span>'; ?></div>
+              <?php endif; ?>
+            </td>
             <td class="text-end">
               <?php if ($eff['on_offer']): ?>
-                <span class="text-decoration-line-through text-muted small">KES <?php echo number_format($retail, 0); ?></span>
-                <span class="fw-semibold" style="color:#b45309;">KES <?php echo number_format($eff['price'], 0); ?></span>
+                <div><span class="text-decoration-line-through text-muted small">KES <?php echo number_format($retail, 0); ?></span>
+                <span class="fw-semibold" style="color:#b45309;">KES <?php echo number_format($eff['price'], 0); ?></span></div>
               <?php else: ?>
-                KES <?php echo number_format($retail, 0); ?>
+                <div>Retail: KES <?php echo number_format($retail, 0); ?></div>
               <?php endif; ?>
+              <?php if ($hasPack): ?>
+                <div class="text-muted small">Wholesale/<?php echo htmlspecialchars($packUnit); ?>: <?php echo $packSell > 0 ? 'KES ' . number_format($packSell, 0) : '<span class="text-danger">missing</span>'; ?></div>
+              <?php endif; ?>
+            </td>
+            <td class="text-end small">
+              <div>Retail: <span class="<?php echo $retailProfitTotal < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($retailProfitTotal, 0); ?></span></div>
+              <div>Wholesale: <span class="<?php echo $wholesaleProfitTotal < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($wholesaleProfitTotal, 0); ?></span></div>
             </td>
             <td class="text-end text-muted"><?php echo number_format($vatRate, 2); ?>%</td>
             <td class="text-end text-muted">
