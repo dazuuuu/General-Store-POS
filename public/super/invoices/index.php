@@ -58,6 +58,7 @@ $invoices = $q !== ''
     ? $O->searchInvoices($q, ['open_only' => false, 'limit' => 100])
     : $O->documentOrders(100);
 $itemsByOrder = $O->itemsForMany(array_column($invoices, 'id'));
+$invoiceSearchApi = public_url('api/orders/invoice_search.php');
 $page_title = 'Invoices';
 ob_start();
 ?>
@@ -69,6 +70,27 @@ ob_start();
     <p class="text-muted small mb-0">Generate customer invoices directly from products. Stock is deducted immediately; unpaid balances are collected from Payments.</p>
   </div>
   <a class="btn btn-sm btn-outline-success" href="<?php echo public_url('super/payments/'); ?>"><i class="fas fa-cash-register me-1"></i>Payments</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+  <div class="card-body p-3">
+    <form method="get" class="row g-2 align-items-end" id="invoiceListSearchForm" autocomplete="off">
+      <div class="col-12 col-md-9 position-relative">
+        <label class="form-label small mb-1">Search invoices</label>
+        <input type="search" name="q" id="invoiceListSearch" class="form-control form-control-lg"
+               placeholder="Customer name, company, or invoice number…"
+               value="<?php echo htmlspecialchars($q); ?>">
+        <div class="invoice-suggest-menu" id="invoiceListSuggestMenu"></div>
+        <div class="form-text">Shows customer / company, invoice number, and balance owed.</div>
+      </div>
+      <div class="col-6 col-md-2">
+        <button class="btn btn-primary btn-lg w-100"><i class="fas fa-magnifying-glass me-1"></i>Find</button>
+      </div>
+      <div class="col-6 col-md-1">
+        <?php if ($q !== ''): ?><a class="btn btn-outline-secondary btn-lg w-100" href="<?php echo public_url('super/invoices/'); ?>">Clear</a><?php endif; ?>
+      </div>
+    </form>
+  </div>
 </div>
 
 <form method="post" id="invoiceForm" class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
@@ -96,13 +118,8 @@ ob_start();
 </form>
 
 <div class="card border-0 shadow-sm" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <h2 class="h6 fw-bold mb-0">Customer invoices</h2>
-    <form method="get" class="d-flex gap-2" style="min-width:min(100%,360px);">
-      <input type="search" name="q" class="form-control form-control-sm" placeholder="Customer, company, or invoice #" value="<?php echo htmlspecialchars($q); ?>">
-      <button class="btn btn-sm btn-outline-primary">Search</button>
-      <?php if ($q !== ''): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/invoices/'); ?>">Clear</a><?php endif; ?>
-    </form>
+  <div class="px-4 py-3 border-bottom bg-white">
+    <h2 class="h6 fw-bold mb-0"><?php echo $q !== '' ? 'Search results' : 'Customer invoices'; ?></h2>
   </div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
@@ -302,6 +319,61 @@ ob_start();
   document.getElementById('discountAmount').addEventListener('input', recalc);
   attachCustomerLookup();
   addRow();
+})();
+</script>
+<style>
+.invoice-suggest-menu{position:absolute;left:0;right:0;top:100%;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:320px;overflow:auto;margin-top:4px;}
+.invoice-suggest-menu.show{display:block;}
+.invoice-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.7rem .85rem;border-bottom:1px solid #f1f5f9;}
+.invoice-suggest-menu button:last-child{border-bottom:0;}
+.invoice-suggest-menu button:hover{background:#f8fafc;}
+.invoice-suggest-menu .meta{display:block;color:#64748b;font-size:.78rem;margin-top:2px;}
+.invoice-suggest-menu .bal{float:right;font-weight:700;color:#b91c1c;}
+.invoice-suggest-menu .bal.paid{color:#15803d;}
+</style>
+<script>
+(function(){
+  var input = document.getElementById('invoiceListSearch');
+  var menu = document.getElementById('invoiceListSuggestMenu');
+  var api = <?php echo json_encode($invoiceSearchApi); ?>;
+  if (!input || !menu) return;
+  var timer = null;
+  function hide(){ menu.classList.remove('show'); }
+  function money(n){ return 'KES ' + (Number(n)||0).toLocaleString('en-KE', {maximumFractionDigits:0}); }
+  function render(items){
+    menu.innerHTML = '';
+    if (!items.length) { hide(); return; }
+    items.forEach(function(it){
+      var b = document.createElement('button');
+      b.type = 'button';
+      var title = (it.customer_name || 'Customer') + (it.company_name ? ' · ' + it.company_name : '');
+      var balClass = (Number(it.balance) || 0) > 0 ? 'bal' : 'bal paid';
+      b.innerHTML = '<span class="' + balClass + '">' + money(it.balance) + '</span><strong></strong><span class="meta"></span>';
+      b.querySelector('strong').textContent = title;
+      b.querySelector('.meta').textContent = (it.receipt_number || '') + (it.status === 'paid' ? ' · Paid' : ' · Unpaid') + (it.phone ? ' · ' + it.phone : '');
+      b.addEventListener('mousedown', function(e){
+        e.preventDefault();
+        window.location.href = '?q=' + encodeURIComponent(it.receipt_number || it.customer_name || '');
+      });
+      menu.appendChild(b);
+    });
+    menu.classList.add('show');
+  }
+  input.addEventListener('input', function(){
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (q.length < 1) { hide(); return; }
+    timer = setTimeout(function(){
+      fetch(api + '?q=' + encodeURIComponent(q) + '&limit=12&open_only=0')
+        .then(function(r){ return r.json(); })
+        .then(function(data){ render(data.items || []); })
+        .catch(function(){ hide(); });
+    }, 180);
+  });
+  input.addEventListener('blur', function(){ setTimeout(hide, 160); });
+  input.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') hide();
+  });
 })();
 </script>
 <?php
