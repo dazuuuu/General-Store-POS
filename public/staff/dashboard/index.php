@@ -377,10 +377,10 @@ ob_start();
         </div>
       </div>
       <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Set cart price</span>
+        <span>Tap Add adds to</span>
         <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:150px;">
-          <option value="retail">Retail (item)</option>
-          <option value="wholesale">Wholesale (pack)</option>
+          <option value="retail">Retail (items)</option>
+          <option value="wholesale">Wholesale (packs)</option>
         </select>
       </div>
       <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
@@ -542,14 +542,17 @@ ob_start();
 .customer-suggest-menu button:hover{background:#f8fafc;}
 .customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
 .pos-cart{max-height:280px;overflow-y:auto;margin:14px 0;}
-.pos-cart-line{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #f3f4f7;}
-.pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;}
+.pos-cart-line{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f7;}
+.pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;margin-top:2px;}
 .pos-cart-name{font-weight:600;font-size:.85rem;color:#1f2330;}
 .pos-cart-price{color:#9aa0ac;font-size:.76rem;}
 .pos-qty{display:flex;align-items:center;gap:6px;}
 .pos-qty button{width:24px;height:24px;border-radius:6px;border:1px solid #eef0f4;background:#fff;font-weight:700;line-height:1;}
 .pos-qty-input{width:72px;height:28px;border:1px solid #eef0f4;border-radius:7px;text-align:center;font-weight:700;font-size:.82rem;}
-.pos-cart-del{color:#64748b;background:none;border:0;font-size:.85rem;}
+.pos-dual-qty{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.pos-dual-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;}
+.pos-dual-label{font-size:.72rem;font-weight:600;color:#5b6070;min-width:0;flex:1;}
+.pos-cart-del{color:#64748b;background:none;border:0;font-size:.85rem;margin-top:4px;}
 .pos-totals{border-top:1px dashed #eef0f4;padding-top:12px;font-size:.9rem;color:#5b6070;}
 .pos-total-line{font-weight:800;font-size:1.05rem;color:#1f2330;margin-top:6px;}
 .pos-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
@@ -589,22 +592,106 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
 var cart = {};
 try {
     (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) {
-        cart[c.product_id] = {
-            qty: parseFloat(c.quantity) || 0,
-            priceType: c.price_type === 'wholesale' ? 'wholesale' : 'retail'
-        };
+        var id = String(c.product_id);
+        if (!cart[id]) cart[id] = { retail: 0, wholesale: 0 };
+        var qty = parseFloat(c.quantity) || 0;
+        if (c.price_type === 'wholesale') cart[id].wholesale += qty;
+        else cart[id].retail += qty;
     });
 } catch (e) {}
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
 function defaultSaleType() { return document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail'; }
-function lineType(id) { return cart[id] && cart[id].priceType === 'wholesale' ? 'wholesale' : 'retail'; }
-function sellsByPack(p, type) { return type === 'wholesale' && p.packUnit && p.unitsPerPack > 1 && p.packPrice > 0; }
+function ensureCart(id) {
+    if (!cart[id]) cart[id] = { retail: 0, wholesale: 0 };
+    return cart[id];
+}
+function isPackProduct(p) { return !!(p && p.packUnit && p.unitsPerPack > 1 && p.packPrice > 0); }
+function sellsByPack(p, type) { return type === 'wholesale' && isPackProduct(p); }
 function saleStockQty(p, saleQty, type) { return sellsByPack(p, type) ? saleQty * p.unitsPerPack : saleQty; }
-function maxSaleQty(p, type) { return sellsByPack(p, type) ? Math.floor((p.stock / p.unitsPerPack) * 100) / 100 : p.stock; }
-function saleUnitLabel(p, type) { return sellsByPack(p, type) ? p.packUnit : ''; }
 function productPrice(p, type) {
     if (sellsByPack(p, type)) return p.packPrice;
     return type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price;
+}
+function wholesaleUnitLabel(p) { return isPackProduct(p) ? p.packUnit : 'item'; }
+function stockUsed(id) {
+    var p = PRODUCTS[id], c = cart[id];
+    if (!p || !c) return 0;
+    return (c.retail || 0) + saleStockQty(p, c.wholesale || 0, 'wholesale');
+}
+function maxRetail(id) {
+    var p = PRODUCTS[id], c = ensureCart(id);
+    return Math.max(0, Math.round((p.stock - saleStockQty(p, c.wholesale || 0, 'wholesale')) * 100) / 100);
+}
+function maxWholesale(id) {
+    var p = PRODUCTS[id], c = ensureCart(id);
+    var left = Math.max(0, p.stock - (c.retail || 0));
+    if (isPackProduct(p)) return Math.floor((left / p.unitsPerPack) * 100) / 100;
+    return Math.round(left * 100) / 100;
+}
+function cartHasItems() {
+    return Object.keys(cart).some(function (id) {
+        return (cart[id].retail || 0) > 0 || (cart[id].wholesale || 0) > 0;
+    });
+}
+function serializeCart() {
+    var out = [];
+    Object.keys(cart).forEach(function (id) {
+        var p = PRODUCTS[id], c = cart[id];
+        if (!p || !c) return;
+        if ((c.retail || 0) > 0) {
+            out.push({ product_id: parseInt(id, 10), quantity: c.retail, price_type: 'retail' });
+        }
+        if ((c.wholesale || 0) > 0) {
+            out.push({
+                product_id: parseInt(id, 10),
+                quantity: saleStockQty(p, c.wholesale, 'wholesale'),
+                price_type: 'wholesale'
+            });
+        }
+    });
+    return out;
+}
+function pruneCart(id) {
+    if (!cart[id]) return;
+    if ((cart[id].retail || 0) <= 0 && (cart[id].wholesale || 0) <= 0) delete cart[id];
+}
+function setRetailQty(id, val) {
+    var p = PRODUCTS[id]; if (!p) return;
+    var c = ensureCart(id);
+    val = Math.round((parseFloat(val) || 0) * 100) / 100;
+    var max = Math.max(0, Math.round((p.stock - saleStockQty(p, c.wholesale || 0, 'wholesale')) * 100) / 100);
+    if (val > max) val = max;
+    c.retail = val > 0 ? val : 0;
+    pruneCart(id);
+    render();
+}
+function setWholesaleQty(id, val) {
+    var p = PRODUCTS[id]; if (!p) return;
+    var c = ensureCart(id);
+    val = Math.round((parseFloat(val) || 0) * 100) / 100;
+    var left = Math.max(0, p.stock - (c.retail || 0));
+    var max = isPackProduct(p) ? Math.floor((left / p.unitsPerPack) * 100) / 100 : Math.round(left * 100) / 100;
+    if (val > max) val = max;
+    c.wholesale = val > 0 ? val : 0;
+    pruneCart(id);
+    render();
+}
+function add(id) {
+    var p = PRODUCTS[id]; if (!p) return;
+    var type = defaultSaleType();
+    var c = ensureCart(id);
+    if (type === 'wholesale') setWholesaleQty(id, (c.wholesale || 0) + 1);
+    else setRetailQty(id, (c.retail || 0) + 1);
+}
+function subtotal() {
+    var t = 0;
+    Object.keys(cart).forEach(function (id) {
+        var p = PRODUCTS[id], c = cart[id];
+        if (!p || !c) return;
+        if (c.retail > 0) t += productPrice(p, 'retail') * c.retail;
+        if (c.wholesale > 0) t += productPrice(p, 'wholesale') * c.wholesale;
+    });
+    return t;
 }
 var CUSTOMER_SEARCH_URL = <?php echo json_encode($customerSearchUrl); ?>;
 function attachCustomerLookup() {
@@ -651,32 +738,6 @@ function attachCustomerLookup() {
 }
 attachCustomerLookup();
 
-function setQty(id, val) {
-    var p = PRODUCTS[id]; if (!p) return;
-    var type = lineType(id);
-    val = Math.round((parseFloat(val) || 0) * 100) / 100;
-    if (val <= 0) { delete cart[id]; render(); return; }
-    var max = maxSaleQty(p, type);
-    if (val > max) { val = max; }
-    cart[id] = { qty: val, priceType: type }; render();
-}
-function add(id) {
-    if (!cart[id]) { cart[id] = { qty: 0, priceType: defaultSaleType() }; }
-    setQty(id, cart[id].qty + 1);
-}
-function setLineType(id, type) {
-    var p = PRODUCTS[id]; if (!p || !cart[id]) return;
-    var oldType = lineType(id);
-    var nextType = type === 'wholesale' ? 'wholesale' : 'retail';
-    var stockQty = saleStockQty(p, cart[id].qty, oldType);
-    cart[id].priceType = nextType;
-    cart[id].qty = sellsByPack(p, nextType) ? Math.floor((stockQty / p.unitsPerPack) * 100) / 100 : stockQty;
-    var max = maxSaleQty(p, nextType);
-    if (cart[id].qty > max) cart[id].qty = max;
-    if (cart[id].qty <= 0) delete cart[id];
-    render();
-}
-function subtotal() { var t = 0; for (var id in cart) { t += productPrice(PRODUCTS[id], lineType(id)) * cart[id].qty; } return t; }
 function total() {
     var sub = subtotal();
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
@@ -704,59 +765,52 @@ function updateTotals() {
 
 function render() {
     var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
-    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4">Tap a product to add it.</div>';
+    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4">Tap a product to add it. Type qty for retail items and/or wholesale packs.</div>';
     ids.forEach(function (id) {
-        var p = PRODUCTS[id], qty = cart[id].qty, type = lineType(id);
-        var unit = saleUnitLabel(p, type);
-        var max = maxSaleQty(p, type);
+        var p = PRODUCTS[id], c = cart[id];
+        if (!p || !c) return;
+        var retailMax = Math.max(c.retail || 0, maxRetail(id));
+        var wholesaleMax = Math.max(c.wholesale || 0, maxWholesale(id));
+        var wLabel = wholesaleUnitLabel(p);
+        var lineTotal = (c.retail || 0) * productPrice(p, 'retail') + (c.wholesale || 0) * productPrice(p, 'wholesale');
         var line = document.createElement('div');
-        line.className = 'pos-cart-line';
+        line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML = (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
-          + '<div class="flex-grow-1"><div class="pos-cart-name">' + p.name + '</div><div class="pos-cart-price">' + money(productPrice(p, type)) + (unit ? ' / ' + unit : ' / item') + '</div>'
-          + '<select class="form-select form-select-sm mt-1 pos-price-type" data-price-type="' + id + '">'
-          + '<option value="retail"' + (type === 'retail' ? ' selected' : '') + '>Retail sale — ' + money(p.price) + ' / item</option>'
-          + '<option value="wholesale"' + (type === 'wholesale' ? ' selected' : '') + '>Wholesale sale — ' + money(sellsByPack(p, 'wholesale') ? p.packPrice : (p.wholesale > 0 ? p.wholesale : p.price)) + (sellsByPack(p, 'wholesale') ? (' / ' + p.packUnit) : ' / item') + '</option>'
-          + '</select></div>'
-          + '<div class="pos-qty"><button type="button" data-dec="' + id + '">−</button><input type="number" step="0.01" min="0" max="' + max + '" class="pos-qty-input" data-qty="' + id + '" value="' + qty + '"><button type="button" data-inc="' + id + '">+</button></div>'
+          + '<div class="flex-grow-1">'
+          +   '<div class="pos-cart-name">' + p.name + '</div>'
+          +   '<div class="pos-dual-qty">'
+          +     '<label class="pos-dual-row"><span class="pos-dual-label">Retail <span class="text-muted">(' + money(productPrice(p, 'retail')) + '/item)</span></span>'
+          +       '<span class="pos-qty"><button type="button" data-dec-retail="' + id + '">−</button>'
+          +       '<input type="number" step="0.01" min="0" max="' + retailMax + '" class="pos-qty-input" data-retail-qty="' + id + '" value="' + (c.retail || 0) + '" inputmode="decimal">'
+          +       '<button type="button" data-inc-retail="' + id + '">+</button></span></label>'
+          +     '<label class="pos-dual-row"><span class="pos-dual-label">Wholesale <span class="text-muted">(' + money(productPrice(p, 'wholesale')) + '/' + wLabel + ')</span></span>'
+          +       '<span class="pos-qty"><button type="button" data-dec-wholesale="' + id + '">−</button>'
+          +       '<input type="number" step="0.01" min="0" max="' + wholesaleMax + '" class="pos-qty-input" data-wholesale-qty="' + id + '" value="' + (c.wholesale || 0) + '" inputmode="decimal">'
+          +       '<button type="button" data-inc-wholesale="' + id + '">+</button></span></label>'
+          +   '</div>'
+          +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal) + (isPackProduct(p) ? ' <span class="text-muted small">· stock used ' + stockUsed(id) + ' items</span>' : '') + '</div>'
+          + '</div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);
     });
-    document.getElementById('holdBtn').disabled = ids.length === 0;
-    document.getElementById('checkoutBtn').disabled = ids.length === 0;
-    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (id) {
-        return { product_id: parseInt(id, 10), quantity: saleStockQty(PRODUCTS[id], cart[id].qty, lineType(id)), price_type: lineType(id) };
-    }));
+    var empty = !cartHasItems();
+    document.getElementById('holdBtn').disabled = empty;
+    document.getElementById('checkoutBtn').disabled = empty;
+    document.getElementById('cartInput').value = JSON.stringify(serializeCart());
     updateTotals();
 }
 function syncTypedQty(input) {
-    var id = input.dataset.qty;
-    var p = PRODUCTS[id]; if (!p) return;
-    var val = Math.round((parseFloat(input.value) || 0) * 100) / 100;
-    var max = maxSaleQty(p, lineType(id));
-    if (val > max) { val = max; input.value = val; }
-    if (val > 0) { cart[id].qty = val; } else { delete cart[id]; }
-    var ids = Object.keys(cart);
-    document.getElementById('holdBtn').disabled = ids.length === 0;
-    document.getElementById('checkoutBtn').disabled = ids.length === 0;
-    document.getElementById('cartInput').value = JSON.stringify(ids.map(function (cid) {
-        return { product_id: parseInt(cid, 10), quantity: saleStockQty(PRODUCTS[cid], cart[cid].qty, lineType(cid)), price_type: lineType(cid) };
-    }));
-    updateTotals();
+    if (input.dataset.retailQty) {
+        setRetailQty(input.dataset.retailQty, input.value);
+        return;
+    }
+    if (input.dataset.wholesaleQty) {
+        setWholesaleQty(input.dataset.wholesaleQty, input.value);
+    }
 }
 document.getElementById('discountInput').addEventListener('input', updateTotals);
 document.getElementById('saleType').addEventListener('change', function () {
-    var type = defaultSaleType();
-    Object.keys(cart).forEach(function (id) {
-        if (!cart[id] || !PRODUCTS[id]) return;
-        var oldType = lineType(id);
-        var stockQty = saleStockQty(PRODUCTS[id], cart[id].qty, oldType);
-        cart[id].priceType = type;
-        cart[id].qty = sellsByPack(PRODUCTS[id], type) ? Math.floor((stockQty / PRODUCTS[id].unitsPerPack) * 100) / 100 : stockQty;
-        var max = maxSaleQty(PRODUCTS[id], type);
-        if (cart[id].qty > max) cart[id].qty = max;
-        if (cart[id].qty <= 0) delete cart[id];
-    });
-    render();
+    // Only controls what Tap Add increments; existing dual quantities stay as typed.
 });
 document.getElementById('vatEnabledInput').addEventListener('change', function () {
     var enabled = document.getElementById('vatEnabledInput').checked;
@@ -768,25 +822,45 @@ document.getElementById('vatEnabledInput').addEventListener('change', function (
 document.querySelectorAll('.pos-card .pos-add').forEach(function (b) { b.addEventListener('click', function () { add(b.closest('.pos-card').dataset.id); }); });
 document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
-    if (t.dataset.inc) add(t.dataset.inc);
-    else if (t.dataset.dec) setQty(t.dataset.dec, (cart[t.dataset.dec] ? cart[t.dataset.dec].qty : 0) - 1);
+    if (t.dataset.incRetail) setRetailQty(t.dataset.incRetail, (cart[t.dataset.incRetail] ? cart[t.dataset.incRetail].retail : 0) + 1);
+    else if (t.dataset.decRetail) setRetailQty(t.dataset.decRetail, (cart[t.dataset.decRetail] ? cart[t.dataset.decRetail].retail : 0) - 1);
+    else if (t.dataset.incWholesale) setWholesaleQty(t.dataset.incWholesale, (cart[t.dataset.incWholesale] ? cart[t.dataset.incWholesale].wholesale : 0) + 1);
+    else if (t.dataset.decWholesale) setWholesaleQty(t.dataset.decWholesale, (cart[t.dataset.decWholesale] ? cart[t.dataset.decWholesale].wholesale : 0) - 1);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
 });
 document.getElementById('cartRows').addEventListener('change', function (e) {
-    var priceType = e.target.closest('[data-price-type]');
-    if (priceType) {
-        setLineType(priceType.dataset.priceType, priceType.value);
-        return;
-    }
-    var input = e.target.closest('[data-qty]');
-    if (input) setQty(input.dataset.qty, input.value);
+    var retail = e.target.closest('[data-retail-qty]');
+    if (retail) { setRetailQty(retail.dataset.retailQty, retail.value); return; }
+    var wholesale = e.target.closest('[data-wholesale-qty]');
+    if (wholesale) setWholesaleQty(wholesale.dataset.wholesaleQty, wholesale.value);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
-    var input = e.target.closest('[data-qty]');
-    if (input) syncTypedQty(input);
+    var input = e.target.closest('[data-retail-qty], [data-wholesale-qty]');
+    if (!input) return;
+    // Live update totals while typing without wiping the focused field via full re-render.
+    var id = input.dataset.retailQty || input.dataset.wholesaleQty;
+    var p = PRODUCTS[id]; if (!p) return;
+    var c = ensureCart(id);
+    var val = Math.round((parseFloat(input.value) || 0) * 100) / 100;
+    if (input.dataset.retailQty) {
+        var maxR = Math.max(0, Math.round((p.stock - saleStockQty(p, c.wholesale || 0, 'wholesale')) * 100) / 100);
+        if (val > maxR) { val = maxR; input.value = val; }
+        c.retail = val > 0 ? val : 0;
+    } else {
+        var left = Math.max(0, p.stock - (c.retail || 0));
+        var maxW = isPackProduct(p) ? Math.floor((left / p.unitsPerPack) * 100) / 100 : Math.round(left * 100) / 100;
+        if (val > maxW) { val = maxW; input.value = val; }
+        c.wholesale = val > 0 ? val : 0;
+    }
+    pruneCart(id);
+    var empty = !cartHasItems();
+    document.getElementById('holdBtn').disabled = empty;
+    document.getElementById('checkoutBtn').disabled = empty;
+    document.getElementById('cartInput').value = JSON.stringify(serializeCart());
+    updateTotals();
 });
 document.getElementById('cartRows').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && e.target.closest('[data-qty]')) {
+    if (e.key === 'Enter' && e.target.closest('[data-retail-qty], [data-wholesale-qty]')) {
         e.preventDefault();
         e.target.blur();
     }
@@ -901,7 +975,7 @@ document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventLis
 });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
-    if (Object.keys(cart).length === 0) { e.preventDefault(); alert('Add at least one product.'); return; }
+    if (!cartHasItems()) { e.preventDefault(); alert('Add at least one product.'); return; }
     if (document.getElementById('formAction').value === 'pay') {
         var m = payMethod(), t = total().total;
         if (m === 'cash' && (parseFloat(document.getElementById('cashGivenInput').value) || 0) < t) { e.preventDefault(); alert('Cash given is less than the total.'); return; }
@@ -947,7 +1021,7 @@ if (barcodeScan) {
         var id = BARCODES[code];
         if (!id) { flashScan('No product with that barcode.', false); return; }
         var p = PRODUCTS[id];
-        if (p && maxSaleQty(p, cart[id] ? lineType(id) : defaultSaleType()) <= (cart[id] ? cart[id].qty : 0)) { flashScan(p.name + ' — no more in stock.', false); return; }
+        if (p && stockUsed(id) >= p.stock) { flashScan(p.name + ' — no more in stock.', false); return; }
         add(id);
         flashScan((p ? p.name : 'Product') + ' added.', true);
     });
