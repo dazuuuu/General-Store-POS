@@ -780,19 +780,74 @@ class OrderModel extends Model
         return $row ?: null;
     }
 
-    /** All open tabs for the tenant, newest first. */
+    /** All open tabs for the tenant, oldest first (FIFO credit queue). */
     public function openOrders(): array
     {
         $tid = \TenantContext::tenantId();
         $sql = "SELECT o.*, u.username AS opened_by_name,
-                       (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+                       c.name AS customer_record_name,
+                       c.company_name AS customer_company,
+                       (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                       GREATEST(COALESCE(o.amount_due, GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0) AS balance_due
                   FROM orders o
              LEFT JOIN users u ON u.id = o.opened_by
+             LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
                  WHERE o.tenant_id = ? AND o.status = 'open'
                    AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
               ORDER BY o.created_at ASC, o.id ASC";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([$tid]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Search invoices by receipt #, customer name, company name, or phone.
+     * Defaults to open unpaid credit invoices (balance > 0).
+     *
+     * @param array{open_only?:bool,limit?:int} $opts
+     */
+    public function searchInvoices(string $q, array $opts = []): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) {
+            return [];
+        }
+        $q = trim($q);
+        $openOnly = !array_key_exists('open_only', $opts) || (bool) $opts['open_only'];
+        $limit = max(1, min(100, (int) ($opts['limit'] ?? 40)));
+
+        $sql = "SELECT o.*, u.username AS opened_by_name,
+                       c.name AS customer_record_name,
+                       c.company_name AS customer_company,
+                       (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                       GREATEST(COALESCE(o.amount_due, GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0) AS balance_due
+                  FROM orders o
+             LEFT JOIN users u ON u.id = o.opened_by
+             LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
+                 WHERE o.tenant_id = ? AND o.status <> 'void'";
+        $params = [$tid];
+
+        if ($openOnly) {
+            $sql .= " AND o.status = 'open'
+                      AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001";
+        }
+
+        if ($q !== '') {
+            $like = '%' . $q . '%';
+            $sql .= " AND (
+                        o.receipt_number LIKE ?
+                        OR o.table_name LIKE ?
+                        OR COALESCE(o.customer_phone,'') LIKE ?
+                        OR COALESCE(c.name,'') LIKE ?
+                        OR COALESCE(c.company_name,'') LIKE ?
+                        OR COALESCE(c.phone,'') LIKE ?
+                      )";
+            $params = array_merge($params, [$like, $like, $like, $like, $like, $like]);
+        }
+
+        $sql .= " ORDER BY o.created_at DESC, o.id DESC LIMIT " . (int) $limit;
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
 
@@ -802,9 +857,13 @@ class OrderModel extends Model
         $tid = \TenantContext::tenantId();
         $stmt = $this->db->prepare(
             "SELECT o.*, u.username AS opened_by_name,
-                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+                    c.name AS customer_record_name,
+                    c.company_name AS customer_company,
+                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                    GREATEST(COALESCE(o.amount_due, GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0) AS balance_due
                FROM orders o
           LEFT JOIN users u ON u.id = o.opened_by
+          LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
               WHERE o.tenant_id = ? AND o.status <> 'void'
            ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.id DESC
               LIMIT " . (int) $limit

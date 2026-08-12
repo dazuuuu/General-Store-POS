@@ -17,10 +17,28 @@ $receiptBase = $isStaffViewer ? public_url('staff/orders/receipt.php') : public_
 
 $error = '';
 $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
-$order = $receiptQuery !== '' ? $O->findByReceipt($receiptQuery) : null;
+$preferDeposit = isset($_GET['deposit']) || (($_POST['payment_method'] ?? '') === 'credit');
+$invoiceSearchApi = public_url('api/orders/invoice_search.php');
+$order = null;
+$searchMatches = [];
 
-if ($receiptQuery !== '' && !$order) {
-    $error = 'No invoice found with that number. Check it and try again.';
+if ($receiptQuery !== '') {
+    $order = $O->findByReceipt($receiptQuery);
+    if (!$order) {
+        $searchMatches = $O->searchInvoices($receiptQuery, ['open_only' => true, 'limit' => 20]);
+        if (count($searchMatches) === 1) {
+            $order = $O->find((int) $searchMatches[0]['id']);
+            $searchMatches = [];
+            if ($order && !empty($order['receipt_number'])) {
+                $qs = '?receipt=' . urlencode($order['receipt_number']);
+                if ($preferDeposit) { $qs .= '&deposit=1'; }
+                header('Location: ' . $paymentsBase . $qs);
+                exit;
+            }
+        } elseif (!$searchMatches) {
+            $error = 'No open invoice found for that search. Try the invoice number, customer name, or company.';
+        }
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settle' && $order) {
@@ -41,10 +59,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
         if ($res['ok']) {
             if (($res['status'] ?? 'paid') === 'paid') {
                 $_SESSION['flash']['success'] = 'Payment recorded for ' . $order['receipt_number'] . '.';
-                header('Location: ' . $receiptBase . '?id=' . (int) $order['id']);
+                header('Location: ' . $receiptBase . '?id=' . (int) $order['id'] . '&print=1');
             } else {
-                $_SESSION['flash']['success'] = 'Credit payment recorded. Balance remaining: KES ' . number_format((float) ($res['amount_due'] ?? 0), 0) . '.';
-                header('Location: ' . $paymentsBase . '?receipt=' . urlencode($order['receipt_number']));
+                $_SESSION['flash']['success'] = 'Deposit recorded. Balance remaining: KES ' . number_format((float) ($res['amount_due'] ?? 0), 0) . '.';
+                header('Location: ' . $receiptBase . '?id=' . (int) $order['id'] . '&print=1&deposit=1');
             }
             exit;
         }
@@ -60,20 +78,56 @@ ob_start();
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-12 col-sm-8">
-        <label class="form-label small mb-1">Invoice number</label>
-        <input type="text" name="receipt" class="form-control form-control-lg text-uppercase" placeholder="e.g. ORD-000123"
+    <form method="get" class="row g-2 align-items-end" id="paymentLookupForm" autocomplete="off">
+      <div class="col-12 col-sm-8 position-relative">
+        <label class="form-label small mb-1">Find credit invoice</label>
+        <input type="text" name="receipt" id="receiptSearch" class="form-control form-control-lg"
+               placeholder="Invoice number, customer name, or company…"
                value="<?php echo htmlspecialchars($receiptQuery); ?>" autofocus>
+        <div class="invoice-suggest-menu" id="paymentSuggestMenu"></div>
+        <div class="form-text">Search by invoice #, customer name, or company. Results show balance owed.</div>
       </div>
       <div class="col-12 col-sm-4">
         <button class="btn btn-primary btn-lg w-100"><i class="fas fa-magnifying-glass me-1"></i>Find</button>
       </div>
+      <?php if ($preferDeposit): ?><input type="hidden" name="deposit" value="1"><?php endif; ?>
     </form>
   </div>
 </div>
 
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+
+<?php if ($searchMatches && !$order): ?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
+  <div class="px-4 py-3 border-bottom"><strong><?php echo count($searchMatches); ?></strong> open invoices match “<?php echo htmlspecialchars($receiptQuery); ?>”</div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr class="text-muted small text-uppercase"><th>Customer / company</th><th>Invoice</th><th class="text-end">Balance</th><th></th></tr></thead>
+      <tbody>
+        <?php foreach ($searchMatches as $m):
+          $paid = max(0, (float) ($m['amount_paid'] ?? 0));
+          $due = (float) ($m['balance_due'] ?? $m['amount_due'] ?? 0);
+          if ($due <= 0.0001) { $due = max(0, (float) ($m['total'] ?? 0) - $paid); }
+          $cust = trim((string) ($m['table_name'] ?? ''));
+          $co = trim((string) ($m['customer_company'] ?? ''));
+        ?>
+        <tr>
+          <td>
+            <div class="fw-semibold"><?php echo htmlspecialchars($cust !== '' ? $cust : '—'); ?></div>
+            <?php if ($co !== ''): ?><div class="text-muted small"><?php echo htmlspecialchars($co); ?></div><?php endif; ?>
+          </td>
+          <td class="fw-semibold"><?php echo htmlspecialchars($m['receipt_number'] ?? ''); ?></td>
+          <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-success" href="<?php echo $paymentsBase . '?receipt=' . urlencode($m['receipt_number']) . ($preferDeposit ? '&deposit=1' : ''); ?>">Select</a>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
+<?php endif; ?>
 
 <?php if ($order):
     $amountPaid = max(0, (float) ($order['amount_paid'] ?? 0));
@@ -129,7 +183,7 @@ ob_start();
         <input type="hidden" name="action" value="settle">
         <input type="hidden" name="receipt_number" value="<?php echo htmlspecialchars($order['receipt_number']); ?>">
         <div class="btn-group payment-methods w-100 mb-3 flex-wrap" role="group">
-          <input type="radio" class="btn-check" name="payment_method" id="payCash" value="cash" checked>
+          <input type="radio" class="btn-check" name="payment_method" id="payCash" value="cash"<?php echo $preferDeposit ? '' : ' checked'; ?>>
           <label class="btn btn-outline-primary" for="payCash"><i class="fas fa-money-bill-wave me-1"></i>Cash</label>
           <input type="radio" class="btn-check" name="payment_method" id="payMpesa" value="mpesa">
           <label class="btn btn-outline-success" for="payMpesa"><i class="fas fa-mobile-screen me-1"></i>M-Pesa</label>
@@ -141,13 +195,13 @@ ob_start();
           <label class="btn btn-outline-secondary" for="paySacco"><i class="fas fa-landmark me-1"></i>SACCO</label>
           <input type="radio" class="btn-check" name="payment_method" id="paySplit" value="split">
           <label class="btn btn-outline-secondary" for="paySplit"><i class="fas fa-divide me-1"></i>Split (both)</label>
-          <input type="radio" class="btn-check" name="payment_method" id="payCredit" value="credit">
-          <label class="btn btn-outline-warning" for="payCredit"><i class="fas fa-hand-holding-dollar me-1"></i>Credit payment</label>
+          <input type="radio" class="btn-check" name="payment_method" id="payCredit" value="credit"<?php echo $preferDeposit ? ' checked' : ''; ?>>
+          <label class="btn btn-outline-warning" for="payCredit"><i class="fas fa-hand-holding-dollar me-1"></i>Deposit / part pay</label>
         </div>
-        <div id="creditBox" style="display:none;" class="row g-2 mb-2">
+        <div id="creditBox" style="display:<?php echo $preferDeposit ? 'flex' : 'none'; ?>;" class="row g-2 mb-2">
           <div class="col-12 col-sm-6">
-            <label class="form-label small">Amount paid now</label>
-            <input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $amountDue); ?>" name="amount_received" id="creditAmount" class="form-control" placeholder="0">
+            <label class="form-label small">Deposit amount now</label>
+            <input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $amountDue); ?>" name="amount_received" id="creditAmount" class="form-control" placeholder="0"<?php echo $preferDeposit ? ' autofocus' : ''; ?>>
           </div>
           <div class="col-12 col-sm-6">
             <label class="form-label small">Received through</label>
@@ -159,8 +213,9 @@ ob_start();
               <option value="sacco">SACCO</option>
             </select>
           </div>
+          <div class="col-12"><div class="form-text">Enter any amount up to the balance. A deposit receipt prints after saving.</div></div>
         </div>
-        <div id="cashBox" class="row g-2 mb-2">
+        <div id="cashBox" class="row g-2 mb-2" style="display:<?php echo $preferDeposit ? 'none' : 'flex'; ?>;">
           <div class="col-6">
             <label class="form-label small">Cash given</label>
             <input type="number" step="0.01" min="0" name="amount_tendered" id="cashGiven" class="form-control" placeholder="0">
@@ -264,7 +319,7 @@ ob_start();
           var button = document.getElementById('submitPayment');
           if (m === 'credit') {
             var remaining = Math.max(ORDER_TOTAL - creditAmount, 0);
-            button.innerHTML = '<i class="fas fa-check me-1"></i>Record credit payment — KES ' + money(creditAmount) + (remaining > 0 ? ' (owes KES ' + money(remaining) + ')' : '');
+            button.innerHTML = '<i class="fas fa-check me-1"></i>Record deposit — KES ' + money(creditAmount) + (remaining > 0 ? ' (owes KES ' + money(remaining) + ')' : '');
           } else {
             button.innerHTML = '<i class="fas fa-check me-1"></i>Mark paid — KES ' + money(ORDER_TOTAL);
           }
@@ -293,6 +348,64 @@ ob_start();
   </div>
 </div>
 <?php endif; ?>
+
+<style>
+.invoice-suggest-menu{position:absolute;left:0;right:0;top:100%;z-index:40;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:320px;overflow:auto;margin-top:4px;}
+.invoice-suggest-menu.show{display:block;}
+.invoice-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.7rem .85rem;border-bottom:1px solid #f1f5f9;}
+.invoice-suggest-menu button:last-child{border-bottom:0;}
+.invoice-suggest-menu button:hover{background:#f8fafc;}
+.invoice-suggest-menu .meta{display:block;color:#64748b;font-size:.78rem;margin-top:2px;}
+.invoice-suggest-menu .bal{float:right;font-weight:700;color:#b91c1c;}
+</style>
+<script>
+(function(){
+  var input = document.getElementById('receiptSearch');
+  var menu = document.getElementById('paymentSuggestMenu');
+  var api = <?php echo json_encode($invoiceSearchApi); ?>;
+  var preferDeposit = <?php echo $preferDeposit ? 'true' : 'false'; ?>;
+  if (!input || !menu) return;
+  var timer = null;
+  function hide(){ menu.classList.remove('show'); }
+  function money(n){ return 'KES ' + (Number(n)||0).toLocaleString('en-KE', {maximumFractionDigits:0}); }
+  function go(receipt){
+    var url = '?receipt=' + encodeURIComponent(receipt);
+    if (preferDeposit) url += '&deposit=1';
+    window.location.href = url;
+  }
+  function render(items){
+    menu.innerHTML = '';
+    if (!items.length) { hide(); return; }
+    items.forEach(function(it){
+      var b = document.createElement('button');
+      b.type = 'button';
+      var title = (it.customer_name || 'Customer') + (it.company_name ? ' · ' + it.company_name : '');
+      b.innerHTML = '<span class="bal">' + money(it.balance) + '</span><strong></strong><span class="meta"></span>';
+      b.querySelector('strong').textContent = title;
+      b.querySelector('.meta').textContent = (it.receipt_number || '') + (it.phone ? ' · ' + it.phone : '');
+      b.addEventListener('mousedown', function(e){
+        e.preventDefault();
+        go(it.receipt_number);
+      });
+      menu.appendChild(b);
+    });
+    menu.classList.add('show');
+  }
+  input.addEventListener('input', function(){
+    clearTimeout(timer);
+    var q = input.value.trim();
+    // Exact ORD- style numbers can still use Find; suggestions help name/company search.
+    if (q.length < 1) { hide(); return; }
+    timer = setTimeout(function(){
+      fetch(api + '?q=' + encodeURIComponent(q) + '&limit=12&open_only=1')
+        .then(function(r){ return r.json(); })
+        .then(function(data){ render(data.items || []); })
+        .catch(function(){ hide(); });
+    }, 180);
+  });
+  input.addEventListener('blur', function(){ setTimeout(hide, 160); });
+})();
+</script>
 <?php
 $content = ob_get_clean();
 $__layout = $isStaffViewer ? 'staff' : 'tenants';

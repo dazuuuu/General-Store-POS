@@ -51,8 +51,15 @@ function money($n) { global $currency; return $currency . ' ' . number_format((f
 // send each viewer back into their own section, not always into staff.
 $isStaffViewer = TenantContext::role() === 'staff';
 $autoPrint = ($_GET['print'] ?? '') === '1';
+$isDepositReceipt = ($_GET['deposit'] ?? '') === '1';
 $returnToShop = ($_GET['return'] ?? '') === 'shop';
 $shopReturnUrl = $isStaffViewer ? public_url('staff/dashboard/') : public_url('super/shop/');
+$latestPayment = $payments ? $payments[count($payments) - 1] : null;
+if ($isDepositReceipt && $latestPayment) {
+    $depositJustPaid = (float) ($latestPayment['amount'] ?? 0);
+} else {
+    $depositJustPaid = 0.0;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -87,7 +94,13 @@ $shopReturnUrl = $isStaffViewer ? public_url('staff/dashboard/') : public_url('s
       <?php if ($location !== ''): ?><div style="font-size:15px;color:#000;"><?php echo htmlspecialchars($location); ?></div><?php endif; ?>
       <?php if ($phone !== ''): ?><div style="font-size:16px;color:#000;">TEL: <?php echo htmlspecialchars($phone); ?></div><?php endif; ?>
       <?php if (!empty($tenant['kra_pin'])): ?><div style="font-size:15px;color:#000;">PIN: <?php echo htmlspecialchars($tenant['kra_pin']); ?></div><?php endif; ?>
-      <div style="font-size:16px;margin-top:5px;"><?php echo $isWalkin ? 'Invoice / Receipt' : 'Invoice'; ?> <?php echo htmlspecialchars($order['receipt_number']); ?></div>
+      <div style="font-size:16px;margin-top:5px;"><?php
+        if ($isDepositReceipt && $order['status'] === 'open') {
+            echo 'Deposit receipt';
+        } else {
+            echo $isWalkin ? 'Invoice / Receipt' : 'Invoice';
+        }
+      ?> <?php echo htmlspecialchars($order['receipt_number']); ?></div>
       <div style="font-size:15px;"><?php echo htmlspecialchars(date('j M Y, g:i a', strtotime($order['created_at']))); ?></div>
       <?php if ($customerName !== ''): ?>
       <div style="font-size:15px;">Customer: <strong><?php echo htmlspecialchars($customerName); ?></strong></div>
@@ -124,6 +137,9 @@ $shopReturnUrl = $isStaffViewer ? public_url('staff/dashboard/') : public_url('s
       <?php endif; ?>
       <tr><td style="font-weight:900;padding-top:8px;font-size:19px;">Total</td><td style="text-align:right;font-weight:900;padding-top:8px;font-size:19px;"><?php echo money($order['total']); ?></td></tr>
       <?php if ($amountPaid > 0): ?>
+        <?php if ($isDepositReceipt && $depositJustPaid > 0): ?>
+        <tr><td style="color:#64748b;font-weight:700;">Deposit received</td><td style="text-align:right;font-weight:700;"><?php echo money($depositJustPaid); ?></td></tr>
+        <?php endif; ?>
         <tr><td style="color:#64748b;">Paid so far</td><td style="text-align:right;"><?php echo money($amountPaid); ?></td></tr>
         <tr><td style="color:#64748b;font-weight:700;">Still owed</td><td style="text-align:right;font-weight:700;"><?php echo money($order['status'] === 'paid' ? 0 : $amountDue); ?></td></tr>
       <?php endif; ?>

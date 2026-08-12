@@ -53,7 +53,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$invoices = $O->documentOrders(100);
+$q = trim((string) ($_GET['q'] ?? ''));
+$invoices = $q !== ''
+    ? $O->searchInvoices($q, ['open_only' => false, 'limit' => 100])
+    : $O->documentOrders(100);
 $itemsByOrder = $O->itemsForMany(array_column($invoices, 'id'));
 $page_title = 'Invoices';
 ob_start();
@@ -93,24 +96,36 @@ ob_start();
 </form>
 
 <div class="card border-0 shadow-sm" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom bg-white"><h2 class="h6 fw-bold mb-0">Customer invoices</h2></div>
+  <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h2 class="h6 fw-bold mb-0">Customer invoices</h2>
+    <form method="get" class="d-flex gap-2" style="min-width:min(100%,360px);">
+      <input type="search" name="q" class="form-control form-control-sm" placeholder="Customer, company, or invoice #" value="<?php echo htmlspecialchars($q); ?>">
+      <button class="btn btn-sm btn-outline-primary">Search</button>
+      <?php if ($q !== ''): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/invoices/'); ?>">Clear</a><?php endif; ?>
+    </form>
+  </div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>Customer</th><th>Products</th><th>Status</th><th class="text-end">Paid</th><th class="text-end">Balance</th><th></th></tr></thead>
+      <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>Customer / company</th><th>Products</th><th>Status</th><th class="text-end">Paid</th><th class="text-end">Balance</th><th></th></tr></thead>
       <tbody>
-        <?php if (!$invoices): ?><tr><td colspan="7" class="text-center text-muted py-4">No invoices yet.</td></tr><?php endif; ?>
+        <?php if (!$invoices): ?><tr><td colspan="7" class="text-center text-muted py-4"><?php echo $q !== '' ? 'No invoices match that search.' : 'No invoices yet.'; ?></td></tr><?php endif; ?>
         <?php foreach ($invoices as $inv):
             $paid = max(0, (float) ($inv['amount_paid'] ?? 0));
-            $due = (float) ($inv['amount_due'] ?? 0);
+            $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
             if (($inv['status'] ?? '') === 'open' && $due <= 0.0001) { $due = max(0, (float) $inv['total'] - $paid); }
+            if (($inv['status'] ?? '') === 'paid') { $due = 0; }
             $orderItems = $itemsByOrder[(int) $inv['id']] ?? [];
+            $company = trim((string) ($inv['customer_company'] ?? ''));
         ?>
         <tr>
           <td>
             <div class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number']); ?></div>
             <div class="text-muted small"><?php echo date('j M Y, g:i a', strtotime($inv['created_at'])); ?></div>
           </td>
-          <td><?php echo htmlspecialchars($inv['table_name']); ?></td>
+          <td>
+            <div><?php echo htmlspecialchars($inv['table_name']); ?></div>
+            <?php if ($company !== ''): ?><div class="text-muted small"><?php echo htmlspecialchars($company); ?></div><?php endif; ?>
+          </td>
           <td class="small">
             <?php echo htmlspecialchars(implode(', ', array_map(fn($it) => $it['name'] . ' x' . rtrim(rtrim(number_format((float) $it['qty'], 2), '0'), '.'), array_slice($orderItems, 0, 3)))); ?>
             <?php if (count($orderItems) > 3): ?> ...<?php endif; ?>
@@ -122,7 +137,7 @@ ob_start();
             <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/orders/receipt.php?id=' . (int) $inv['id']); ?>">Print</a>
             <?php if ($inv['status'] === 'open'): ?>
               <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/invoices/edit.php?id=' . (int) $inv['id']); ?>">Edit</a>
-              <a class="btn btn-sm btn-outline-success" href="<?php echo public_url('super/payments/?receipt=' . urlencode($inv['receipt_number'])); ?>">Pay</a>
+              <a class="btn btn-sm btn-success" href="<?php echo public_url('super/payments/?receipt=' . urlencode($inv['receipt_number']) . '&deposit=1'); ?>">Deposit</a>
               <form method="post" class="d-inline" onsubmit="return confirm('Delete this invoice and return its products to stock?');">
                 <input type="hidden" name="action" value="delete_invoice">
                 <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">

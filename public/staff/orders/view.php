@@ -28,6 +28,8 @@ $isStaffViewer = TenantContext::role() === 'staff';
 $ordersBase  = $isStaffViewer ? public_url('staff/orders/') : public_url('super/orders/');
 $viewUrl     = ($isStaffViewer ? public_url('staff/orders/view.php') : public_url('super/orders/view.php')) . '?id=' . $id;
 $receiptUrl  = ($isStaffViewer ? public_url('staff/orders/receipt.php') : public_url('super/orders/receipt.php')) . '?id=' . $id;
+$editUrl     = ($isStaffViewer ? public_url('staff/invoices/edit.php') : public_url('super/invoices/edit.php')) . '?id=' . $id;
+$paymentsUrl = ($isStaffViewer ? public_url('staff/payments/') : public_url('super/payments/')) . '?receipt=' . urlencode($order['receipt_number'] ?? '') . '&deposit=1';
 
 $P = new Models\ProductModel($pdo);
 $products = $order['status'] === 'open' ? $P->sellable() : [];
@@ -129,8 +131,12 @@ ob_start();
     <h1 class="h5 mb-1 fw-bold"><?php echo htmlspecialchars($order['table_name']); ?> <?php echo $statusBadge; ?></h1>
     <div class="small text-muted">Invoice <?php echo htmlspecialchars($order['receipt_number']); ?> · opened <?php echo date('j M Y, g:i a', strtotime($order['created_at'])); ?></div>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-arrow-left me-1"></i>Credit sales</a>
+    <?php if ($order['status'] === 'open'): ?>
+      <a class="btn btn-sm btn-outline-primary" href="<?php echo $editUrl; ?>"><i class="fas fa-pen me-1"></i>Edit items</a>
+      <a class="btn btn-sm btn-success" href="<?php echo $paymentsUrl; ?>"><i class="fas fa-hand-holding-dollar me-1"></i>Deposit</a>
+    <?php endif; ?>
     <a class="btn btn-sm btn-outline-primary" href="<?php echo $receiptUrl; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
   </div>
 </div>
@@ -140,8 +146,8 @@ ob_start();
 
 <?php if ($order['status'] === 'open'): ?>
   <div class="alert alert-info py-2 small">
-    <i class="fas fa-circle-info me-1"></i>To collect payment, give the customer invoice <strong><?php echo htmlspecialchars($order['receipt_number']); ?></strong> —
-    whoever is on Payments looks it up by that number and records full or partial payments.
+    <i class="fas fa-circle-info me-1"></i>
+    Use <strong>Edit items</strong> to add or remove products, or <strong>Deposit</strong> when the customer pays part of the balance (a receipt prints automatically).
   </div>
 <?php endif; ?>
 
