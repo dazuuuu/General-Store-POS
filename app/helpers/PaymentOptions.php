@@ -2,6 +2,70 @@
 
 class PaymentOptions
 {
+    /** Settle methods shown on payments desk (admin can enable/reorder via settings). */
+    public static function settleMethods(): array
+    {
+        return [
+            'cash' => 'Cash',
+            'mpesa' => 'M-Pesa',
+            'paybill' => 'Paybill / Till',
+            'card' => 'Card',
+            'bank' => 'Bank',
+            'sacco' => 'SACCO',
+            'split' => 'Split (Cash + M-Pesa)',
+        ];
+    }
+
+    /** Default enabled order — admin settings override this list. */
+    public static function defaultEnabledMethods(): array
+    {
+        return ['cash', 'mpesa', 'paybill', 'card', 'bank', 'sacco', 'split'];
+    }
+
+    /**
+     * Enabled settle methods for the current tenant, in admin priority order.
+     * Stored as JSON on tenants.payment_methods_json.
+     */
+    public static function enabledSettleMethods(?array $tenant = null): array
+    {
+        $all = self::settleMethods();
+        $raw = is_array($tenant) ? ($tenant['payment_methods_json'] ?? null) : null;
+        $ids = [];
+        if (is_string($raw) && trim($raw) !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $ids = $decoded;
+            } else {
+                $ids = array_map('trim', explode(',', $raw));
+            }
+        }
+        if (!$ids) {
+            $ids = self::defaultEnabledMethods();
+        }
+        $out = [];
+        foreach ($ids as $id) {
+            $id = strtolower(trim((string) $id));
+            if (isset($all[$id])) {
+                $out[$id] = $all[$id];
+            }
+        }
+        return $out ?: $all;
+    }
+
+    public static function depositMethods(?array $tenant = null): array
+    {
+        $enabled = self::enabledSettleMethods($tenant);
+        unset($enabled['split']);
+        return $enabled ?: [
+            'cash' => 'Cash',
+            'mpesa' => 'M-Pesa',
+            'paybill' => 'Paybill / Till',
+            'card' => 'Card',
+            'bank' => 'Bank',
+            'sacco' => 'SACCO',
+        ];
+    }
+
     public static function cardTypes(): array
     {
         return [
@@ -137,21 +201,21 @@ class PaymentOptions
 
     public static function label(array $row): string
     {
-        $method = $row['payment_method'] ?? 'cash';
-        $provider = trim((string) ($row['payment_provider'] ?? ''));
-        $account = trim((string) ($row['payment_account_name'] ?? ''));
+        $method = $row['payment_method'] ?? $row['method'] ?? 'cash';
+        $provider = trim((string) ($row['payment_provider'] ?? $row['provider'] ?? ''));
+        $account = trim((string) ($row['payment_account_name'] ?? $row['account_name'] ?? ''));
         $base = [
             'cash' => 'Cash',
             'mpesa' => 'M-Pesa',
+            'paybill' => 'Paybill / Till',
             'split' => 'Split',
             'card' => 'Card',
             'bank' => 'Bank',
             'sacco' => 'SACCO',
-            'credit' => 'Credit',
+            'credit' => 'Deposit',
         ][$method] ?? ucfirst((string) $method);
 
         $detail = $provider !== '' ? $provider : $account;
         return $detail !== '' ? $base . ' - ' . $detail : $base;
     }
 }
-

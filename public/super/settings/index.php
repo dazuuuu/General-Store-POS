@@ -44,6 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'receipt_footer'          => trim($_POST['receipt_footer'] ?? ''),
         'kra_pin'                 => trim($_POST['kra_pin'] ?? ''),
         'payment_credentials'     => trim($_POST['payment_credentials'] ?? $defaultPaymentCredentials),
+        'payment_methods_json'    => json_encode(array_values(array_filter(array_map('strval', $_POST['payment_methods'] ?? []))) ?: PaymentOptions::defaultEnabledMethods()),
         'vat_rate'                => max(0, round((float) ($_POST['vat_rate'] ?? 0), 2)),
         'vat_inclusive'           => !empty($_POST['vat_inclusive']) ? 1 : 0,
         'loyalty_points_per_kes'  => max(0, round((float) ($_POST['loyalty_points_per_kes'] ?? 1), 2)),
@@ -146,6 +147,24 @@ ob_start();
             <textarea name="payment_credentials" class="form-control" rows="4"
                       placeholder="Paybill/Till, bank account, account name, or payment instructions"><?php echo htmlspecialchars($__tenant['payment_credentials'] ?? $defaultPaymentCredentials); ?></textarea>
             <div class="form-text">Shown on emailed invoices and bulk-sale notes so customers know how to pay.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Payment modes (priority order)</label>
+            <div class="form-text mb-2">Tick the modes staff can use on the Payments desk. Order below is the display priority.</div>
+            <?php
+              $allMethods = PaymentOptions::settleMethods();
+              $enabledMethods = array_keys(PaymentOptions::enabledSettleMethods($__tenant));
+              $i = 0;
+              foreach ($allMethods as $mid => $mlabel):
+                $checked = in_array($mid, $enabledMethods, true);
+            ?>
+              <div class="form-check mb-1">
+                <input class="form-check-input" type="checkbox" name="payment_methods[]" value="<?php echo htmlspecialchars($mid); ?>" id="pm_<?php echo htmlspecialchars($mid); ?>" <?php echo $checked ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="pm_<?php echo htmlspecialchars($mid); ?>">
+                  <?php echo (++$i) . '. ' . htmlspecialchars($mlabel); ?>
+                </label>
+              </div>
+            <?php endforeach; ?>
           </div>
 
           <hr class="my-4">

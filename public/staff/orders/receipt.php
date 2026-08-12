@@ -132,7 +132,14 @@ if ($isDepositReceipt && $latestPayment) {
       <tr>
         <td style="padding:4px 4px 4px 0;vertical-align:top;"><?php echo (int) $idx + 1; ?></td>
         <td style="padding:4px 4px 4px 0;"><?php echo htmlspecialchars($it['product_name']); ?></td>
-        <td style="padding:4px;text-align:center;"><?php echo rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.'); ?></td>
+        <td style="padding:4px;text-align:center;"><?php
+          $qty = (float) $it['quantity'];
+          echo htmlspecialchars(QtyFormat::display($qty));
+          $halfNote = QtyFormat::halfNote($qty);
+          if ($halfNote !== '') {
+              echo '<div style="font-size:12px;color:#64748b;">' . htmlspecialchars($halfNote) . '</div>';
+          }
+        ?></td>
         <td style="padding:4px 0 4px 4px;text-align:right;"><?php echo number_format((float) $it['line_total'], 2); ?></td>
       </tr>
       <?php endforeach; ?>

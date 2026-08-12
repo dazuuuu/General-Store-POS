@@ -440,7 +440,7 @@ class OrderModel extends Model
         if ($tid === null) {
             return ['ok' => false, 'error' => 'No shop in context.'];
         }
-        $allowed = ['cash', 'mpesa', 'split', 'card', 'bank', 'sacco', 'credit'];
+        $allowed = ['cash', 'mpesa', 'split', 'card', 'bank', 'sacco', 'paybill', 'credit'];
         $method = in_array($payment['method'] ?? '', $allowed, true) ? $payment['method'] : null;
         if (!$method) {
             return ['ok' => false, 'error' => 'Choose how the customer paid.'];
@@ -470,6 +470,7 @@ class OrderModel extends Model
             $mpesa = 0.0;
             $tendered = null;
             $change = null;
+            $recordMethod = $method;
             if ($method === 'cash') {
                 $cash = $balanceDue;
                 $tendered = max(0, round((float) ($payment['amount_tendered'] ?? 0), 2));
@@ -496,7 +497,9 @@ class OrderModel extends Model
                     $change = round($tendered - $cash, 2);
                 }
             } elseif ($method === 'credit') {
-                $actualMethod = in_array($payment['deposit_method'] ?? '', ['cash', 'mpesa', 'card', 'bank', 'sacco'], true) ? $payment['deposit_method'] : 'cash';
+                $depositAllowed = ['cash', 'mpesa', 'paybill', 'card', 'bank', 'sacco'];
+                $actualMethod = in_array($payment['deposit_method'] ?? '', $depositAllowed, true) ? $payment['deposit_method'] : 'cash';
+                $recordMethod = $actualMethod;
                 $received = max(0, round((float) ($payment['amount_received'] ?? 0), 2));
                 if ($received <= 0) {
                     $db->rollBack();
@@ -514,7 +517,11 @@ class OrderModel extends Model
                 } elseif ($actualMethod === 'mpesa') {
                     $mpesa = $received;
                 }
-                $payment['provider'] = $payment['provider'] ?: ucfirst($actualMethod);
+                $payment['provider'] = $payment['provider'] ?: ($actualMethod === 'paybill' ? 'Paybill / Till' : ucfirst($actualMethod));
+            } elseif ($method === 'paybill') {
+                if (trim((string) ($payment['provider'] ?? '')) === '') {
+                    $payment['provider'] = 'Paybill / Till';
+                }
             }
             // card / bank / sacco: paid in full, no cash split tracking.
             $paymentAmount = $method === 'credit' ? ($cash + $mpesa) : $balanceDue;
@@ -528,11 +535,14 @@ class OrderModel extends Model
             if ($method === 'mpesa' && $provider === '') {
                 $provider = 'M-Pesa';
             }
+            if ($method === 'paybill' && $provider === '') {
+                $provider = 'Paybill / Till';
+            }
             if ($method === 'split' && $provider === '') {
                 $provider = 'Cash + M-Pesa';
             }
             if ($method === 'credit' && $provider === '') {
-                $provider = 'Credit payment';
+                $provider = 'Deposit';
             }
 
             $newPaid = round($paidBefore + $paymentAmount, 2);
@@ -549,7 +559,7 @@ class OrderModel extends Model
                 $orderId,
                 $staffId,
                 $paymentAmount,
-                $method,
+                $recordMethod,
                 $cash > 0 ? $cash : null,
                 $mpesa > 0 ? $mpesa : null,
                 $tendered,
@@ -578,7 +588,7 @@ class OrderModel extends Model
                 $paymentStatus,
                 $newPaid,
                 $newDue,
-                $method,
+                $recordMethod,
             ], $payVals, [
                 $tendered,
                 $change,
@@ -605,12 +615,196 @@ class OrderModel extends Model
             }
 
             $db->commit();
-            return ['ok' => true, 'status' => $newStatus, 'amount_due' => $newDue, 'error' => null];
+            return [
+                'ok' => true,
+                'status' => $newStatus,
+                'amount_due' => $newDue,
+                'amount_paid_now' => $paymentAmount,
+                'order_id' => $orderId,
+                'error' => null,
+            ];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
             error_log('OrderModel::markPaid failed: ' . $e->getMessage());
             return ['ok' => false, 'error' => 'Could not record the payment. Please try again.'];
         }
+    }
+
+    /**
+     * Open unpaid invoices for a customer (by customer_id and/or checkout name).
+     * Returns Date / Invoice / Amount (balance) ready for the payments ledger.
+     */
+    public function openInvoicesForCustomer(?int $customerId, string $customerName = '', int $limit = 100): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) {
+            return [];
+        }
+        $customerName = trim($customerName);
+        if (($customerId === null || $customerId <= 0) && $customerName === '') {
+            return [];
+        }
+
+        $sql = "SELECT o.*, u.username AS opened_by_name,
+                       c.name AS customer_record_name,
+                       c.company_name AS customer_company,
+                       (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                       GREATEST(COALESCE(o.amount_due, GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0) AS balance_due
+                  FROM orders o
+             LEFT JOIN users u ON u.id = o.opened_by
+             LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
+                 WHERE o.tenant_id = ? AND o.status = 'open'
+                   AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001";
+        $params = [$tid];
+        $parts = [];
+        if ($customerId !== null && $customerId > 0) {
+            $parts[] = 'o.customer_id = ?';
+            $params[] = $customerId;
+        }
+        if ($customerName !== '') {
+            $parts[] = 'LOWER(TRIM(o.table_name)) = LOWER(?)';
+            $params[] = $customerName;
+        }
+        $sql .= ' AND (' . implode(' OR ', $parts) . ')';
+        $sql .= ' ORDER BY o.created_at ASC, o.id ASC LIMIT ' . (int) $limit;
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    /** Payment history across all invoices for a customer. */
+    public function paymentsForCustomer(?int $customerId, string $customerName = '', int $limit = 200): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) {
+            return [];
+        }
+        $customerName = trim($customerName);
+        if (($customerId === null || $customerId <= 0) && $customerName === '') {
+            return [];
+        }
+        try {
+            $sql = "SELECT op.*, o.receipt_number, o.table_name, o.created_at AS invoice_date,
+                           u.username AS staff_name
+                      FROM order_payments op
+                 INNER JOIN orders o ON o.id = op.order_id AND o.tenant_id = op.tenant_id
+                 LEFT JOIN users u ON u.id = op.staff_id
+                     WHERE op.tenant_id = ? AND o.status <> 'void'";
+            $params = [$tid];
+            $parts = [];
+            if ($customerId !== null && $customerId > 0) {
+                $parts[] = 'o.customer_id = ?';
+                $params[] = $customerId;
+            }
+            if ($customerName !== '') {
+                $parts[] = 'LOWER(TRIM(o.table_name)) = LOWER(?)';
+                $params[] = $customerName;
+            }
+            $sql .= ' AND (' . implode(' OR ', $parts) . ')';
+            $sql .= ' ORDER BY op.created_at DESC, op.id DESC LIMIT ' . (int) $limit;
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll();
+        } catch (\PDOException $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Apply a customer payment across one or more open invoices (FIFO / selected).
+     * Reuses markPaid so each invoice still gets its own payment row + receipt.
+     *
+     * @param int[] $orderIds
+     * @return array{ok:bool,error:?string,allocations:array,receipt_order_ids:array,amount_remaining:float}
+     */
+    public function applyCustomerPayment(array $orderIds, float $amount, array $payment, int $staffId): array
+    {
+        $amount = max(0, round($amount, 2));
+        if ($amount <= 0) {
+            return ['ok' => false, 'error' => 'Enter the amount being paid.', 'allocations' => [], 'receipt_order_ids' => [], 'amount_remaining' => 0.0];
+        }
+        $orderIds = array_values(array_unique(array_filter(array_map('intval', $orderIds))));
+        if (!$orderIds) {
+            return ['ok' => false, 'error' => 'Select at least one invoice.', 'allocations' => [], 'receipt_order_ids' => [], 'amount_remaining' => 0.0];
+        }
+
+        $remaining = $amount;
+        $allocations = [];
+        $receiptIds = [];
+        $depositChannel = $payment['deposit_method'] ?? $payment['method'] ?? 'cash';
+        if (($payment['method'] ?? '') !== 'credit' && in_array($payment['method'] ?? '', ['cash', 'mpesa', 'paybill', 'card', 'bank', 'sacco'], true)) {
+            $depositChannel = $payment['method'];
+        }
+
+        foreach ($orderIds as $oid) {
+            if ($remaining <= 0.0001) {
+                break;
+            }
+            $order = $this->find($oid);
+            if (!$order || ($order['status'] ?? '') !== 'open') {
+                continue;
+            }
+            $due = (float) ($order['amount_due'] ?? 0);
+            if ($due <= 0.0001) {
+                $due = max(0, (float) ($order['total'] ?? 0) - max(0, (float) ($order['amount_paid'] ?? 0)));
+            }
+            if ($due <= 0.0001) {
+                continue;
+            }
+            $slice = min($remaining, $due);
+            $isFull = $slice + 0.0001 >= $due;
+            $payload = $payment;
+            if ($isFull && ($payment['method'] ?? '') !== 'credit' && ($payment['method'] ?? '') !== 'split') {
+                // Full settle of this invoice with the chosen mode.
+                $payload['method'] = $depositChannel === 'split' ? 'cash' : $depositChannel;
+                if ($payload['method'] === 'cash') {
+                    $payload['amount_tendered'] = $payload['amount_tendered'] ?? $slice;
+                }
+            } else {
+                $payload['method'] = 'credit';
+                $payload['deposit_method'] = in_array($depositChannel, ['cash', 'mpesa', 'paybill', 'card', 'bank', 'sacco'], true) ? $depositChannel : 'cash';
+                $payload['amount_received'] = $slice;
+                if ($payload['deposit_method'] === 'cash') {
+                    $payload['amount_tendered'] = $payload['amount_tendered'] ?? $slice;
+                }
+            }
+            $res = $this->markPaid($oid, $payload, $staffId);
+            if (!$res['ok']) {
+                if ($allocations) {
+                    return [
+                        'ok' => true,
+                        'error' => null,
+                        'partial_error' => $res['error'] ?? 'Stopped early.',
+                        'allocations' => $allocations,
+                        'receipt_order_ids' => $receiptIds,
+                        'amount_remaining' => $remaining,
+                    ];
+                }
+                return ['ok' => false, 'error' => $res['error'] ?? 'Could not record payment.', 'allocations' => [], 'receipt_order_ids' => [], 'amount_remaining' => $amount];
+            }
+            $paidNow = (float) ($res['amount_paid_now'] ?? $slice);
+            $allocations[] = [
+                'order_id' => $oid,
+                'receipt_number' => $order['receipt_number'] ?? '',
+                'amount' => $paidNow,
+                'status' => $res['status'] ?? 'open',
+                'amount_due' => (float) ($res['amount_due'] ?? 0),
+            ];
+            $receiptIds[] = $oid;
+            $remaining = round($remaining - $paidNow, 2);
+        }
+
+        if (!$allocations) {
+            return ['ok' => false, 'error' => 'No open balance found on the selected invoices.', 'allocations' => [], 'receipt_order_ids' => [], 'amount_remaining' => $amount];
+        }
+        return [
+            'ok' => true,
+            'error' => null,
+            'allocations' => $allocations,
+            'receipt_order_ids' => $receiptIds,
+            'amount_remaining' => max(0, $remaining),
+            'amount_applied' => round($amount - max(0, $remaining), 2),
+        ];
     }
 
     private function ensurePaymentSchema(): void

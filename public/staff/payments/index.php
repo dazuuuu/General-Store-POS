@@ -1,26 +1,49 @@
 <?php
 // public/staff/payments/index.php
-// Payments desk: look up a credit-sale invoice by its number and record full
-// or partial payments. Reached from staff/payments and super/payments; links
-// and layout adapt to the current role.
+// Customer-centric credit payments: group open invoices under one customer
+// (Date / Invoice / Amount), take deposit or full payment with admin payment
+// modes, then print a receipt. Also supports single-invoice lookup.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::PAYMENTS_PROCESS);
 
 $pdo = Database::pdo();
 $O = new Models\OrderModel($pdo);
+$CM = new Models\CustomerModel($pdo);
+$tenant = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: [];
 $cardTypes = PaymentOptions::cardTypes();
 $banks = PaymentOptions::kenyaBanks();
 $saccos = PaymentOptions::kenyaSaccos();
+$settleMethods = PaymentOptions::enabledSettleMethods($tenant);
+$depositMethods = PaymentOptions::depositMethods($tenant);
 $isStaffViewer = TenantContext::role() === 'staff';
 $paymentsBase = $isStaffViewer ? public_url('staff/payments/') : public_url('super/payments/');
 $receiptBase = $isStaffViewer ? public_url('staff/orders/receipt.php') : public_url('super/orders/receipt.php');
+$statementBase = $isStaffViewer ? public_url('staff/customers/statement.php') : public_url('super/customers/statement.php');
+$invoiceSearchApi = public_url('api/orders/invoice_search.php');
+$customerSearchApi = public_url('api/customers/search.php');
 
 $error = '';
 $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
-$preferDeposit = isset($_GET['deposit']) || (($_POST['payment_method'] ?? '') === 'credit');
-$invoiceSearchApi = public_url('api/orders/invoice_search.php');
+$customerQuery = trim($_GET['customer'] ?? $_POST['customer_name'] ?? '');
+$customerId = (int) ($_GET['customer_id'] ?? $_POST['customer_id'] ?? 0);
+$preferDeposit = isset($_GET['deposit']) || (($_POST['pay_mode'] ?? '') === 'deposit');
 $order = null;
 $searchMatches = [];
+$customerInvoices = [];
+$customerPayments = [];
+$customerLabel = $customerQuery;
+$customerCompany = '';
+
+if ($customerId > 0) {
+    $cust = $CM->find($customerId);
+    if ($cust) {
+        $customerLabel = (string) ($cust['name'] ?? $customerLabel);
+        $customerCompany = (string) ($cust['company_name'] ?? '');
+        if ($customerQuery === '') {
+            $customerQuery = $customerLabel;
+        }
+    }
+}
 
 if ($receiptQuery !== '') {
     $order = $O->findByReceipt($receiptQuery);
@@ -35,10 +58,81 @@ if ($receiptQuery !== '') {
                 header('Location: ' . $paymentsBase . $qs);
                 exit;
             }
-        } elseif (!$searchMatches) {
-            $error = 'No open invoice found for that search. Try the invoice number, customer name, or company.';
+        } elseif (!$searchMatches && $customerId <= 0 && $customerQuery === '') {
+            $error = 'No open invoice found for that search.';
         }
     }
+}
+
+if (!$order && ($customerId > 0 || $customerQuery !== '')) {
+    $customerInvoices = $O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery);
+    $customerPayments = $O->paymentsForCustomer($customerId > 0 ? $customerId : null, $customerQuery, 50);
+    if (!$customerInvoices && !$error) {
+        // Fall back to invoice search by the typed name
+        if ($receiptQuery === '' && $customerQuery !== '') {
+            $searchMatches = $O->searchInvoices($customerQuery, ['open_only' => true, 'limit' => 20]);
+        }
+        if (!$searchMatches) {
+            $error = 'No open credit invoices for this customer.';
+        }
+    } elseif ($customerInvoices && !$customerLabel) {
+        $customerLabel = (string) ($customerInvoices[0]['table_name'] ?? 'Customer');
+        $customerCompany = (string) ($customerInvoices[0]['customer_company'] ?? '');
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settle_customer') {
+    $ids = array_map('intval', $_POST['order_ids'] ?? []);
+    $amount = round((float) ($_POST['amount_received'] ?? 0), 2);
+    $mode = $_POST['payment_method'] ?? 'cash';
+    $payMode = ($_POST['pay_mode'] ?? 'deposit') === 'full' ? 'full' : 'deposit';
+    if ($payMode === 'full') {
+        // Pay full selected balances
+        $totalDue = 0.0;
+        foreach ($O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery) as $inv) {
+            if ($ids && !in_array((int) $inv['id'], $ids, true)) continue;
+            $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+            if ($due <= 0.0001) {
+                $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
+            }
+            $totalDue += $due;
+            if (!$ids) { $ids[] = (int) $inv['id']; }
+        }
+        $amount = round($totalDue, 2);
+    }
+    $payload = [
+        'method' => $payMode === 'deposit' ? 'credit' : $mode,
+        'deposit_method' => $mode,
+        'amount_received' => $amount,
+        'amount_tendered' => $_POST['amount_tendered'] ?? $amount,
+        'cash_amount' => $_POST['cash_amount'] ?? 0,
+        'mpesa_amount' => $_POST['mpesa_amount'] ?? 0,
+        'provider' => $_POST['payment_provider'] ?? '',
+        'account_name' => $_POST['payment_account_name'] ?? '',
+        'reference' => $_POST['payment_reference'] ?? '',
+    ];
+    if ($payMode === 'full') {
+        $payload['method'] = $mode === 'split' ? 'split' : $mode;
+    }
+    $res = $O->applyCustomerPayment($ids, $amount, $payload, TenantContext::userId());
+    if ($res['ok']) {
+        $firstId = (int) ($res['receipt_order_ids'][0] ?? 0);
+        $applied = (float) ($res['amount_applied'] ?? $amount);
+        $_SESSION['flash']['success'] = 'Payment of KES ' . number_format($applied, 0) . ' recorded across ' . count($res['allocations']) . ' invoice(s).';
+        if ($firstId > 0) {
+            $isDeposit = false;
+            foreach ($res['allocations'] as $a) {
+                if (($a['status'] ?? '') === 'open') { $isDeposit = true; break; }
+            }
+            header('Location: ' . $receiptBase . '?id=' . $firstId . '&print=1' . ($isDeposit ? '&deposit=1' : ''));
+            exit;
+        }
+        header('Location: ' . $paymentsBase . '?customer_id=' . $customerId . '&customer=' . urlencode($customerQuery));
+        exit;
+    }
+    $error = $res['error'] ?? 'Could not record the payment.';
+    $customerInvoices = $O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery);
+    $customerPayments = $O->paymentsForCustomer($customerId > 0 ? $customerId : null, $customerQuery, 50);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settle' && $order) {
@@ -71,24 +165,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
 }
 
 $items = $order ? $O->items((int) $order['id']) : [];
+$customerBalance = 0.0;
+foreach ($customerInvoices as $inv) {
+    $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+    if ($due <= 0.0001) {
+        $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
+    }
+    $customerBalance += $due;
+}
+
 $page_title = 'Payments';
 ob_start();
+$firstMethod = array_key_first($settleMethods) ?: 'cash';
+$firstDeposit = array_key_first($depositMethods) ?: 'cash';
 ?>
 <h1 class="h5 mb-4 fw-bold"><i class="fas fa-cash-register me-2 text-primary"></i>Payments</h1>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
     <form method="get" class="row g-2 align-items-end" id="paymentLookupForm" autocomplete="off">
-      <div class="col-12 col-sm-8 position-relative">
-        <label class="form-label small mb-1">Find credit invoice</label>
-        <input type="text" name="receipt" id="receiptSearch" class="form-control form-control-lg"
-               placeholder="Invoice number, customer name, or company…"
-               value="<?php echo htmlspecialchars($receiptQuery); ?>" autofocus>
+      <div class="col-12 col-lg-8 position-relative">
+        <label class="form-label small mb-1">Find customer or invoice</label>
+        <input type="text" name="customer" id="customerSearch" class="form-control form-control-lg"
+               placeholder="Customer name, company, or invoice number…"
+               value="<?php echo htmlspecialchars($customerQuery !== '' ? $customerQuery : $receiptQuery); ?>" autofocus>
+        <input type="hidden" name="customer_id" id="customerIdField" value="<?php echo (int) $customerId; ?>">
         <div class="invoice-suggest-menu" id="paymentSuggestMenu"></div>
-        <div class="form-text">Search by invoice #, customer name, or company. Results show balance owed.</div>
+        <div class="form-text">Credit invoices for one customer are grouped with Date, Invoice no, and Amount.</div>
       </div>
-      <div class="col-12 col-sm-4">
+      <div class="col-6 col-lg-2">
         <button class="btn btn-primary btn-lg w-100"><i class="fas fa-magnifying-glass me-1"></i>Find</button>
+      </div>
+      <div class="col-6 col-lg-2">
+        <a class="btn btn-outline-secondary btn-lg w-100" href="<?php echo $paymentsBase; ?>">Clear</a>
       </div>
       <?php if ($preferDeposit): ?><input type="hidden" name="deposit" value="1"><?php endif; ?>
     </form>
@@ -97,12 +206,12 @@ ob_start();
 
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-<?php if ($searchMatches && !$order): ?>
+<?php if ($searchMatches && !$order && !$customerInvoices): ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom"><strong><?php echo count($searchMatches); ?></strong> open invoices match “<?php echo htmlspecialchars($receiptQuery); ?>”</div>
+  <div class="px-4 py-3 border-bottom"><strong><?php echo count($searchMatches); ?></strong> open invoices matched</div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr class="text-muted small text-uppercase"><th>Customer / company</th><th>Invoice</th><th class="text-end">Balance</th><th></th></tr></thead>
+      <thead><tr class="text-muted small text-uppercase"><th>Date</th><th>Customer / company</th><th>Invoice no</th><th class="text-end">Amount</th><th></th></tr></thead>
       <tbody>
         <?php foreach ($searchMatches as $m):
           $paid = max(0, (float) ($m['amount_paid'] ?? 0));
@@ -112,6 +221,7 @@ ob_start();
           $co = trim((string) ($m['customer_company'] ?? ''));
         ?>
         <tr>
+          <td class="small"><?php echo date('j M Y', strtotime($m['created_at'])); ?></td>
           <td>
             <div class="fw-semibold"><?php echo htmlspecialchars($cust !== '' ? $cust : '—'); ?></div>
             <?php if ($co !== ''): ?><div class="text-muted small"><?php echo htmlspecialchars($co); ?></div><?php endif; ?>
@@ -119,6 +229,7 @@ ob_start();
           <td class="fw-semibold"><?php echo htmlspecialchars($m['receipt_number'] ?? ''); ?></td>
           <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
           <td class="text-end">
+            <a class="btn btn-sm btn-outline-primary" href="<?php echo $paymentsBase . '?customer=' . urlencode($cust) . ($m['customer_id'] ? '&customer_id=' . (int) $m['customer_id'] : ''); ?>">Customer ledger</a>
             <a class="btn btn-sm btn-success" href="<?php echo $paymentsBase . '?receipt=' . urlencode($m['receipt_number']) . ($preferDeposit ? '&deposit=1' : ''); ?>">Select</a>
           </td>
         </tr>
@@ -127,6 +238,222 @@ ob_start();
     </table>
   </div>
 </div>
+<?php endif; ?>
+
+<?php if ($customerInvoices): ?>
+<?php
+  $statementUrl = $statementBase . '?name=' . urlencode($customerLabel) . ($customerId > 0 ? '&customer_id=' . $customerId : '');
+?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+  <div class="card-body p-4">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+      <div>
+        <div class="fw-bold fs-5"><?php echo htmlspecialchars($customerLabel); ?></div>
+        <?php if ($customerCompany !== ''): ?><div class="text-muted"><?php echo htmlspecialchars($customerCompany); ?></div><?php endif; ?>
+        <div class="mt-1">Total credit owed: <strong class="text-danger fs-5">KES <?php echo number_format($customerBalance, 0); ?></strong></div>
+      </div>
+      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $statementUrl; ?>"><i class="fas fa-download me-1"></i>Download customer report</a>
+    </div>
+
+    <form method="post" id="customerPayForm">
+      <input type="hidden" name="action" value="settle_customer">
+      <input type="hidden" name="customer_id" value="<?php echo (int) $customerId; ?>">
+      <input type="hidden" name="customer_name" value="<?php echo htmlspecialchars($customerLabel); ?>">
+      <input type="hidden" name="payment_provider" id="custPaymentProvider" value="">
+      <input type="hidden" name="payment_account_name" id="custPaymentAccountName" value="">
+      <input type="hidden" name="payment_reference" id="custPaymentReference" value="">
+
+      <div class="table-responsive mb-3">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr class="text-muted small text-uppercase">
+              <th style="width:40px;"><input type="checkbox" id="checkAllInvoices" checked></th>
+              <th>Date</th>
+              <th>Invoice no</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($customerInvoices as $inv):
+              $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+              if ($due <= 0.0001) {
+                  $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
+              }
+            ?>
+            <tr>
+              <td><input type="checkbox" class="inv-check" name="order_ids[]" value="<?php echo (int) $inv['id']; ?>" data-due="<?php echo htmlspecialchars((string) $due); ?>" checked></td>
+              <td><?php echo date('j M Y', strtotime($inv['created_at'])); ?></td>
+              <td class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number'] ?? ''); ?></td>
+              <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="3" class="text-end">Selected balance</th>
+              <th class="text-end text-danger" id="selectedBalanceOut">KES <?php echo number_format($customerBalance, 0); ?></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label small">Payment type</label>
+          <select name="pay_mode" id="custPayMode" class="form-select">
+            <option value="deposit" <?php echo $preferDeposit ? 'selected' : ''; ?>>Deposit / part pay</option>
+            <option value="full">Pay full selected balance</option>
+          </select>
+        </div>
+        <div class="col-md-4" id="custAmountWrap">
+          <label class="form-label small">Amount paid</label>
+          <input type="number" step="0.01" min="0" name="amount_received" id="custAmount" class="form-control" value="" placeholder="0">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Mode of payment</label>
+          <select name="payment_method" id="custPayMethod" class="form-select">
+            <?php foreach ($depositMethods as $mid => $mlabel): ?>
+              <option value="<?php echo htmlspecialchars($mid); ?>"><?php echo htmlspecialchars($mlabel); ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+
+      <div id="custCashBox" class="row g-2 mb-2" style="display:none;">
+        <div class="col-md-6">
+          <label class="form-label small">Cash given</label>
+          <input type="number" step="0.01" min="0" name="amount_tendered" id="custCashGiven" class="form-control" placeholder="0">
+        </div>
+      </div>
+      <div id="custDetailBox" class="row g-2 mb-3" style="display:none;">
+        <div class="col-md-6">
+          <label class="form-label small" id="custDetailLabel">Details</label>
+          <input type="text" id="custDetailInput" class="form-control" placeholder="Optional" list="custDetailList">
+          <datalist id="custDetailList"></datalist>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small">Reference</label>
+          <input type="text" id="custRefInput" class="form-control" placeholder="Optional">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-success btn-lg w-100" id="custPayBtn"><i class="fas fa-check me-1"></i>Record payment &amp; print receipt</button>
+      <div class="form-text text-center mt-2">Payment date is recorded automatically. A receipt opens after saving.</div>
+    </form>
+
+    <?php if ($customerPayments): ?>
+      <hr class="my-4">
+      <h2 class="h6 fw-bold mb-2">Recent payments</h2>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr class="text-muted small text-uppercase"><th>Date</th><th>Invoice</th><th>Mode</th><th class="text-end">Amount paid</th></tr></thead>
+          <tbody>
+            <?php foreach ($customerPayments as $pay): ?>
+            <tr>
+              <td class="small"><?php echo date('j M Y, g:i a', strtotime($pay['created_at'])); ?></td>
+              <td><?php echo htmlspecialchars($pay['receipt_number'] ?? ''); ?></td>
+              <td><?php echo htmlspecialchars(PaymentOptions::label($pay)); ?></td>
+              <td class="text-end fw-semibold">KES <?php echo number_format((float) $pay['amount'], 0); ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
+  </div>
+</div>
+<script>
+(function(){
+  var checks = Array.prototype.slice.call(document.querySelectorAll('.inv-check'));
+  var all = document.getElementById('checkAllInvoices');
+  var amountInput = document.getElementById('custAmount');
+  var modeSel = document.getElementById('custPayMode');
+  var methodSel = document.getElementById('custPayMethod');
+  var cashBox = document.getElementById('custCashBox');
+  var detailBox = document.getElementById('custDetailBox');
+  var detailInput = document.getElementById('custDetailInput');
+  var detailLabel = document.getElementById('custDetailLabel');
+  var detailList = document.getElementById('custDetailList');
+  var refInput = document.getElementById('custRefInput');
+  var cardTypes = <?php echo json_encode(array_values($cardTypes)); ?>;
+  var banks = <?php echo json_encode(array_values($banks)); ?>;
+  var saccos = <?php echo json_encode(array_values($saccos)); ?>;
+  function selectedDue(){
+    return checks.reduce(function(sum, c){ return sum + (c.checked ? (parseFloat(c.dataset.due)||0) : 0); }, 0);
+  }
+  function money(n){ return 'KES ' + (Math.round(n*100)/100).toLocaleString('en-KE', {maximumFractionDigits:0}); }
+  function refreshSelected(){
+    var due = selectedDue();
+    document.getElementById('selectedBalanceOut').textContent = money(due);
+    if (modeSel.value === 'full') amountInput.value = due.toFixed(2);
+    syncDetails();
+  }
+  function fillList(items){
+    detailList.innerHTML = '';
+    (items||[]).forEach(function(v){
+      var o = document.createElement('option');
+      o.value = v;
+      detailList.appendChild(o);
+    });
+  }
+  function syncDetails(){
+    var m = methodSel.value;
+    cashBox.style.display = m === 'cash' ? 'flex' : 'none';
+    document.getElementById('custAmountWrap').style.display = modeSel.value === 'deposit' ? '' : 'none';
+    if (m === 'cash') {
+      detailBox.style.display = 'none';
+      return;
+    }
+    detailBox.style.display = 'flex';
+    if (m === 'mpesa' || m === 'paybill') {
+      detailLabel.textContent = m === 'paybill' ? 'Paybill / Till' : 'Name on M-Pesa';
+      detailInput.placeholder = m === 'paybill' ? 'Paybill or Till number' : 'Optional name';
+      fillList([]);
+    } else if (m === 'card') {
+      detailLabel.textContent = 'Card type';
+      detailInput.placeholder = 'Choose card type';
+      fillList(cardTypes);
+    } else if (m === 'bank') {
+      detailLabel.textContent = 'Bank';
+      detailInput.placeholder = 'Choose or type bank';
+      fillList(banks);
+    } else if (m === 'sacco') {
+      detailLabel.textContent = 'SACCO';
+      detailInput.placeholder = 'Choose or type SACCO';
+      fillList(saccos);
+    } else {
+      detailBox.style.display = 'none';
+    }
+  }
+  function syncHidden(){
+    var m = methodSel.value;
+    var provider = '';
+    var account = '';
+    if (m === 'mpesa') { provider = 'M-Pesa'; account = detailInput.value || ''; }
+    else if (m === 'paybill') { provider = detailInput.value || 'Paybill / Till'; }
+    else if (m === 'card' || m === 'bank' || m === 'sacco') { provider = detailInput.value || ''; }
+    document.getElementById('custPaymentProvider').value = provider;
+    document.getElementById('custPaymentAccountName').value = account;
+    document.getElementById('custPaymentReference').value = refInput.value || '';
+    var due = selectedDue();
+    var amt = modeSel.value === 'full' ? due : (parseFloat(amountInput.value)||0);
+    document.getElementById('custPayBtn').innerHTML = '<i class="fas fa-check me-1"></i>Record ' + money(amt) + ' &amp; print receipt';
+  }
+  if (all) all.addEventListener('change', function(){ checks.forEach(function(c){ c.checked = all.checked; }); refreshSelected(); });
+  checks.forEach(function(c){ c.addEventListener('change', refreshSelected); });
+  modeSel.addEventListener('change', refreshSelected);
+  methodSel.addEventListener('change', function(){ syncDetails(); syncHidden(); });
+  [amountInput, detailInput, refInput, document.getElementById('custCashGiven')].forEach(function(el){
+    if (el) { el.addEventListener('input', syncHidden); el.addEventListener('change', syncHidden); }
+  });
+  document.getElementById('customerPayForm').addEventListener('submit', function(e){
+    syncHidden();
+    if (!checks.some(function(c){ return c.checked; })) { e.preventDefault(); alert('Select at least one invoice.'); return; }
+    if (modeSel.value === 'deposit' && (parseFloat(amountInput.value)||0) <= 0) { e.preventDefault(); alert('Enter the deposit amount.'); }
+  });
+  refreshSelected();
+})();
+</script>
 <?php endif; ?>
 
 <?php if ($order):
@@ -140,6 +467,7 @@ ob_start();
         'paid' => '<span class="badge bg-success">Paid</span>',
         'void' => '<span class="badge bg-secondary">Voided</span>',
     ][$order['status']] ?? '';
+    $ledgerUrl = $paymentsBase . '?customer=' . urlencode($order['table_name'] ?? '') . (!empty($order['customer_id']) ? '&customer_id=' . (int) $order['customer_id'] : '');
 ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
@@ -155,14 +483,17 @@ ob_start();
           </div>
         <?php endif; ?>
       </div>
-      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $receiptBase . '?id=' . (int) $order['id']; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-primary" href="<?php echo $ledgerUrl; ?>">Customer ledger</a>
+        <a class="btn btn-sm btn-outline-secondary" href="<?php echo $receiptBase . '?id=' . (int) $order['id']; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
+      </div>
     </div>
 
     <?php foreach ($items as $it): ?>
       <div class="d-flex justify-content-between border-bottom py-2">
         <div>
           <div class="fw-semibold" style="font-size:.9rem;"><?php echo htmlspecialchars($it['product_name']); ?></div>
-          <small class="text-muted">KES <?php echo number_format((float) $it['unit_price'], 0); ?> × <?php echo rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.'); ?></small>
+          <small class="text-muted">KES <?php echo number_format((float) $it['unit_price'], 0); ?> × <?php echo htmlspecialchars(QtyFormat::display((float) $it['quantity'])); ?></small>
         </div>
         <div class="fw-bold">KES <?php echo number_format((float) $it['line_total'], 0); ?></div>
       </div>
@@ -190,18 +521,10 @@ ob_start();
         <input type="hidden" name="action" value="settle">
         <input type="hidden" name="receipt_number" value="<?php echo htmlspecialchars($order['receipt_number']); ?>">
         <div class="btn-group payment-methods w-100 mb-3 flex-wrap" role="group">
-          <input type="radio" class="btn-check" name="payment_method" id="payCash" value="cash"<?php echo $preferDeposit ? '' : ' checked'; ?>>
-          <label class="btn btn-outline-primary" for="payCash"><i class="fas fa-money-bill-wave me-1"></i>Cash</label>
-          <input type="radio" class="btn-check" name="payment_method" id="payMpesa" value="mpesa">
-          <label class="btn btn-outline-success" for="payMpesa"><i class="fas fa-mobile-screen me-1"></i>M-Pesa</label>
-          <input type="radio" class="btn-check" name="payment_method" id="payCard" value="card">
-          <label class="btn btn-outline-dark" for="payCard"><i class="fas fa-credit-card me-1"></i>Card</label>
-          <input type="radio" class="btn-check" name="payment_method" id="payBank" value="bank">
-          <label class="btn btn-outline-secondary" for="payBank"><i class="fas fa-building-columns me-1"></i>Bank</label>
-          <input type="radio" class="btn-check" name="payment_method" id="paySacco" value="sacco">
-          <label class="btn btn-outline-secondary" for="paySacco"><i class="fas fa-landmark me-1"></i>SACCO</label>
-          <input type="radio" class="btn-check" name="payment_method" id="paySplit" value="split">
-          <label class="btn btn-outline-secondary" for="paySplit"><i class="fas fa-divide me-1"></i>Split (both)</label>
+          <?php $i = 0; foreach ($settleMethods as $mid => $mlabel): $i++; ?>
+            <input type="radio" class="btn-check" name="payment_method" id="pay_<?php echo htmlspecialchars($mid); ?>" value="<?php echo htmlspecialchars($mid); ?>" <?php echo (!$preferDeposit && $i === 1) || ($preferDeposit && false) ? 'checked' : ''; ?>>
+            <label class="btn btn-outline-primary" for="pay_<?php echo htmlspecialchars($mid); ?>"><?php echo htmlspecialchars($mlabel); ?></label>
+          <?php endforeach; ?>
           <input type="radio" class="btn-check" name="payment_method" id="payCredit" value="credit"<?php echo $preferDeposit ? ' checked' : ''; ?>>
           <label class="btn btn-outline-warning" for="payCredit"><i class="fas fa-hand-holding-dollar me-1"></i>Deposit / part pay</label>
         </div>
@@ -213,14 +536,11 @@ ob_start();
           <div class="col-12 col-sm-6">
             <label class="form-label small">Received through</label>
             <select name="deposit_method" id="depositMethod" class="form-select">
-              <option value="cash">Cash</option>
-              <option value="mpesa">M-Pesa</option>
-              <option value="card">Card</option>
-              <option value="bank">Bank</option>
-              <option value="sacco">SACCO</option>
+              <?php foreach ($depositMethods as $mid => $mlabel): ?>
+                <option value="<?php echo htmlspecialchars($mid); ?>"><?php echo htmlspecialchars($mlabel); ?></option>
+              <?php endforeach; ?>
             </select>
           </div>
-          <div class="col-12"><div class="form-text">Enter any amount up to the balance. A deposit receipt prints after saving.</div></div>
         </div>
         <div id="cashBox" class="row g-2 mb-2" style="display:<?php echo $preferDeposit ? 'none' : 'flex'; ?>;">
           <div class="col-6">
@@ -249,6 +569,12 @@ ob_start();
           <div class="col-12">
             <label class="form-label small">Name shown on M-Pesa</label>
             <input type="text" id="mpesaNameInput" class="form-control" placeholder="Optional">
+          </div>
+        </div>
+        <div id="paybillBox" style="display:none;" class="row g-2 mb-2">
+          <div class="col-12">
+            <label class="form-label small">Paybill / Till</label>
+            <input type="text" id="paybillInput" class="form-control" placeholder="Paybill or Till number">
           </div>
         </div>
         <div id="cardBox" style="display:none;" class="row g-2 mb-2">
@@ -295,12 +621,14 @@ ob_start();
           var m = document.querySelector('input[name=payment_method]:checked').value;
           var depositMethod = document.getElementById('depositMethod').value;
           document.getElementById('creditBox').style.display = m === 'credit' ? 'flex' : 'none';
+          var detailMethod = m === 'credit' ? depositMethod : m;
           cashBox.style.display = (m === 'cash' || m === 'split' || (m === 'credit' && depositMethod === 'cash')) ? 'flex' : 'none';
           splitBox.style.display = m === 'split' ? 'flex' : 'none';
-          document.getElementById('mpesaBox').style.display = (m === 'mpesa' || m === 'split' || (m === 'credit' && depositMethod === 'mpesa')) ? 'flex' : 'none';
-          document.getElementById('cardBox').style.display = (m === 'card' || (m === 'credit' && depositMethod === 'card')) ? 'flex' : 'none';
-          document.getElementById('bankBox').style.display = (m === 'bank' || (m === 'credit' && depositMethod === 'bank')) ? 'flex' : 'none';
-          document.getElementById('saccoBox').style.display = (m === 'sacco' || (m === 'credit' && depositMethod === 'sacco')) ? 'flex' : 'none';
+          document.getElementById('mpesaBox').style.display = (detailMethod === 'mpesa' || m === 'split') ? 'flex' : 'none';
+          document.getElementById('paybillBox').style.display = detailMethod === 'paybill' ? 'flex' : 'none';
+          document.getElementById('cardBox').style.display = detailMethod === 'card' ? 'flex' : 'none';
+          document.getElementById('bankBox').style.display = detailMethod === 'bank' ? 'flex' : 'none';
+          document.getElementById('saccoBox').style.display = detailMethod === 'sacco' ? 'flex' : 'none';
           document.getElementById('referenceBox').style.display = (m === 'cash') ? 'none' : 'flex';
           updateBalance();
         }
@@ -317,6 +645,7 @@ ob_start();
           var accountName = '';
           var detailMethod = m === 'credit' ? depositMethod : m;
           if (detailMethod === 'mpesa' || m === 'split') { accountName = document.getElementById('mpesaNameInput').value || ''; provider = m === 'split' ? 'Cash + M-Pesa' : 'M-Pesa'; }
+          if (detailMethod === 'paybill') { provider = document.getElementById('paybillInput').value || 'Paybill / Till'; }
           if (detailMethod === 'card') { provider = document.getElementById('cardTypeInput').value || ''; }
           if (detailMethod === 'bank') { provider = document.getElementById('bankInput').value || ''; }
           if (detailMethod === 'sacco') { provider = document.getElementById('saccoInput').value || ''; }
@@ -332,9 +661,11 @@ ob_start();
           }
         }
         document.querySelectorAll('input[name=payment_method]').forEach(function (r) { r.addEventListener('change', syncMode); });
-        ['cashGiven', 'cashPortion', 'mpesaPortion', 'mpesaNameInput', 'cardTypeInput', 'bankInput', 'saccoInput', 'referenceInput', 'creditAmount', 'depositMethod'].forEach(function (id) {
-          document.getElementById(id).addEventListener('input', updateBalance);
-          document.getElementById(id).addEventListener('change', updateBalance);
+        ['cashGiven', 'cashPortion', 'mpesaPortion', 'mpesaNameInput', 'paybillInput', 'cardTypeInput', 'bankInput', 'saccoInput', 'referenceInput', 'creditAmount', 'depositMethod'].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener('input', updateBalance);
+          el.addEventListener('change', updateBalance);
         });
         document.getElementById('depositMethod').addEventListener('change', syncMode);
         syncMode();
@@ -367,47 +698,72 @@ ob_start();
 </style>
 <script>
 (function(){
-  var input = document.getElementById('receiptSearch');
+  var input = document.getElementById('customerSearch');
   var menu = document.getElementById('paymentSuggestMenu');
+  var hidden = document.getElementById('customerIdField');
   var api = <?php echo json_encode($invoiceSearchApi); ?>;
+  var custApi = <?php echo json_encode($customerSearchApi); ?>;
   var preferDeposit = <?php echo $preferDeposit ? 'true' : 'false'; ?>;
   if (!input || !menu) return;
   var timer = null;
   function hide(){ menu.classList.remove('show'); }
   function money(n){ return 'KES ' + (Number(n)||0).toLocaleString('en-KE', {maximumFractionDigits:0}); }
-  function go(receipt){
+  function goCustomer(name, id){
+    var url = '?customer=' + encodeURIComponent(name || '');
+    if (id) url += '&customer_id=' + encodeURIComponent(id);
+    if (preferDeposit) url += '&deposit=1';
+    window.location.href = url;
+  }
+  function goReceipt(receipt){
     var url = '?receipt=' + encodeURIComponent(receipt);
     if (preferDeposit) url += '&deposit=1';
     window.location.href = url;
   }
-  function render(items){
+  function render(items, customers){
     menu.innerHTML = '';
-    if (!items.length) { hide(); return; }
-    items.forEach(function(it){
+    var any = false;
+    (customers || []).forEach(function(c){
+      any = true;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.innerHTML = '<strong></strong><span class="meta"></span>';
+      b.querySelector('strong').textContent = (c.name || 'Customer') + (c.company_name ? ' · ' + c.company_name : '');
+      b.querySelector('.meta').textContent = 'Customer ledger' + (c.phone ? ' · ' + c.phone : '');
+      b.addEventListener('mousedown', function(e){
+        e.preventDefault();
+        if (hidden) hidden.value = c.id || '';
+        goCustomer(c.name || '', c.id || 0);
+      });
+      menu.appendChild(b);
+    });
+    (items || []).forEach(function(it){
+      any = true;
       var b = document.createElement('button');
       b.type = 'button';
       var title = (it.customer_name || 'Customer') + (it.company_name ? ' · ' + it.company_name : '');
       b.innerHTML = '<span class="bal">' + money(it.balance) + '</span><strong></strong><span class="meta"></span>';
       b.querySelector('strong').textContent = title;
-      b.querySelector('.meta').textContent = (it.receipt_number || '') + (it.phone ? ' · ' + it.phone : '');
+      b.querySelector('.meta').textContent = (it.receipt_number || '') + ' · open invoice';
       b.addEventListener('mousedown', function(e){
         e.preventDefault();
-        go(it.receipt_number);
+        goCustomer(it.customer_name || '', 0);
       });
       menu.appendChild(b);
     });
-    menu.classList.add('show');
+    if (any) menu.classList.add('show'); else hide();
   }
   input.addEventListener('input', function(){
+    if (hidden) hidden.value = '';
     clearTimeout(timer);
     var q = input.value.trim();
-    // Exact ORD- style numbers can still use Find; suggestions help name/company search.
     if (q.length < 1) { hide(); return; }
     timer = setTimeout(function(){
-      fetch(api + '?q=' + encodeURIComponent(q) + '&limit=12&open_only=1')
-        .then(function(r){ return r.json(); })
-        .then(function(data){ render(data.items || []); })
-        .catch(function(){ hide(); });
+      Promise.all([
+        fetch(api + '?q=' + encodeURIComponent(q) + '&limit=8&open_only=1').then(function(r){ return r.json(); }).catch(function(){ return {items:[]}; }),
+        fetch(custApi + '?q=' + encodeURIComponent(q) + '&limit=6').then(function(r){ return r.json(); }).catch(function(){ return {items:[]}; })
+      ]).then(function(res){
+        render((res[0] && res[0].items) || [], (res[1] && res[1].items) || []);
+      });
     }, 180);
   });
   input.addEventListener('blur', function(){ setTimeout(hide, 160); });

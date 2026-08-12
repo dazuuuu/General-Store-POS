@@ -431,6 +431,7 @@ ob_start();
 .pos-cart-price{color:#9aa0ac;font-size:.76rem;}
 .pos-qty{display:flex;align-items:center;gap:6px;}
 .pos-qty button{width:24px;height:24px;border-radius:6px;border:1px solid #eef0f4;background:#fff;font-weight:700;line-height:1;}
+.pos-qty .pos-half-btn{width:auto;min-width:28px;padding:0 6px;font-size:.78rem;color:var(--pos-green);}
 .pos-qty-input{width:72px;height:28px;border:1px solid #eef0f4;border-radius:7px;text-align:center;font-weight:700;font-size:.82rem;}
 .pos-dual-qty{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
 .pos-dual-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;}
@@ -477,6 +478,14 @@ try {
     });
 } catch (e) {}
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
+function formatHalfQty(n) {
+    n = Math.round((parseFloat(n) || 0) * 100) / 100;
+    var whole = Math.floor(n + 0.0001);
+    var frac = Math.round((n - whole) * 100) / 100;
+    if (Math.abs(frac - 0.5) < 0.001) return (whole > 0 ? String(whole) : '') + '½';
+    if (Math.abs(frac) < 0.001) return String(whole);
+    return String(n);
+}
 function defaultSaleType() { return document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail'; }
 function ensureCart(id) {
     if (!cart[id]) cart[id] = { retail: 0, wholesale: 0 };
@@ -665,14 +674,19 @@ function render() {
           +   '<div class="pos-dual-qty">'
           +     '<label class="pos-dual-row"><span class="pos-dual-label">Retail <span class="text-muted">(' + money(productPrice(p, 'retail')) + '/item)</span></span>'
           +       '<span class="pos-qty"><button type="button" data-dec-retail="' + id + '">−</button>'
-          +       '<input type="number" step="0.01" min="0" max="' + retailMax + '" class="pos-qty-input" data-retail-qty="' + id + '" value="' + (c.retail || 0) + '" inputmode="decimal">'
+          +       '<button type="button" class="pos-half-btn" data-half-retail="' + id + '" title="Add half">½</button>'
+          +       '<input type="number" step="0.5" min="0" max="' + retailMax + '" class="pos-qty-input" data-retail-qty="' + id + '" value="' + (c.retail || 0) + '" inputmode="decimal">'
           +       '<button type="button" data-inc-retail="' + id + '">+</button></span></label>'
           +     '<label class="pos-dual-row"><span class="pos-dual-label">Wholesale <span class="text-muted">(' + money(productPrice(p, 'wholesale')) + '/' + wLabel + ')</span></span>'
           +       '<span class="pos-qty"><button type="button" data-dec-wholesale="' + id + '">−</button>'
-          +       '<input type="number" step="0.01" min="0" max="' + wholesaleMax + '" class="pos-qty-input" data-wholesale-qty="' + id + '" value="' + (c.wholesale || 0) + '" inputmode="decimal">'
+          +       '<button type="button" class="pos-half-btn" data-half-wholesale="' + id + '" title="Add half">½</button>'
+          +       '<input type="number" step="0.5" min="0" max="' + wholesaleMax + '" class="pos-qty-input" data-wholesale-qty="' + id + '" value="' + (c.wholesale || 0) + '" inputmode="decimal">'
           +       '<button type="button" data-inc-wholesale="' + id + '">+</button></span></label>'
           +   '</div>'
-          +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal) + (isPackProduct(p) ? ' <span class="text-muted small">· stock used ' + stockUsed(id) + ' items</span>' : '') + '</div>'
+          +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal)
+          +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
+          +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
+          +     (isPackProduct(p) ? ' <span class="text-muted small">· stock used ' + stockUsed(id) + ' items</span>' : '') + '</div>'
           + '</div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);
@@ -708,8 +722,10 @@ document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
     if (t.dataset.incRetail) setRetailQty(t.dataset.incRetail, (cart[t.dataset.incRetail] ? cart[t.dataset.incRetail].retail : 0) + 1);
     else if (t.dataset.decRetail) setRetailQty(t.dataset.decRetail, (cart[t.dataset.decRetail] ? cart[t.dataset.decRetail].retail : 0) - 1);
+    else if (t.dataset.halfRetail) setRetailQty(t.dataset.halfRetail, (cart[t.dataset.halfRetail] ? cart[t.dataset.halfRetail].retail : 0) + 0.5);
     else if (t.dataset.incWholesale) setWholesaleQty(t.dataset.incWholesale, (cart[t.dataset.incWholesale] ? cart[t.dataset.incWholesale].wholesale : 0) + 1);
     else if (t.dataset.decWholesale) setWholesaleQty(t.dataset.decWholesale, (cart[t.dataset.decWholesale] ? cart[t.dataset.decWholesale].wholesale : 0) - 1);
+    else if (t.dataset.halfWholesale) setWholesaleQty(t.dataset.halfWholesale, (cart[t.dataset.halfWholesale] ? cart[t.dataset.halfWholesale].wholesale : 0) + 0.5);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
 });
 document.getElementById('cartRows').addEventListener('change', function (e) {
