@@ -334,9 +334,14 @@ ob_start();
           <div class="pos-card-price">
             <?php if (!empty($p['on_offer'])): ?>
               <span class="pos-card-regprice">KES <?php echo number_format((float) $p['regular_price'], 0); ?></span>
-              KES <?php echo number_format($price, 0); ?>
+              Retail KES <?php echo number_format($price, 0); ?>
             <?php else: ?>
-              KES <?php echo number_format($price, 0); ?>
+              Retail KES <?php echo number_format($price, 0); ?>
+            <?php endif; ?>
+            <?php if ($packUnit !== '' && $unitsPerPack > 1 && $packPrice > 0): ?>
+              <div class="small text-muted">Wholesale KES <?php echo number_format($packPrice, 0); ?> / <?php echo htmlspecialchars($packUnit); ?> (<?php echo rtrim(rtrim(number_format($unitsPerPack, 2), '0'), '.'); ?> pcs)</div>
+            <?php elseif ($wholesale > 0 && abs($wholesale - $price) > 0.001): ?>
+              <div class="small text-muted">Wholesale KES <?php echo number_format($wholesale, 0); ?></div>
             <?php endif; ?>
           </div>
           <button type="button" class="pos-add"><i class="fas fa-cart-plus me-1"></i>Add</button>
@@ -373,9 +378,9 @@ ob_start();
       </div>
       <div class="d-flex justify-content-between align-items-center py-1">
         <span>Set cart price</span>
-        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:120px;">
-          <option value="retail">Retail</option>
-          <option value="wholesale">Wholesale</option>
+        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:150px;">
+          <option value="retail">Retail (item)</option>
+          <option value="wholesale">Wholesale (pack)</option>
         </select>
       </div>
       <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
@@ -707,8 +712,11 @@ function render() {
         var line = document.createElement('div');
         line.className = 'pos-cart-line';
         line.innerHTML = (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
-          + '<div class="flex-grow-1"><div class="pos-cart-name">' + p.name + '</div><div class="pos-cart-price">' + money(productPrice(p, type)) + (unit ? ' / ' + unit : '') + '</div>'
-          + '<select class="form-select form-select-sm mt-1 pos-price-type" data-price-type="' + id + '"><option value="retail"' + (type === 'retail' ? ' selected' : '') + '>Retail</option><option value="wholesale"' + (type === 'wholesale' ? ' selected' : '') + '>Wholesale</option></select></div>'
+          + '<div class="flex-grow-1"><div class="pos-cart-name">' + p.name + '</div><div class="pos-cart-price">' + money(productPrice(p, type)) + (unit ? ' / ' + unit : ' / item') + '</div>'
+          + '<select class="form-select form-select-sm mt-1 pos-price-type" data-price-type="' + id + '">'
+          + '<option value="retail"' + (type === 'retail' ? ' selected' : '') + '>Retail sale — ' + money(p.price) + ' / item</option>'
+          + '<option value="wholesale"' + (type === 'wholesale' ? ' selected' : '') + '>Wholesale sale — ' + money(sellsByPack(p, 'wholesale') ? p.packPrice : (p.wholesale > 0 ? p.wholesale : p.price)) + (sellsByPack(p, 'wholesale') ? (' / ' + p.packUnit) : ' / item') + '</option>'
+          + '</select></div>'
           + '<div class="pos-qty"><button type="button" data-dec="' + id + '">−</button><input type="number" step="0.01" min="0" max="' + max + '" class="pos-qty-input" data-qty="' + id + '" value="' + qty + '"><button type="button" data-inc="' + id + '">+</button></div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);

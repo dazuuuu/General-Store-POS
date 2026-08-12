@@ -49,6 +49,7 @@ function single_product_package_fields(array $row, array $units): array
             'faulty_quantity' => max(0, (float) ($row['faulty_quantity'] ?? 0)),
             'unit' => $receiveUnit,
             'buying_price' => (float) ($row['buying_price'] ?? 0),
+            'package_buying_price' => null,
             'wholesale_price' => $row['wholesale_price'] ?? '',
             'package_unit' => null,
             'package_quantity' => null,
@@ -66,6 +67,7 @@ function single_product_package_fields(array $row, array $units): array
         'faulty_quantity' => round(max(0, (float) ($row['faulty_quantity'] ?? 0)) * $inside, 2),
         'unit' => $innerUnit,
         'buying_price' => round($packageCost / $inside, 2),
+        'package_buying_price' => $packageCost,
         'wholesale_price' => $packageWholesale !== null ? round($packageWholesale / $inside, 2) : '',
         'package_unit' => $receiveUnit,
         'package_quantity' => $packageQty,
@@ -85,8 +87,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($name === '') {
         $error = 'Product name is required.';
+    } elseif ($pkg['package_unit'] !== null && ($pkg['package_buying_price'] ?? 0) <= 0) {
+        $error = 'Enter the buying price for each package (e.g. per carton).';
+    } elseif ($pkg['package_unit'] !== null && ($pkg['package_price'] ?? 0) <= 0) {
+        $error = 'Enter the wholesale price for each package (e.g. per carton).';
     } elseif ($qty <= 0) {
-        $error = 'Enter the good (sellable) quantity received.';
+        $error = 'Enter packages received and items inside each package (or a good qty).';
+    } elseif (($pkg['package_unit'] === null) && (float) ($_POST['selling_price'] ?? 0) < 0) {
+        $error = 'Enter a valid retail price.';
     } else {
         $img = single_product_handle_image($_FILES['image'] ?? []);
         if (!$img['ok']) {
@@ -104,6 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
+                    'package_buying_price' => $pkg['package_buying_price'],
                     'colors' => [],
                     'buying_price' => $pkg['buying_price'],
                     'remark' => trim($_POST['remark'] ?? ''),
@@ -121,6 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
+                    'package_buying_price' => $pkg['package_buying_price'],
                     'colors' => [],
                     'quantity' => $qty,
                     'faulty_quantity' => $faulty,
@@ -242,14 +252,20 @@ ob_start();
       <div class="col-md-4">
         <label class="form-label fw-semibold" id="buyingLabel">Buying price (KES)</label>
         <input type="number" step="0.01" min="0" name="buying_price" id="buyingPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['buying_price'] ?? ''); ?>">
+        <div class="form-text" id="buyingHint">Cost for one item (or one package when received as carton/bale/dozen).</div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold">Selling price (KES)</label>
-        <input type="number" step="0.01" min="0" name="selling_price" class="form-control" value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>">
+        <label class="form-label fw-semibold" id="retailLabel">Retail price (single item)</label>
+        <input type="number" step="0.01" min="0" name="selling_price" id="retailPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>">
+        <div class="form-text">Price charged when selling one item from inside the package.</div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold" id="wholesaleLabel">Wholesale <span class="text-muted fw-normal">(optional)</span></label>
-        <input type="number" step="0.01" min="0" name="wholesale_price" class="form-control" value="<?php echo htmlspecialchars($_POST['wholesale_price'] ?? ''); ?>">
+        <label class="form-label fw-semibold" id="wholesaleLabel">Wholesale price per package</label>
+        <input type="number" step="0.01" min="0" name="wholesale_price" id="wholesalePrice" class="form-control" value="<?php echo htmlspecialchars($_POST['wholesale_price'] ?? ''); ?>">
+        <div class="form-text" id="wholesaleHint">Price for selling one whole package (carton/bale/dozen…).</div>
+      </div>
+      <div class="col-12">
+        <div id="profitSummary" class="alert alert-light border small mb-0" style="display:none;"></div>
       </div>
       <div class="col-12">
         <div class="border rounded p-3" style="border-color:#e2e8f0!important;">
@@ -318,32 +334,70 @@ ob_start();
   var quantityInput = document.getElementById('quantityInput');
   var packageQty = document.getElementById('packageQty');
   var unitsPerPackage = document.getElementById('unitsPerPackage');
+  function money(n) { return 'KES ' + (Math.round(n * 100) / 100).toLocaleString(); }
   function recalcPackage() {
     var unit = unitSelect ? unitSelect.value : 'piece';
     var isPackageUnit = unit !== 'piece';
     var pkgQty = parseFloat(packageQty ? packageQty.value : 0) || 0;
     var inside = parseFloat(unitsPerPackage ? unitsPerPackage.value : 0) || 0;
     var total = pkgQty > 0 && inside > 0 ? Math.round(pkgQty * inside * 100) / 100 : 0;
+    var buy = parseFloat(document.getElementById('buyingPrice').value) || 0;
+    var retail = parseFloat(document.getElementById('retailPrice').value) || 0;
+    var wholesale = parseFloat(document.getElementById('wholesalePrice').value) || 0;
+    var hasPackage = isPackageUnit && pkgQty > 0 && inside > 0;
     if (packageFields) packageFields.style.display = isPackageUnit ? 'block' : 'none';
     var packageQtyLabel = document.getElementById('packageQtyLabel');
     var unitsPerPackageLabel = document.getElementById('unitsPerPackageLabel');
     if (packageQtyLabel) packageQtyLabel.textContent = 'Number of ' + unit + 's';
     if (unitsPerPackageLabel) unitsPerPackageLabel.textContent = 'Items inside each ' + unit;
     if (document.getElementById('totalItems')) document.getElementById('totalItems').textContent = total;
-    if (isPackageUnit && total > 0) {
+    if (hasPackage) {
       quantityInput.value = total;
       quantityInput.readOnly = true;
       document.getElementById('qtyLabel').textContent = 'Total sellable items';
       document.getElementById('buyingLabel').textContent = 'Buying price per ' + unit + ' (KES)';
-      document.getElementById('wholesaleLabel').innerHTML = 'Wholesale price per ' + unit + ' <span class="text-muted fw-normal">(optional)</span>';
+      document.getElementById('buyingHint').textContent = 'Cost of one ' + unit + '. Total cost = this × number of ' + unit + 's.';
+      document.getElementById('retailLabel').textContent = 'Retail price (single item inside)';
+      document.getElementById('wholesaleLabel').textContent = 'Wholesale price per ' + unit;
+      document.getElementById('wholesaleHint').textContent = 'Selling price when the customer buys a whole ' + unit + '.';
     } else {
       quantityInput.readOnly = false;
       document.getElementById('qtyLabel').textContent = isPackageUnit ? ('Good ' + unit + ' qty received') : 'Good qty received';
-      document.getElementById('buyingLabel').textContent = isPackageUnit ? ('Buying price per ' + unit + ' (KES)') : 'Buying price (KES)';
-      document.getElementById('wholesaleLabel').innerHTML = (isPackageUnit ? ('Wholesale price per ' + unit) : 'Wholesale') + ' <span class="text-muted fw-normal">(optional)</span>';
+      document.getElementById('buyingLabel').textContent = 'Buying price (KES)';
+      document.getElementById('buyingHint').textContent = 'Cost for one item.';
+      document.getElementById('retailLabel').textContent = 'Retail price (single item)';
+      document.getElementById('wholesaleLabel').innerHTML = 'Wholesale price <span class="text-muted fw-normal">(optional)</span>';
+      document.getElementById('wholesaleHint').textContent = 'Optional wholesale unit price.';
     }
+    var summary = document.getElementById('profitSummary');
+    if (!summary) return;
+    var qtyForCalc = hasPackage ? total : (parseFloat(quantityInput.value) || 0);
+    if (qtyForCalc <= 0 || buy <= 0) {
+      summary.style.display = 'none';
+      return;
+    }
+    var cost = hasPackage ? (pkgQty * buy) : (qtyForCalc * buy);
+    var wholesaleReturn = hasPackage ? (pkgQty * wholesale) : (qtyForCalc * wholesale);
+    var retailReturn = qtyForCalc * retail;
+    var wholesaleProfit = wholesaleReturn - cost;
+    var retailProfit = retailReturn - cost;
+    var wholesaleMargin = wholesaleReturn > 0 ? (wholesaleProfit / wholesaleReturn * 100) : 0;
+    var retailMargin = retailReturn > 0 ? (retailProfit / retailReturn * 100) : 0;
+    summary.style.display = 'block';
+    summary.innerHTML = '<strong>Totals for this delivery</strong>'
+      + '<br>Cost: <strong>' + money(cost) + '</strong>'
+      + (hasPackage ? ' <span class="text-muted">(' + pkgQty + ' × ' + money(buy) + ')</span>' : '')
+      + '<br>Wholesale return: <strong>' + money(wholesaleReturn) + '</strong>'
+      + ' <span class="' + (wholesaleProfit < 0 ? 'text-danger' : 'text-success') + '">Profit ' + money(wholesaleProfit) + ' · ' + wholesaleMargin.toFixed(1) + '%</span>'
+      + '<br>Retail return: <strong>' + money(retailReturn) + '</strong>'
+      + ' <span class="' + (retailProfit < 0 ? 'text-danger' : 'text-success') + '">Profit ' + money(retailProfit) + ' · ' + retailMargin.toFixed(1) + '%</span>'
+      + (hasPackage ? '<br><span class="text-muted">Retail = item price × items/package × packages. Wholesale = package price × packages.</span>' : '');
   }
-  [unitSelect, packageQty, unitsPerPackage].forEach(function (el) {
+  [unitSelect, packageQty, unitsPerPackage, quantityInput,
+    document.getElementById('buyingPrice'),
+    document.getElementById('retailPrice'),
+    document.getElementById('wholesalePrice')
+  ].forEach(function (el) {
     if (el) {
       el.addEventListener('input', recalcPackage);
       el.addEventListener('change', recalcPackage);
