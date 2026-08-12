@@ -147,6 +147,13 @@ ob_start();
       <div>
         <div class="fw-bold fs-5"><?php echo htmlspecialchars($order['table_name']); ?> <?php echo $statusBadge; ?></div>
         <div class="text-muted small">Invoice <?php echo htmlspecialchars($order['receipt_number']); ?> · opened by <?php echo htmlspecialchars($order['opened_by_name'] ?? '—'); ?> · <?php echo date('j M Y, g:i a', strtotime($order['created_at'])); ?></div>
+        <?php if (!empty($order['credit_due_at']) || !empty($order['credit_duration_days'])): ?>
+          <div class="small <?php echo !empty($order['credit_due_at']) && strtotime($order['credit_due_at']) < time() && $order['status'] === 'open' ? 'text-danger fw-semibold' : 'text-muted'; ?>">
+            Credit:
+            <?php if (!empty($order['credit_duration_days'])): ?><?php echo (int) $order['credit_duration_days']; ?> days<?php endif; ?>
+            <?php if (!empty($order['credit_due_at'])): ?> · due <?php echo date('j M Y', strtotime($order['credit_due_at'])); ?><?php endif; ?>
+          </div>
+        <?php endif; ?>
       </div>
       <a class="btn btn-sm btn-outline-secondary" href="<?php echo $receiptBase . '?id=' . (int) $order['id']; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
     </div>
