@@ -89,8 +89,8 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <?php endif; ?>
         <?php if ($isOwner): ?>
-        <a class="t-link <?php echo $isOn('/super/revenues'); ?>" href="<?php echo public_url('super/revenues/'); ?>">
-            <i class="fas fa-sack-dollar"></i><span>Revenues</span>
+        <a class="t-link <?php echo $isOn('/super/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">
+            <i class="fas fa-money-bill-wave"></i><span>Expenses</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">
             <i class="fas fa-chart-pie"></i><span>Finances</span>
