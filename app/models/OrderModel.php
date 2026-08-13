@@ -637,7 +637,7 @@ class OrderModel extends Model
                         payment_method = ?, ' . $cashSql . ', ' . $mpesaSql . ',
                         amount_tendered = ?, change_due = ?, payment_provider = ?,
                         payment_account_name = ?, payment_reference = ?,
-                        paid_by = ?, paid_at = NOW()
+                        paid_by = ?, paid_at = CASE WHEN ? = \'paid\' THEN NOW() ELSE paid_at END
                   WHERE id = ?'
             )->execute(array_merge([
                 $newStatus,
@@ -652,6 +652,7 @@ class OrderModel extends Model
                 $accountName !== '' ? $accountName : null,
                 $reference !== '' ? $reference : null,
                 $staffId,
+                $newStatus,
                 $orderId,
             ]));
 
@@ -1340,34 +1341,79 @@ class OrderModel extends Model
 
     // ===== owner reporting: paid orders, shaped like SaleModel's rows ======
 
+    /** SQL fragments used to recognize credit repayments in the period received. */
+    private function paymentPeriodSql(string $period, string $alias = 'op'): string
+    {
+        return match ($period) {
+            'today' => "DATE({$alias}.created_at) = CURDATE()",
+            'week'  => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+            'month' => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            default => '1=1',
+        };
+    }
+
+    private function orderPeriodSql(string $period, string $alias = 'o'): string
+    {
+        return match ($period) {
+            'today' => "DATE({$alias}.created_at) = CURDATE()",
+            'week'  => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+            'month' => "{$alias}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            default => '1=1',
+        };
+    }
+
     /**
      * Sales for a period (paid + open credit / part-paid), shaped with the same
      * keys SaleModel::forTenant() rows have so the owner's Sales page can merge
      * the two lists and reuse SaleModel's summarize()/staffBreakdown().
-     * Uses COALESCE(paid_at, created_at) so unpaid credit sales still appear
-     * on the day they were sold, and deposits update collected/balance live.
+     * Credit revenue is recognized from order_payments in the period the money
+     * was received. The invoice total and live balance remain unchanged.
      */
     public function forTenant(int $limit = 1000, string $period = 'all', ?int $staffId = null): array
     {
         $tid = \TenantContext::tenantId();
-        $periodSql = match ($period) {
-            'today' => "AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()",
-            'week'  => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
-            default => '',
-        };
+        $payPeriod = $this->paymentPeriodSql($period);
+        $orderPeriod = $this->orderPeriodSql($period);
+        $activitySql = $period === 'all'
+            ? ''
+            : "AND (({$orderPeriod}) OR COALESCE(pa.period_paid, 0) > 0)";
         $staffSql = $staffId !== null ? "AND o.opened_by = :staff_id" : '';
         $stmt = $this->db->prepare(
             "SELECT o.*, u.username AS staff_name,
-                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                    CASE
+                        WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND ({$orderPeriod}) THEN o.total
+                        ELSE COALESCE(pa.period_paid, 0)
+                    END AS recognized_revenue,
+                    CASE WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND ({$orderPeriod})
+                         THEN COALESCE(o.cash_amount, CASE WHEN o.payment_method = 'cash' THEN o.total ELSE 0 END)
+                         ELSE COALESCE(pa.period_cash, 0) END AS recognized_cash,
+                    CASE WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND ({$orderPeriod})
+                         THEN COALESCE(o.mpesa_amount, CASE WHEN o.payment_method = 'mpesa' THEN o.total ELSE 0 END)
+                         ELSE COALESCE(pa.period_mpesa, 0) END AS recognized_mpesa,
+                    CASE WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND ({$orderPeriod})
+                         THEN CASE WHEN o.payment_method IN ('card','bank','sacco','paybill') THEN o.total ELSE 0 END
+                         ELSE COALESCE(pa.period_other, 0) END AS recognized_other,
+                    pa.last_period_payment_at
                FROM orders o
           LEFT JOIN users u ON u.id = o.opened_by
+          LEFT JOIN (
+                    SELECT op.tenant_id, op.order_id,
+                           SUM(op.amount) AS all_paid,
+                           SUM(CASE WHEN {$payPeriod} THEN op.amount ELSE 0 END) AS period_paid,
+                           SUM(CASE WHEN {$payPeriod} AND op.method = 'cash' THEN op.amount ELSE 0 END) AS period_cash,
+                           SUM(CASE WHEN {$payPeriod} AND op.method = 'mpesa' THEN op.amount ELSE 0 END) AS period_mpesa,
+                           SUM(CASE WHEN {$payPeriod} AND op.method NOT IN ('cash','mpesa') THEN op.amount ELSE 0 END) AS period_other,
+                           MAX(CASE WHEN {$payPeriod} THEN op.created_at ELSE NULL END) AS last_period_payment_at
+                      FROM order_payments op
+                  GROUP BY op.tenant_id, op.order_id
+               ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
               WHERE o.tenant_id = :tid
                 AND o.status IN ('paid', 'open')
                 AND COALESCE(o.total, 0) > 0
                 AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
-                {$periodSql} {$staffSql}
-           ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.id DESC
+                {$activitySql} {$staffSql}
+           ORDER BY COALESCE(pa.last_period_payment_at, o.created_at) DESC, o.id DESC
               LIMIT :lim"
         );
         $stmt->bindValue(':tid', $tid, \PDO::PARAM_INT);
@@ -1398,7 +1444,7 @@ class OrderModel extends Model
                     $status = 'credit';
                 }
             }
-            $r['created_at']       = $r['paid_at'] ?: $r['created_at'];
+            $r['created_at']       = $r['last_period_payment_at'] ?: $r['created_at'];
             $r['customer_name']    = $r['table_name'];
             $r['sale_type']        = $r['sale_type'] ?? 'retail';
             $r['payment_status']   = $status;
@@ -1406,6 +1452,10 @@ class OrderModel extends Model
             $r['discount_amount']  = (float) ($r['discount_amount'] ?? 0);
             $r['amount_due']       = $due;
             $r['amount_paid']      = $paid;
+            $r['_recognized_revenue'] = round((float) ($r['recognized_revenue'] ?? 0), 2);
+            $r['_recognized_cash'] = round((float) ($r['recognized_cash'] ?? 0), 2);
+            $r['_recognized_mpesa'] = round((float) ($r['recognized_mpesa'] ?? 0), 2);
+            $r['_recognized_other'] = round((float) ($r['recognized_other'] ?? 0), 2);
             $r['receipt_url']      = 'staff/orders/receipt.php?id=' . (int) $r['id'];
             $r['source']           = 'order';
         }
@@ -1424,17 +1474,42 @@ class OrderModel extends Model
         $date = preg_replace('/[^0-9-]/', '', $date);
         $stmt = $this->db->prepare(
             "SELECT o.*, u.username AS staff_name,
-                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                    CASE
+                        WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ? THEN o.total
+                        ELSE COALESCE(pa.period_paid, 0)
+                    END AS recognized_revenue,
+                    CASE WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ?
+                         THEN COALESCE(o.cash_amount, CASE WHEN o.payment_method = 'cash' THEN o.total ELSE 0 END)
+                         ELSE COALESCE(pa.period_cash, 0) END AS recognized_cash,
+                    CASE WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ?
+                         THEN COALESCE(o.mpesa_amount, CASE WHEN o.payment_method = 'mpesa' THEN o.total ELSE 0 END)
+                         ELSE COALESCE(pa.period_mpesa, 0) END AS recognized_mpesa,
+                    CASE WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ?
+                         THEN CASE WHEN o.payment_method IN ('card','bank','sacco','paybill') THEN o.total ELSE 0 END
+                         ELSE COALESCE(pa.period_other, 0) END AS recognized_other,
+                    pa.last_period_payment_at
                FROM orders o
           LEFT JOIN users u ON u.id = o.opened_by
+          LEFT JOIN (
+                    SELECT op.tenant_id, op.order_id,
+                           SUM(op.amount) AS all_paid,
+                           SUM(CASE WHEN DATE(op.created_at) = ? THEN op.amount ELSE 0 END) AS period_paid,
+                           SUM(CASE WHEN DATE(op.created_at) = ? AND op.method = 'cash' THEN op.amount ELSE 0 END) AS period_cash,
+                           SUM(CASE WHEN DATE(op.created_at) = ? AND op.method = 'mpesa' THEN op.amount ELSE 0 END) AS period_mpesa,
+                           SUM(CASE WHEN DATE(op.created_at) = ? AND op.method NOT IN ('cash','mpesa') THEN op.amount ELSE 0 END) AS period_other,
+                           MAX(CASE WHEN DATE(op.created_at) = ? THEN op.created_at ELSE NULL END) AS last_period_payment_at
+                      FROM order_payments op
+                  GROUP BY op.tenant_id, op.order_id
+               ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
               WHERE o.tenant_id = ?
                 AND o.status IN ('paid', 'open')
                 AND COALESCE(o.total, 0) > 0
                 AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
-                AND DATE(COALESCE(o.paid_at, o.created_at)) = ?
-           ORDER BY COALESCE(o.paid_at, o.created_at) ASC, o.id ASC"
+                AND (DATE(o.created_at) = ? OR COALESCE(pa.period_paid, 0) > 0)
+           ORDER BY COALESCE(pa.last_period_payment_at, o.created_at) ASC, o.id ASC"
         );
-        $stmt->execute([$tenantId, $date]);
+        $stmt->execute([$date, $date, $date, $date, $date, $date, $date, $date, $date, $tenantId, $date]);
         $rows = $stmt->fetchAll();
 
         foreach ($rows as &$r) {
@@ -1459,7 +1534,7 @@ class OrderModel extends Model
                     $status = 'credit';
                 }
             }
-            $r['created_at']      = $r['paid_at'] ?: $r['created_at'];
+            $r['created_at']      = $r['last_period_payment_at'] ?: $r['created_at'];
             $r['customer_name']   = $r['table_name'];
             $r['sale_type']       = $r['sale_type'] ?? 'retail';
             $r['payment_status']  = $status;
@@ -1467,6 +1542,10 @@ class OrderModel extends Model
             $r['discount_amount'] = (float) ($r['discount_amount'] ?? 0);
             $r['amount_due']      = $due;
             $r['amount_paid']     = $paid;
+            $r['_recognized_revenue'] = round((float) ($r['recognized_revenue'] ?? 0), 2);
+            $r['_recognized_cash'] = round((float) ($r['recognized_cash'] ?? 0), 2);
+            $r['_recognized_mpesa'] = round((float) ($r['recognized_mpesa'] ?? 0), 2);
+            $r['_recognized_other'] = round((float) ($r['recognized_other'] ?? 0), 2);
             $r['receipt_url']     = 'staff/orders/receipt.php?id=' . (int) $r['id'];
             $r['source']          = 'order';
         }
@@ -1480,9 +1559,19 @@ class OrderModel extends Model
     {
         $date = preg_replace('/[^0-9-]/', '', $date);
         $stmt = $this->db->prepare(
-            "SELECT oi.product_name, SUM(GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0)) AS qty, SUM(oi.line_total) AS revenue
+            "SELECT oi.product_name,
+                    SUM(GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0)
+                        * LEAST(1, COALESCE(pa.period_paid, CASE WHEN COALESCE(pa.all_paid,0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ? THEN o.total ELSE 0 END) / NULLIF(o.total,0))) AS qty,
+                    SUM(oi.line_total
+                        * LEAST(1, COALESCE(pa.period_paid, CASE WHEN COALESCE(pa.all_paid,0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ? THEN o.total ELSE 0 END) / NULLIF(o.total,0))) AS revenue
                FROM order_items oi
                JOIN orders o ON o.id = oi.order_id AND o.tenant_id = oi.tenant_id
+          LEFT JOIN (
+                    SELECT op.tenant_id, op.order_id, SUM(op.amount) AS all_paid,
+                           SUM(CASE WHEN DATE(op.created_at) = ? THEN op.amount ELSE 0 END) AS period_paid
+                      FROM order_payments op
+                  GROUP BY op.tenant_id, op.order_id
+               ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
           LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
                       FROM product_returns
@@ -1490,11 +1579,11 @@ class OrderModel extends Model
                   GROUP BY tenant_id, source_item_id
                ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
               WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0
-                AND DATE(COALESCE(o.paid_at, o.created_at)) = ?
+                AND (COALESCE(pa.period_paid,0) > 0 OR (COALESCE(pa.all_paid,0) = 0 AND o.status = 'paid' AND DATE(o.created_at) = ?))
            GROUP BY oi.product_name
            ORDER BY revenue DESC"
         );
-        $stmt->execute([$tenantId, $date]);
+        $stmt->execute([$date, $date, $date, $tenantId, $date]);
         return $stmt->fetchAll();
     }
 
@@ -1505,41 +1594,49 @@ class OrderModel extends Model
         if ($tid === null) { return []; }
 
         $this->ensureColumn('products', 'package_buying_price', "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`");
-        $periodSql = match ($period) {
-            'today' => "AND DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()",
-            'week'  => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
-            'month' => "AND COALESCE(o.paid_at, o.created_at) >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
-            default => '',
-        };
+        $payPeriod = $this->paymentPeriodSql($period);
+        $orderPeriod = $this->orderPeriodSql($period);
+        $recognizedPay = "(CASE
+            WHEN COALESCE(pa.all_paid, 0) = 0 AND o.status = 'paid' AND ({$orderPeriod}) THEN o.total
+            ELSE COALESCE(pa.period_paid, 0)
+        END)";
+        $paidRatio = "LEAST(1, {$recognizedPay} / NULLIF(o.total, 0))";
 
         $sql = "SELECT oi.product_id,
                        MAX(oi.product_name) AS product_name,
-                       SUM(GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0)) AS qty,
-                       SUM(oi.line_total) AS revenue,
+                       SUM(GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * {$paidRatio}) AS qty,
+                       SUM(oi.line_total * {$paidRatio}) AS revenue,
                        SUM(
                            CASE
                                WHEN oi.price_type = 'wholesale'
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
                                     AND p.package_buying_price IS NOT NULL
-                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
-                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price * {$paidRatio}
+                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio}
                            END
                        ) AS cost,
-                       SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total ELSE 0 END)
-                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
-                       SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total ELSE 0 END)
+                       SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total * {$paidRatio} ELSE 0 END)
+                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total * {$paidRatio} ELSE 0 END)
                        - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
                            CASE
                                WHEN COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
                                     AND p.package_buying_price IS NOT NULL
-                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
-                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                                   THEN (GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price * {$paidRatio}
+                               ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio}
                            END
                          ELSE 0 END) AS wholesale_profit
                   FROM order_items oi
                   JOIN orders o    ON o.id = oi.order_id AND o.tenant_id = oi.tenant_id
+             LEFT JOIN (
+                    SELECT op.tenant_id, op.order_id,
+                           SUM(op.amount) AS all_paid,
+                           SUM(CASE WHEN {$payPeriod} THEN op.amount ELSE 0 END) AS period_paid
+                      FROM order_payments op
+                  GROUP BY op.tenant_id, op.order_id
+             ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
              LEFT JOIN products p  ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id
              LEFT JOIN (
                     SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
@@ -1547,7 +1644,8 @@ class OrderModel extends Model
                      WHERE source_type = 'order'
                   GROUP BY tenant_id, source_item_id
              ) ret ON ret.tenant_id = oi.tenant_id AND ret.source_item_id = oi.id
-                 WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0 {$periodSql}
+                 WHERE oi.tenant_id = ? AND o.status IN ('paid','open') AND COALESCE(o.total,0) > 0
+                   AND {$recognizedPay} > 0
               GROUP BY oi.product_id";
 
         $stmt = $this->db->prepare($sql);

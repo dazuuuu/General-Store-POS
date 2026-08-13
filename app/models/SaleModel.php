@@ -739,7 +739,9 @@ class SaleModel extends Model
             $name = $r['staff_name'] ?? 'Unknown';
             if (!isset($out[$name])) { $out[$name] = ['count' => 0, 'revenue' => 0.0]; }
             $out[$name]['count']++;
-            $out[$name]['revenue'] += (float) $r['total'];
+            $out[$name]['revenue'] += array_key_exists('_recognized_revenue', $r)
+                ? (float) $r['_recognized_revenue']
+                : (float) $r['total'];
         }
         uasort($out, fn($a, $b) => $b['revenue'] <=> $a['revenue']);
         return $out;
@@ -755,9 +757,14 @@ class SaleModel extends Model
             'credit_due' => 0.0, 'credit_count' => 0,
         ];
         foreach ($rows as $r) {
+            $recognized = array_key_exists('_recognized_revenue', $r)
+                ? (float) $r['_recognized_revenue']
+                : (float) $r['total'];
             $sum['count']++;
-            $sum['revenue']  += (float) $r['total'];
-            $sum['collected'] += (float) ($r['amount_paid'] ?? $r['total']);
+            $sum['revenue']  += $recognized;
+            $sum['collected'] += array_key_exists('_recognized_revenue', $r)
+                ? $recognized
+                : (float) ($r['amount_paid'] ?? $r['total']);
             $sum['discount'] += (float) ($r['discount_amount'] ?? 0);
             $sum['credit_due'] += (float) ($r['amount_due'] ?? 0);
             if (($r['payment_status'] ?? 'paid') !== 'paid') { $sum['credit_count']++; }
@@ -766,6 +773,17 @@ class SaleModel extends Model
             $sum[$stype] = ($sum[$stype] ?? 0) + 1;
 
             $method = $r['payment_method'] ?? 'cash';
+            if (array_key_exists('_recognized_revenue', $r)) {
+                $sum['cash'] += (float) ($r['_recognized_cash'] ?? 0);
+                $sum['mpesa'] += (float) ($r['_recognized_mpesa'] ?? 0);
+                $other = (float) ($r['_recognized_other'] ?? 0);
+                if ($other > 0) {
+                    $bucket = in_array($method, ['card', 'bank', 'sacco', 'paybill'], true) ? $method : 'paybill';
+                    if (!isset($sum[$bucket])) { $sum[$bucket] = 0.0; }
+                    $sum[$bucket] += $other;
+                }
+                continue;
+            }
             // For split/credit, use the actual cash/mpesa columns (deposit routed there).
             if ($method === 'split' || $method === 'credit' || (($r['payment_status'] ?? '') === 'part_paid')) {
                 $sum['cash']  += (float) ($r['cash_amount'] ?? 0);

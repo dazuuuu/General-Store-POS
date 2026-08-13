@@ -88,7 +88,11 @@ for ($i = 6; $i >= 0; $i--) {
     $chartLabels[] = date('D', strtotime($date));
     $dayTotal = 0.0;
     foreach ($week as $r) {
-        if (date('Y-m-d', strtotime($r['created_at'])) === $date) { $dayTotal += (float) $r['total']; }
+        if (date('Y-m-d', strtotime($r['created_at'])) === $date) {
+            $dayTotal += array_key_exists('_recognized_revenue', $r)
+                ? (float) $r['_recognized_revenue']
+                : (float) $r['total'];
+        }
     }
     $chartValues[] = round($dayTotal, 2);
 }
