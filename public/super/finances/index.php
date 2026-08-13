@@ -205,7 +205,7 @@ ob_start();
     <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
       <div class="text-muted small text-uppercase fw-semibold">Money in</div>
       <div class="h5 mb-0 fw-bold text-success">KES <?php echo number_format($moneyIn, 0); ?></div>
-      <div class="text-muted" style="font-size:.7rem;">Sales + other revenues</div>
+      <div class="text-muted" style="font-size:.7rem;">Sales collected</div>
     </div></div>
   </div>
   <div class="col-6 col-md-3">
@@ -248,9 +248,9 @@ ob_start();
   </div>
   <div class="col-6 col-md-3">
     <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
-      <div class="text-muted small text-uppercase fw-semibold">Other revenues</div>
-      <div class="h5 mb-0 fw-bold">KES <?php echo number_format($otherRevenue, 0); ?></div>
-      <div class="text-muted" style="font-size:.7rem;"><a href="<?php echo public_url('super/expenses/?period=' . urlencode($period)); ?>">Manage</a></div>
+      <div class="text-muted small text-uppercase fw-semibold">Cost of goods</div>
+      <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($cogs, 0); ?></div>
+      <div class="text-muted" style="font-size:.7rem;">Buying cost of sold products</div>
     </div></div>
   </div>
   <div class="col-6 col-md-3">

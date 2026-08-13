@@ -1,5 +1,5 @@
 <?php
-// Standalone revenues and expenses (non-sale money in/out) for Finances + Revenues pages.
+// Standalone expenses (and optional revenue entries) for Finances + Expenses pages.
 namespace Models;
 
 class FinanceModel extends Model
