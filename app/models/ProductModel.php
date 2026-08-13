@@ -560,9 +560,22 @@ class ProductModel extends Model
             if (($in['pack_price'] ?? '') === '' || !is_numeric($in['pack_price']) || (float) $in['pack_price'] <= 0) {
                 $errors['pack_price'] = 'Selling price of the package (wholesale price) is required.';
             }
+            if (($in['units_per_pack'] ?? '') === '' || !is_numeric($in['units_per_pack']) || (float) $in['units_per_pack'] <= 1) {
+                $errors['units_per_pack'] = 'Enter how many items are inside each package.';
+            }
+        } elseif ((int) ($in['id'] ?? 0) <= 0) {
+            // New products must be recorded as packages (carton/bale/pack…).
+            $errors['pack_unit'] = 'Choose a package type (carton, bale, pack, dozen, box…).';
+            $errors['units_per_pack'] = 'Enter how many items are inside each package.';
+            $errors['package_buying_price'] = 'Buying price of the package is required.';
+            $errors['pack_price'] = 'Wholesale package selling price is required.';
         }
-        if (!is_numeric($in['retail_price'] ?? null) || (float) $in['retail_price'] < 0) {
-            $errors['retail_price'] = 'Enter a valid retail price.';
+        $isNew = (int) ($in['id'] ?? 0) <= 0;
+        if (!is_numeric($in['retail_price'] ?? null) || (float) ($in['retail_price'] ?? -1) < 0
+            || ($isNew && (float) ($in['retail_price'] ?? 0) <= 0)) {
+            $errors['retail_price'] = $isNew
+                ? 'Enter the retail price of a single item inside the package.'
+                : 'Enter a valid retail price.';
         }
         if (!is_numeric($in['quantity'] ?? null) || (float) $in['quantity'] < 0) {
             $errors['quantity'] = 'Enter a valid quantity.';

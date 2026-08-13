@@ -121,17 +121,24 @@ $lossBars = array_map(fn($v) => round(max(0, $v * 0.38), 2), $chartValues);
 $limitTarget = max(1, $weekSum['revenue'] + max($weekCogs, $damagedLoss, 1));
 $limitPct = min(100, round(($weekSum['revenue'] / $limitTarget) * 100));
 ob_start();
+$icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 ?>
 <div class="fin-shell">
   <div class="fin-rail">
-    <a class="rail-mark" href="<?php echo public_url('super/dashboard/'); ?>"><i class="fas fa-chart-pie"></i></a>
-    <a class="rail-pill active" href="<?php echo public_url('super/dashboard/'); ?>"><i class="fas fa-border-all"></i></a>
-    <a class="rail-pill" href="<?php echo public_url('super/shop/'); ?>"><i class="fas fa-store"></i></a>
-    <a class="rail-pill" href="<?php echo public_url('super/invoices/'); ?>"><i class="fas fa-file-invoice"></i></a>
-    <a class="rail-pill" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-boxes-stacked"></i></a>
-    <a class="rail-pill" href="<?php echo public_url('super/settings/'); ?>"><i class="fas fa-gear"></i></a>
+    <a class="rail-mark" href="<?php echo public_url('super/dashboard/'); ?>" title="Dashboard"><?php echo $icon('chart', 18); ?></a>
+    <a class="rail-pill active" href="<?php echo public_url('super/dashboard/'); ?>" title="Overview"><?php echo $icon('overview'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/shop/'); ?>" title="Shop"><?php echo $icon('shop'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/sales/'); ?>" title="Sales"><?php echo $icon('sales'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/invoices/'); ?>" title="Invoices"><?php echo $icon('invoices'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/payments/'); ?>" title="Payments"><?php echo $icon('payments'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/inventory/'); ?>" title="Inventory"><?php echo $icon('inventory'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/store/'); ?>" title="Store"><?php echo $icon('store'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/expenses/'); ?>" title="Expenses"><?php echo $icon('expenses'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/finances/'); ?>" title="Finances"><?php echo $icon('finances'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/stock/new.php'); ?>" title="Record stock"><?php echo $icon('stock'); ?></a>
+    <a class="rail-pill" href="<?php echo public_url('super/settings/'); ?>" title="Settings"><?php echo $icon('settings'); ?></a>
     <span class="rail-spacer"></span>
-    <a class="rail-pill" href="<?php echo public_url('auth/logout.php'); ?>"><i class="fas fa-arrow-right-from-bracket"></i></a>
+    <a class="rail-pill" href="<?php echo public_url('auth/logout.php'); ?>" title="Logout"><?php echo $icon('logout'); ?></a>
   </div>
 
   <section class="fin-board">
@@ -145,12 +152,12 @@ ob_start();
         <a class="tab" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
       </div>
       <div class="head-actions">
-        <button type="button" class="circle-btn"><i class="fas fa-magnifying-glass"></i></button>
-        <button type="button" class="circle-btn"><i class="fas fa-bell"></i></button>
+        <a class="circle-btn" href="<?php echo public_url('super/sales/'); ?>" title="Search sales"><?php echo $icon('search', 16); ?></a>
+        <a class="circle-btn" href="<?php echo public_url('super/inventory/low-stock.php'); ?>" title="Alerts"><?php echo $icon('bell', 16); ?></a>
         <div class="profile-chip">
           <span class="avatar"><?php echo strtoupper(substr($userName, 0, 1)); ?></span>
           <span><strong><?php echo htmlspecialchars($userName); ?></strong><small><?php echo htmlspecialchars($shop); ?></small></span>
-          <i class="fas fa-chevron-down"></i>
+          <?php echo $icon('chevron', 14); ?>
         </div>
       </div>
     </header>
@@ -164,10 +171,10 @@ ob_start();
       <section class="panel balance-panel">
         <div class="panel-label">Total Balance</div>
         <div class="money-xl"><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 2); ?></div>
-        <div class="delta good"><i class="fas fa-arrow-up"></i><?php echo $todaySum['count']; ?> sale<?php echo $todaySum['count'] === 1 ? '' : 's'; ?> today</div>
+        <div class="delta good"><?php echo $icon('arrow-up', 12); ?><?php echo $todaySum['count']; ?> sale<?php echo $todaySum['count'] === 1 ? '' : 's'; ?> today</div>
         <div class="balance-actions">
-          <a class="dark-action" href="<?php echo public_url('super/shop/'); ?>"><i class="fas fa-arrow-right-arrow-left"></i> Sell</a>
-          <a class="light-action" href="<?php echo public_url('super/stock/new.php'); ?>"><i class="fas fa-plus"></i> Stock</a>
+          <a class="dark-action" href="<?php echo public_url('super/shop/'); ?>"><?php echo $icon('transfer', 14); ?> Sell</a>
+          <a class="light-action" href="<?php echo public_url('super/stock/new.php'); ?>"><?php echo $icon('plus', 14); ?> Stock</a>
         </div>
         <div class="wallets">
           <div class="wallet"><span>Today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small>Active</small></div>
@@ -177,10 +184,10 @@ ob_start();
       </section>
 
       <section class="metric-grid">
-        <article class="metric hot"><span>Total Earnings</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small><i class="fas fa-arrow-up"></i> Today</small></article>
-        <article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><i class="fas fa-file-invoice-dollar"></i> <?php echo count($openTabs); ?> open</small></article>
-        <article class="metric"><span>Sales Revenue</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 0); ?></strong><small><i class="fas fa-arrow-up"></i> This week</small></article>
-        <article class="metric <?php echo $profitAfterLoss < 0 ? 'danger' : ''; ?>"><span>Net Profit</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($profitAvailable ? $profitAfterLoss : 0, 0); ?></strong><small><i class="fas fa-chart-line"></i> After losses</small></article>
+        <article class="metric hot"><span>Total Earnings</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Today</small></article>
+        <article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo $icon('invoice-dollar', 12); ?> <?php echo count($openTabs); ?> open</small></article>
+        <article class="metric"><span>Sales Revenue</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> This week</small></article>
+        <article class="metric <?php echo $profitAfterLoss < 0 ? 'danger' : ''; ?>"><span>Net Profit</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($profitAvailable ? $profitAfterLoss : 0, 0); ?></strong><small><?php echo $icon('chart', 12); ?> After losses</small></article>
       </section>
 
       <section class="panel chart-panel">
@@ -272,7 +279,7 @@ ob_start();
       <section class="panel activity-panel">
         <div class="panel-title-row">
           <h2>Recent Activities</h2>
-          <div class="activity-tools"><span><i class="fas fa-magnifying-glass"></i> Search</span><span>Filter <i class="fas fa-sliders"></i></span></div>
+          <div class="activity-tools"><span><?php echo $icon('search', 12); ?> Search</span><span>Filter <?php echo $icon('filter', 12); ?></span></div>
         </div>
         <?php if (!$recent): ?>
           <div class="empty-state">No sales recorded yet.</div>
@@ -284,9 +291,9 @@ ob_start();
             $pending = !$paid && (float) ($r['amount_due'] ?? 0) > 0;
           ?>
           <div class="activity-row">
-            <span class="check <?php echo $idx === 3 ? 'on' : ''; ?>"><i class="fas fa-check"></i></span>
+            <span class="check <?php echo $idx === 3 ? 'on' : ''; ?>"><?php echo $icon('check', 10); ?></span>
             <span class="mono"><?php echo htmlspecialchars($r['receipt_number'] ?? ('INV_' . str_pad((string) $r['id'], 6, '0', STR_PAD_LEFT))); ?></span>
-            <span><i class="act-icon fas fa-cart-shopping"></i><?php echo htmlspecialchars(($r['items'][0]['name'] ?? $r['customer_name'] ?? 'Sale')); ?></span>
+            <span><span class="act-icon"><?php echo $icon('cart', 11); ?></span><?php echo htmlspecialchars(($r['items'][0]['name'] ?? $r['customer_name'] ?? 'Sale')); ?></span>
             <span><?php echo htmlspecialchars($currency); ?> <?php echo number_format((float) $r['total'], 0); ?></span>
             <span class="status <?php echo $pending ? 'pending' : 'done'; ?>"><i></i><?php echo $pending ? 'Pending' : 'Completed'; ?></span>
             <span><?php echo date('j M Y, h:i A', strtotime($r['created_at'])); ?></span>
@@ -302,22 +309,23 @@ ob_start();
 
 <style>
 .t-sidebar,.t-sidebar-toggle,.t-sidebar-overlay{display:none!important;}
-.t-main{margin-left:0;width:100%;padding:26px 28px;background:#e9e9ea;}
+.t-main{margin-left:0!important;width:100%!important;max-width:none!important;padding:0!important;background:#e9e9ea;min-height:100vh;}
 .t-topbar{display:none;}
-.fin-shell{display:grid;grid-template-columns:58px minmax(0,1fr);gap:16px;max-width:1180px;margin:14px auto;background:#f7f7f8;border:1px solid rgba(255,255,255,.72);border-radius:24px;padding:14px;box-shadow:0 18px 45px rgba(23,21,29,.08);}
-.fin-rail{background:#fff;border-radius:22px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:12px;min-height:720px;}
-.rail-mark,.rail-pill{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#625b69;text-decoration:none;}
-.rail-mark{background:var(--pos-violet);color:#fff;font-size:1.05rem;}
+.fin-shell{display:grid;grid-template-columns:72px minmax(0,1fr);gap:0;width:100%;max-width:none;min-height:100vh;margin:0;background:#f3f3f4;border:0;border-radius:0;padding:0;box-shadow:none;}
+.fin-rail{background:#fff;border-radius:0;border-right:1px solid #ece8ef;padding:16px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:100vh;position:sticky;top:0;}
+.rail-mark,.rail-pill{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#625b69;text-decoration:none;}
+.rail-mark{background:var(--pos-violet);color:#fff;}
 .rail-pill.active{background:#17151d;color:#fff;}
 .rail-pill:hover{background:var(--pos-violet-light);color:var(--pos-violet);}
 .rail-spacer{flex:1;}
-.fin-board{min-width:0;padding:0 0 2px;}
+.nav-svg{display:block;flex-shrink:0;}
+.fin-board{min-width:0;padding:20px 24px 28px;width:100%;}
 .fin-head{height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;}
 .fin-tabs{background:#fff;border-radius:20px;padding:7px;display:flex;gap:8px;align-items:center;}
 .tab{border-radius:16px;padding:9px 18px;color:#4f4856;text-decoration:none;font-size:.84rem;}
 .tab.active{background:#17151d;color:#fff;}
 .head-actions{display:flex;gap:10px;align-items:center;}
-.circle-btn{width:40px;height:40px;border:0;border-radius:50%;background:#fff;color:#17151d;}
+.circle-btn{width:40px;height:40px;border:0;border-radius:50%;background:#fff;color:#17151d;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;}
 .profile-chip{height:46px;border-radius:19px;background:#fff;padding:5px 10px 5px 6px;display:flex;align-items:center;gap:9px;min-width:190px;}
 .profile-chip .avatar{width:34px;height:34px;border-radius:50%;background:var(--pos-violet-light);color:var(--pos-violet);display:flex;align-items:center;justify-content:center;font-weight:800;}
 .profile-chip strong{display:block;font-size:.78rem;line-height:1.05;}
@@ -325,14 +333,14 @@ ob_start();
 .fin-greeting{margin:8px 0 20px;}
 .fin-greeting h1{font-size:2rem;line-height:1.12;margin:0 0 6px;font-weight:800;letter-spacing:0;}
 .fin-greeting p{color:#686170;margin:0;font-size:.9rem;}
-.fin-grid{display:grid;grid-template-columns:1.05fr 1.05fr 1fr;gap:16px;}
+.fin-grid{display:grid;grid-template-columns:1.05fr 1.05fr 1fr;gap:16px;width:100%;}
 .panel,.metric{background:#fff;border-radius:18px;border:1px solid #eeeeef;box-shadow:0 8px 20px rgba(23,21,29,.035);}
 .balance-panel{padding:18px;min-height:274px;}
 .panel-label{color:#746d7a;font-size:.84rem;margin-bottom:6px;}
 .money-xl{font-size:1.6rem;font-weight:800;margin-bottom:6px;}
 .delta{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 8px;font-size:.72rem;background:#f7f1ff;color:var(--pos-violet);}
 .balance-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0;}
-.dark-action,.light-action{border-radius:18px;padding:10px 12px;text-decoration:none;text-align:center;font-size:.86rem;}
+.dark-action,.light-action{border-radius:18px;padding:10px 12px;text-decoration:none;text-align:center;font-size:.86rem;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
 .dark-action{background:#17151d;color:#fff;}
 .light-action{background:#f1f0f2;color:#17151d;}
 .wallets{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;background:#f6f5f6;border-radius:16px;padding:10px;}
@@ -345,7 +353,7 @@ ob_start();
 .metric.danger{border-color:#f3c9c9;background:#fff7f7;}
 .metric span{display:block;font-size:.82rem;color:inherit;opacity:.78;margin-bottom:22px;}
 .metric strong{font-size:1.55rem;display:block;}
-.metric small{font-size:.72rem;opacity:.72;}
+.metric small{font-size:.72rem;opacity:.72;display:inline-flex;align-items:center;gap:4px;}
 .chart-panel{padding:16px;}
 .panel-title-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;}
 .panel-title-row h2,.limit-panel h2{font-size:1rem;font-weight:800;margin:0;}
@@ -385,19 +393,19 @@ ob_start();
 .pay-card strong{font-size:.9rem;}.pay-card small{font-size:.72rem;opacity:.78;}
 .activity-panel{grid-column:2 / 4;padding:16px;min-height:276px;}
 .activity-tools{display:flex;gap:8px;color:#17151d;font-size:.75rem;}
-.activity-tools span{border:1px solid #eee;border-radius:14px;padding:8px 14px;background:#fff;}
+.activity-tools span{border:1px solid #eee;border-radius:14px;padding:8px 14px;background:#fff;display:inline-flex;align-items:center;gap:6px;}
 .activity-table{border:1px solid #eeecef;border-radius:15px;overflow:hidden;}
 .activity-head,.activity-row{display:grid;grid-template-columns:28px 92px minmax(150px,1fr) 90px 98px 142px 34px;gap:12px;align-items:center;padding:10px 12px;font-size:.76rem;}
 .activity-head{background:#f7f6f7;color:#7d7582;}
 .activity-row{border-top:1px solid #eeecef;color:#2b2731;}
-.check{width:15px;height:15px;border:1px solid #ddd;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:.55rem;color:transparent;}
+.check{width:15px;height:15px;border:1px solid #ddd;border-radius:4px;display:flex;align-items:center;justify-content:center;color:transparent;}
 .check.on{background:#17151d;color:#fff;border-color:#17151d;}
 .mono{font-variant-numeric:tabular-nums;}
-.act-icon{width:20px;height:20px;border-radius:50%;display:inline-flex!important;align-items:center;justify-content:center;background:var(--pos-violet-light);color:var(--pos-violet);margin-right:8px;font-size:.65rem;}
-.status{display:flex;align-items:center;gap:5px;}.status i{width:6px;height:6px;border-radius:50%;background:#36a67c;}.status.pending i{background:#d8bd2d;}.dots{color:#8c8491;letter-spacing:2px;}
+.act-icon{width:20px;height:20px;border-radius:50%;display:inline-flex!important;align-items:center;justify-content:center;background:var(--pos-violet-light);color:var(--pos-violet);margin-right:8px;vertical-align:middle;}
+.status{display:flex;align-items:center;gap:5px;}.status i{width:6px;height:6px;border-radius:50%;background:#36a67c;display:inline-block;}.status.pending i{background:#d8bd2d;}.dots{color:#8c8491;letter-spacing:2px;}
 .empty-state{text-align:center;color:#746d7a;padding:40px 0;}
 @media (max-width:1180px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
-@media (max-width:760px){.t-main{padding:12px;}.fin-shell{grid-template-columns:1fr;padding:10px;border-radius:18px;}.fin-rail{display:none;}.fin-head{height:auto;align-items:flex-start;}.fin-tabs{overflow:auto;max-width:100%;}.head-actions{display:none;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
+@media (max-width:760px){.t-main{padding:0!important;}.fin-shell{grid-template-columns:1fr;}.fin-rail{display:none;}.fin-board{padding:12px;}.fin-head{height:auto;align-items:flex-start;}.fin-tabs{overflow:auto;max-width:100%;}.head-actions{display:none;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
 </style>
 <?php
 $content = ob_get_clean();
