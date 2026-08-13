@@ -88,6 +88,14 @@ $isOn = function (string $needle) use ($uri): string {
             <i class="fas fa-box-archive"></i><span>Store</span>
         </a>
         <?php endif; ?>
+        <?php if ($isOwner): ?>
+        <a class="t-link <?php echo $isOn('/super/revenues'); ?>" href="<?php echo public_url('super/revenues/'); ?>">
+            <i class="fas fa-sack-dollar"></i><span>Revenues</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/super/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">
+            <i class="fas fa-chart-pie"></i><span>Finances</span>
+        </a>
+        <?php endif; ?>
         <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/categories'); ?>" href="<?php echo public_url('super/categories/'); ?>">
             <i class="fas fa-tags"></i><span>Categories</span>

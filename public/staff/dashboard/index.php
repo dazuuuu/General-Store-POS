@@ -137,9 +137,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $subtotal = round($subtotal, 2);
         // Negotiated discount — clamp so a typo can't produce a negative total.
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), $subtotal);
+        $additionalCharges = max(0, round((float) ($_POST['additional_charges'] ?? 0), 2));
+        $additionalNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
         $postVatRate = max(0, round((float) ($_POST['vat_rate'] ?? $vatRate), 2));
         $postVatInc = array_key_exists('vat_inclusive', $_POST) ? (bool) (int) $_POST['vat_inclusive'] : $vatInclusive;
-        $priced = Pricing::totals($subtotal, $discount, $postVatRate, $postVatInc);
+        $priced = Pricing::totals($subtotal, $discount, $postVatRate, $postVatInc, $additionalCharges);
         $total = $priced['total'];
         $method = $_POST['payment_method'] ?? '';
         $tendered = round((float) ($_POST['amount_tendered'] ?? 0), 2);
@@ -167,6 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'items' => $items,
                 'channel' => 'walkin',
                 'discount_amount' => $discount,
+                'additional_charges' => $additionalCharges,
+                'additional_charges_note' => $additionalNote,
                 'vat_rate' => $postVatRate,
                 'vat_inclusive' => $postVatInc,
                 'sale_type' => 'retail',
@@ -368,6 +372,13 @@ ob_start();
       <div class="d-flex justify-content-between align-items-center py-1">
         <span>Discount <span class="text-muted small">(if they negotiate)</span></span>
         <input type="number" step="0.01" min="0" id="discountInput" name="discount_amount" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
+      </div>
+      <div class="d-flex justify-content-between align-items-center py-1 gap-2">
+        <span>Extra charge <span class="text-muted small">(delivery, packing…)</span></span>
+        <input type="number" step="0.01" min="0" id="extraChargeInput" name="additional_charges" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
+      </div>
+      <div class="py-1">
+        <input type="text" id="extraChargeNoteInput" name="additional_charges_note" class="form-control form-control-sm" placeholder="Charge note (optional)">
       </div>
       <div class="d-flex justify-content-between align-items-center py-1">
         <span>VAT <span class="text-muted small" id="vatRateLabel"></span></span>
@@ -765,6 +776,8 @@ function total() {
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
     if (d < 0) d = 0;
     if (d > sub) d = sub;
+    var extra = parseFloat(document.getElementById('extraChargeInput').value) || 0;
+    if (extra < 0) extra = 0;
     var net = sub - d;
     var rate = parseFloat(document.getElementById('vatRateInput').value) || 0;
     var inclusive = document.getElementById('vatInclusiveInput').value === '1';
@@ -773,7 +786,7 @@ function total() {
         vat = inclusive ? (net - (net / (1 + rate / 100))) : (net * rate / 100);
         if (!inclusive) net = net + vat;
     }
-    return { total: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100 };
+    return { total: Math.round((net + extra) * 100) / 100, vat: Math.round(vat * 100) / 100, extra: Math.round(extra * 100) / 100 };
 }
 function updateTotals() {
     var t = total();
@@ -836,6 +849,8 @@ function syncTypedQty(input) {
     }
 }
 document.getElementById('discountInput').addEventListener('input', updateTotals);
+var extraChargeInput = document.getElementById('extraChargeInput');
+if (extraChargeInput) extraChargeInput.addEventListener('input', updateTotals);
 document.getElementById('saleType').addEventListener('change', function () {
     // Only controls what Tap Add increments; existing dual quantities stay as typed.
 });

@@ -79,6 +79,8 @@ class OrderModel extends Model
             }
 
             $discountIn = round((float) ($in['discount_amount'] ?? 0), 2);
+            $additionalCharges = round(max(0, (float) ($in['additional_charges'] ?? 0)), 2);
+            $additionalNote = trim((string) ($in['additional_charges_note'] ?? ''));
             $email = trim((string) ($in['customer_email'] ?? ''));
             $phone = trim((string) ($in['customer_phone'] ?? ''));
             $customerId = (int) ($in['customer_id'] ?? 0);
@@ -96,7 +98,7 @@ class OrderModel extends Model
             $sub = $db->prepare('SELECT subtotal FROM orders WHERE id = ?');
             $sub->execute([$orderId]);
             $subtotal = (float) $sub->fetchColumn();
-            $priced = \Pricing::totals($subtotal, $discountIn, $vatRate, $vatInclusive);
+            $priced = \Pricing::totals($subtotal, $discountIn, $vatRate, $vatInclusive, $additionalCharges);
 
             // Credit tabs (channel=tab) start unpaid — stamp method/status so Sales
             // and Payments show them immediately without waiting on migrations.
@@ -109,6 +111,13 @@ class OrderModel extends Model
                 $email !== '' ? $email : null,
                 $phone !== '' ? $phone : null,
             ];
+            try {
+                $db->query('SELECT additional_charges FROM orders LIMIT 1');
+                $sets[] = 'additional_charges = ?';
+                $sets[] = 'additional_charges_note = ?';
+                $vals[] = $priced['additional_charges'];
+                $vals[] = $additionalNote !== '' ? $additionalNote : null;
+            } catch (\PDOException $ignored) {}
             if ($channel === 'tab') {
                 $sets[] = 'payment_method = ?';
                 $sets[] = 'payment_status = ?';
@@ -331,7 +340,9 @@ class OrderModel extends Model
                 return ['ok' => false, 'errors' => ['_' => 'Invoice must keep at least one product.']];
             }
             $discount = max(0, round((float) ($in['discount_amount'] ?? 0), 2));
-            $priced = \Pricing::totals($subtotal, $discount, (float) ($order['vat_rate'] ?? 0), true);
+            $additionalCharges = round(max(0, (float) ($in['additional_charges'] ?? $order['additional_charges'] ?? 0)), 2);
+            $additionalNote = trim((string) ($in['additional_charges_note'] ?? $order['additional_charges_note'] ?? ''));
+            $priced = \Pricing::totals($subtotal, $discount, (float) ($order['vat_rate'] ?? 0), true, $additionalCharges);
             $paid = max(0, (float) ($order['amount_paid'] ?? 0));
             $paid = min($paid, (float) $priced['total']);
             $due = max(0, round((float) $priced['total'] - $paid, 2));
@@ -340,7 +351,8 @@ class OrderModel extends Model
 
             $db->prepare(
                 'UPDATE orders
-                    SET table_name = ?, sale_type = ?, subtotal = ?, discount_amount = ?, total = ?,
+                    SET table_name = ?, sale_type = ?, subtotal = ?, discount_amount = ?, additional_charges = ?,
+                        additional_charges_note = ?, total = ?,
                         amount_paid = ?, amount_due = ?, customer_email = ?, customer_phone = ?,
                         credit_duration_days = ?, credit_due_at = ?
                   WHERE id = ? AND tenant_id = ?'
@@ -349,6 +361,8 @@ class OrderModel extends Model
                 $saleType,
                 $subtotal,
                 $priced['discount'],
+                $priced['additional_charges'],
+                $additionalNote !== '' ? $additionalNote : null,
                 $priced['total'],
                 $paid,
                 $due,
@@ -916,6 +930,8 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'sale_type', "ALTER TABLE orders ADD COLUMN sale_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER channel");
         $this->ensureColumn('order_items', 'price_type', "ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price");
         $this->ensureColumn('orders', 'vat_rate', "ALTER TABLE orders ADD COLUMN vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
+        $this->ensureColumn('orders', 'additional_charges', "ALTER TABLE orders ADD COLUMN additional_charges DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
+        $this->ensureColumn('orders', 'additional_charges_note', "ALTER TABLE orders ADD COLUMN additional_charges_note VARCHAR(255) NULL AFTER additional_charges");
         $this->ensureColumn('orders', 'vat_amount', "ALTER TABLE orders ADD COLUMN vat_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER vat_rate");
         $this->ensureColumn('orders', 'payment_provider', "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(100) NULL AFTER payment_method");
         $this->ensureColumn('orders', 'payment_account_name', "ALTER TABLE orders ADD COLUMN payment_account_name VARCHAR(160) NULL AFTER payment_provider");
@@ -1450,6 +1466,7 @@ class OrderModel extends Model
             $r['payment_status']   = $status;
             $r['payment_method']   = $r['payment_method'] ?: ($due > 0.0001 ? 'credit' : 'cash');
             $r['discount_amount']  = (float) ($r['discount_amount'] ?? 0);
+            $r['additional_charges'] = (float) ($r['additional_charges'] ?? 0);
             $r['amount_due']       = $due;
             $r['amount_paid']      = $paid;
             $r['_recognized_revenue'] = round((float) ($r['recognized_revenue'] ?? 0), 2);
@@ -1540,6 +1557,7 @@ class OrderModel extends Model
             $r['payment_status']  = $status;
             $r['payment_method']  = $r['payment_method'] ?: ($due > 0.0001 ? 'credit' : 'cash');
             $r['discount_amount'] = (float) ($r['discount_amount'] ?? 0);
+            $r['additional_charges'] = (float) ($r['additional_charges'] ?? 0);
             $r['amount_due']      = $due;
             $r['amount_paid']     = $paid;
             $r['_recognized_revenue'] = round((float) ($r['recognized_revenue'] ?? 0), 2);

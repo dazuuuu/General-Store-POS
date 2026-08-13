@@ -755,6 +755,7 @@ class SaleModel extends Model
             'card' => 0.0, 'bank' => 0.0, 'sacco' => 0.0,
             'retail' => 0, 'wholesale' => 0, 'discount' => 0.0,
             'credit_due' => 0.0, 'credit_count' => 0,
+            'additional_charges' => 0.0,
         ];
         foreach ($rows as $r) {
             $recognized = array_key_exists('_recognized_revenue', $r)
@@ -766,6 +767,7 @@ class SaleModel extends Model
                 ? $recognized
                 : (float) ($r['amount_paid'] ?? $r['total']);
             $sum['discount'] += (float) ($r['discount_amount'] ?? 0);
+            $sum['additional_charges'] += (float) ($r['additional_charges'] ?? 0);
             $sum['credit_due'] += (float) ($r['amount_due'] ?? 0);
             if (($r['payment_status'] ?? 'paid') !== 'paid') { $sum['credit_count']++; }
 
@@ -807,7 +809,7 @@ class SaleModel extends Model
                 $sum[$method] += (float) ($r['amount_paid'] ?? $r['total']);
             }
         }
-        foreach (['revenue','collected','cash','mpesa','card','bank','sacco','discount','credit_due'] as $k) {
+        foreach (['revenue','collected','cash','mpesa','card','bank','sacco','discount','credit_due','additional_charges'] as $k) {
             $sum[$k] = round($sum[$k], 2);
         }
         return $sum;

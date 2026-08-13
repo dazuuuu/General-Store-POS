@@ -146,13 +146,22 @@ if ($isDepositReceipt && $latestPayment) {
     </table>
 
     <table style="width:100%;border-collapse:collapse;font-size:17px;border-top:2px dashed #000;margin-top:8px;padding-top:8px;">
-      <?php if ((float) ($order['discount_amount'] ?? 0) > 0 || (float) ($order['vat_amount'] ?? 0) > 0): ?>
+      <?php if ((float) ($order['discount_amount'] ?? 0) > 0 || (float) ($order['vat_amount'] ?? 0) > 0 || (float) ($order['additional_charges'] ?? 0) > 0): ?>
         <tr><td style="color:#64748b;">Subtotal</td><td style="text-align:right;"><?php echo money($order['subtotal']); ?></td></tr>
         <?php if ((float) ($order['discount_amount'] ?? 0) > 0): ?>
         <tr><td style="color:#64748b;">Discount</td><td style="text-align:right;">− <?php echo money($order['discount_amount']); ?></td></tr>
         <?php endif; ?>
         <?php if ((float) ($order['vat_amount'] ?? 0) > 0): ?>
         <tr><td style="color:#64748b;">VAT (<?php echo number_format((float) ($order['vat_rate'] ?? 0), 2); ?>%)</td><td style="text-align:right;"><?php echo money($order['vat_amount']); ?></td></tr>
+        <?php endif; ?>
+        <?php if ((float) ($order['additional_charges'] ?? 0) > 0): ?>
+        <tr>
+          <td style="color:#64748b;">Extra charge<?php
+            $chargeNote = trim((string) ($order['additional_charges_note'] ?? ''));
+            if ($chargeNote !== '') echo ' (' . htmlspecialchars($chargeNote) . ')';
+          ?></td>
+          <td style="text-align:right;"><?php echo money($order['additional_charges']); ?></td>
+        </tr>
         <?php endif; ?>
       <?php endif; ?>
       <tr><td style="font-weight:900;padding-top:8px;font-size:19px;">Total</td><td style="text-align:right;font-weight:900;padding-top:8px;font-size:19px;"><?php echo money($order['total']); ?></td></tr>

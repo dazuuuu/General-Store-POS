@@ -114,12 +114,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($prod) { $subtotal += \Pricing::unitPriceForQty($prod, (float) $it['quantity'], $lineSaleType) * $it['quantity']; }
         }
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), round($subtotal, 2));
+        $additionalCharges = max(0, round((float) ($_POST['additional_charges'] ?? 0), 2));
+        $additionalNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
 
         $res = (new Models\OrderModel($pdo))->open([
             'table_name'      => $customerName,
             'opened_by'       => TenantContext::userId(),
             'items'           => $items,
             'discount_amount' => $discount,
+            'additional_charges' => $additionalCharges,
+            'additional_charges_note' => $additionalNote,
             'credit_override_amount' => $_POST['credit_override_amount'] ?? 0,
             'customer_id'     => $customerId,
             'customer_email'  => $customerEmail,
@@ -356,8 +360,15 @@ ob_start();
       </div>
       <div class="d-flex justify-content-between"><span>Sub Total</span><span id="subtotalOut">KES 0</span></div>
       <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Discount <span class="text-muted small">(if they negotiate)</span></span>
+        <span>Discount</span>
         <input type="number" step="0.01" min="0" id="discountInput" name="discount_amount" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
+      </div>
+      <div class="d-flex justify-content-between align-items-center py-1 gap-2">
+        <span>Extra charge</span>
+        <input type="number" step="0.01" min="0" id="extraChargeInput" name="additional_charges" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
+      </div>
+      <div class="py-1">
+        <input type="text" name="additional_charges_note" id="extraChargeNoteInput" class="form-control form-control-sm" placeholder="Charge note (optional)">
       </div>
       <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
     </div>
@@ -664,8 +675,10 @@ function updateTotals() {
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
     if (d < 0) d = 0;
     if (d > sub) d = sub;
+    var extra = parseFloat((document.getElementById('extraChargeInput') || {}).value) || 0;
+    if (extra < 0) extra = 0;
     document.getElementById('subtotalOut').textContent = money(sub);
-    document.getElementById('totalOut').textContent = money(sub - d);
+    document.getElementById('totalOut').textContent = money(sub - d + extra);
 }
 
 function render() {
@@ -720,6 +733,8 @@ function syncTypedQty(input) {
     }
 }
 document.getElementById('discountInput').addEventListener('input', updateTotals);
+var extraChargeInput = document.getElementById('extraChargeInput');
+if (extraChargeInput) extraChargeInput.addEventListener('input', updateTotals);
 document.getElementById('saleType').addEventListener('change', function () {
     // Only controls what Tap Add increments; existing dual quantities stay as typed.
 });

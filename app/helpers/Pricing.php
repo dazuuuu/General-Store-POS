@@ -3,11 +3,15 @@
 
 class Pricing
 {
-    /** Apply discount then VAT. Returns subtotal, discount, vat, total. */
-    public static function totals(float $subtotal, float $discount, float $vatRate, bool $vatInclusive = true): array
+    /**
+     * Apply discount then VAT, then optional additional charges (delivery, packing, etc.).
+     * Additional charges are pure profit (no COGS) and are always added on top of the product total.
+     */
+    public static function totals(float $subtotal, float $discount, float $vatRate, bool $vatInclusive = true, float $additionalCharges = 0.0): array
     {
         $subtotal = round(max(0, $subtotal), 2);
         $discount = round(min(max(0, $discount), $subtotal), 2);
+        $additionalCharges = round(max(0, $additionalCharges), 2);
         $net = round($subtotal - $discount, 2);
         $vatRate = max(0, $vatRate);
         if ($vatRate <= 0) {
@@ -16,7 +20,8 @@ class Pricing
                 'discount' => $discount,
                 'vat_rate' => 0.0,
                 'vat_amount' => 0.0,
-                'total' => $net,
+                'additional_charges' => $additionalCharges,
+                'total' => round($net + $additionalCharges, 2),
             ];
         }
         if ($vatInclusive) {
@@ -31,7 +36,8 @@ class Pricing
             'discount' => $discount,
             'vat_rate' => $vatRate,
             'vat_amount' => $vatAmount,
-            'total' => $total,
+            'additional_charges' => $additionalCharges,
+            'total' => round($total + $additionalCharges, 2),
         ];
     }
 

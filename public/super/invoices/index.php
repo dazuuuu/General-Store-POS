@@ -30,6 +30,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'channel' => 'tab',
             'sale_type' => ($_POST['sale_type'] ?? 'retail') === 'wholesale' ? 'wholesale' : 'retail',
             'discount_amount' => $_POST['discount_amount'] ?? 0,
+            'additional_charges' => $_POST['additional_charges'] ?? 0,
+            'additional_charges_note' => $_POST['additional_charges_note'] ?? '',
             'customer_id' => $_POST['customer_id'] ?? 0,
             'customer_email' => $_POST['customer_email'] ?? '',
             'customer_phone' => $_POST['customer_phone'] ?? '',
@@ -107,6 +109,8 @@ ob_start();
       <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" id="saleType" class="form-select"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
       <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select"><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>"><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
       <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" id="discountAmount" class="form-control" value="0"></div>
+      <div class="col-md-4"><label class="form-label small">Extra charge</label><input type="number" min="0" step="0.01" name="additional_charges" id="extraChargeAmount" class="form-control" value="0"></div>
+      <div class="col-md-4"><label class="form-label small">Charge note</label><input type="text" name="additional_charges_note" id="extraChargeNote" class="form-control" placeholder="Delivery, packing…"></div>
     </div>
     <div id="invoiceRows"></div>
     <div class="d-flex justify-content-between align-items-center border-top pt-3 mt-2">
@@ -301,6 +305,7 @@ ob_start();
       total += line;
     });
     total = Math.max(0, total - (parseFloat(document.getElementById('discountAmount').value) || 0));
+    total += Math.max(0, parseFloat((document.getElementById('extraChargeAmount') || {}).value) || 0);
     document.getElementById('invoiceTotal').textContent = money(total);
   }
   function attachProductSearch(row){
@@ -379,6 +384,8 @@ ob_start();
     recalc();
   });
   document.getElementById('discountAmount').addEventListener('input', recalc);
+  var extraChargeAmount = document.getElementById('extraChargeAmount');
+  if (extraChargeAmount) extraChargeAmount.addEventListener('input', recalc);
   document.getElementById('invoiceForm').addEventListener('submit', function(e){
     var ok = false;
     rows.querySelectorAll('.invoice-row').forEach(function(row){

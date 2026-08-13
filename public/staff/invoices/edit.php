@@ -51,6 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'table_name' => $_POST['customer_name'] ?? '',
         'sale_type' => ($_POST['sale_type'] ?? 'retail') === 'wholesale' ? 'wholesale' : 'retail',
         'discount_amount' => $_POST['discount_amount'] ?? 0,
+        'additional_charges' => $_POST['additional_charges'] ?? 0,
+        'additional_charges_note' => $_POST['additional_charges_note'] ?? '',
         'customer_email' => $_POST['customer_email'] ?? '',
         'customer_phone' => $_POST['customer_phone'] ?? '',
         'credit_duration_days' => $_POST['credit_duration_days'] ?? 0,
@@ -113,6 +115,8 @@ ob_start();
       <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($invoice['sale_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail</option><option value="wholesale" <?php echo ($invoice['sale_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
       <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>" <?php echo (int) ($invoice['credit_duration_days'] ?? 0) === $days ? 'selected' : ''; ?>><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
       <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['discount_amount'] ?? 0)); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Extra charge</label><input type="number" min="0" step="0.01" name="additional_charges" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges'] ?? 0)); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Charge note</label><input type="text" name="additional_charges_note" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges_note'] ?? '')); ?>" placeholder="Delivery, packing…" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
     </div>
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
@@ -189,6 +193,7 @@ ob_start();
   var tpl = document.getElementById('newItemTpl');
   var saleType = document.querySelector('[name="sale_type"]');
   var discount = document.querySelector('[name="discount_amount"]');
+  var extraCharge = document.querySelector('[name="additional_charges"]');
   var productSearchUrl = <?php echo json_encode($productSearchUrl); ?>;
   function money(n){ return 'KES ' + (Math.round(n * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits:2}); }
   function rowSaleType(row){
@@ -212,6 +217,7 @@ ob_start();
       if (!row.classList.contains('is-removed')) total += line;
     });
     total = Math.max(0, total - (parseFloat(discount ? discount.value : 0) || 0));
+    total += Math.max(0, parseFloat(extraCharge ? extraCharge.value : 0) || 0);
     document.getElementById('invoiceEditTotal').textContent = money(total);
   }
   function wire(row){
@@ -299,6 +305,7 @@ ob_start();
     recalc();
   });
   if (discount) discount.addEventListener('input', recalc);
+  if (extraCharge) extraCharge.addEventListener('input', recalc);
   var addBtn = document.getElementById('addNewItem');
   if (addBtn && tpl) {
     addBtn.addEventListener('click', function(){
