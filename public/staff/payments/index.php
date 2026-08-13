@@ -59,14 +59,20 @@ if ($receiptQuery !== '') {
         if (count($searchMatches) === 1) {
             $order = $O->find((int) $searchMatches[0]['id']);
             $searchMatches = [];
-            if ($order && !empty($order['receipt_number'])) {
-                $qs = '?receipt=' . urlencode($order['receipt_number']);
-                if ($preferDeposit) { $qs .= '&deposit=1'; }
-                header('Location: ' . $paymentsBase . $qs);
-                exit;
-            }
         } elseif (!$searchMatches && $customerId <= 0 && $customerQuery === '') {
             $error = 'No open invoice found for that search.';
+        }
+    }
+    // Prefer the customer wallet view whenever an invoice belongs to a named customer.
+    if ($order && ($order['status'] ?? '') === 'open') {
+        $cid = (int) ($order['customer_id'] ?? 0);
+        $cname = trim((string) ($order['table_name'] ?? ''));
+        if ($cid > 0 || $cname !== '') {
+            $qs = '?customer=' . urlencode($cname);
+            if ($cid > 0) { $qs .= '&customer_id=' . $cid; }
+            if ($preferDeposit) { $qs .= '&deposit=1'; }
+            header('Location: ' . $paymentsBase . $qs);
+            exit;
         }
     }
 }
@@ -75,12 +81,16 @@ if (!$order && ($customerId > 0 || $customerQuery !== '')) {
     $customerInvoices = $O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery);
     $customerPayments = $O->paymentsForCustomer($customerId > 0 ? $customerId : null, $customerQuery, 50);
     if (!$customerInvoices && !$error) {
-        // Fall back to invoice search by the typed name
         if ($receiptQuery === '' && $customerQuery !== '') {
             $searchMatches = $O->searchInvoices($customerQuery, ['open_only' => true, 'limit' => 20]);
         }
         if (!$searchMatches) {
-            $error = 'No open credit invoices for this customer.';
+            // Still show wallet if they have payment history but no open balance.
+            if ($customerPayments) {
+                $customerLabel = $customerLabel ?: (string) ($customerPayments[0]['table_name'] ?? 'Customer');
+            } else {
+                $error = 'No open credit invoices for this customer.';
+            }
         }
     } elseif ($customerInvoices && !$customerLabel) {
         $customerLabel = (string) ($customerInvoices[0]['table_name'] ?? 'Customer');
@@ -89,23 +99,23 @@ if (!$order && ($customerId > 0 || $customerQuery !== '')) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settle_customer') {
-    $ids = array_map('intval', $_POST['order_ids'] ?? []);
+    // Always settle against the customer's full open wallet (all invoices combined).
+    $openRows = $O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery);
+    $ids = array_map(fn($inv) => (int) $inv['id'], $openRows);
     $amount = round((float) ($_POST['amount_received'] ?? 0), 2);
     $mode = $_POST['payment_method'] ?? 'cash';
     $payMode = ($_POST['pay_mode'] ?? 'deposit') === 'full' ? 'full' : 'deposit';
-    if ($payMode === 'full') {
-        // Pay full selected balances
-        $totalDue = 0.0;
-        foreach ($O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery) as $inv) {
-            if ($ids && !in_array((int) $inv['id'], $ids, true)) continue;
-            $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
-            if ($due <= 0.0001) {
-                $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
-            }
-            $totalDue += $due;
-            if (!$ids) { $ids[] = (int) $inv['id']; }
+    $totalDue = 0.0;
+    foreach ($openRows as $inv) {
+        $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+        if ($due <= 0.0001) {
+            $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
         }
-        $amount = round($totalDue, 2);
+        $totalDue += $due;
+    }
+    $totalDue = round($totalDue, 2);
+    if ($payMode === 'full') {
+        $amount = $totalDue;
     }
     $payload = [
         'method' => $payMode === 'deposit' ? 'credit' : $mode,
@@ -132,23 +142,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
         if ($customerId > 0) {
             try { $CM->refreshCreditBalance($customerId); } catch (\Throwable $ignored) {}
         }
-        $firstId = (int) ($res['receipt_order_ids'][0] ?? 0);
         $applied = (float) ($res['amount_applied'] ?? $amount);
-        $newBalance = 0.0;
+        $newBalance = max(0, round($totalDue - $applied, 2));
         if ($customerId > 0) {
             $fresh = $CM->find($customerId);
-            $newBalance = (float) ($fresh['credit_balance'] ?? 0);
+            $newBalance = (float) ($fresh['credit_balance'] ?? $newBalance);
         }
-        $_SESSION['flash']['success'] = 'Payment of KES ' . number_format($applied, 0) . ' recorded across ' . count($res['allocations']) . ' invoice(s). Balance now KES ' . number_format($newBalance, 0) . '.';
+        $_SESSION['flash']['success'] = 'Payment of KES ' . number_format($applied, 0) . ' recorded. Wallet balance now KES ' . number_format($newBalance, 0) . '.';
+        $firstId = (int) ($res['receipt_order_ids'][0] ?? 0);
+        $returnQs = '?customer=' . urlencode($customerQuery !== '' ? $customerQuery : $customerLabel);
+        if ($customerId > 0) { $returnQs .= '&customer_id=' . $customerId; }
         if ($firstId > 0) {
-            $isDeposit = false;
-            foreach ($res['allocations'] as $a) {
-                if (($a['status'] ?? '') === 'open') { $isDeposit = true; break; }
-            }
-            header('Location: ' . $receiptBase . '?id=' . $firstId . '&print=1' . ($isDeposit ? '&deposit=1' : ''));
-            exit;
+            $_SESSION['flash']['receipt_url'] = $receiptBase . '?id=' . $firstId . '&print=1'
+                . ((float) ($res['allocations'][0]['amount_due'] ?? 0) > 0.0001 ? '&deposit=1' : '');
         }
-        header('Location: ' . $paymentsBase . '?customer_id=' . $customerId . '&customer=' . urlencode($customerQuery));
+        header('Location: ' . $paymentsBase . $returnQs);
         exit;
     }
     $error = $res['error'] ?? 'Could not record the payment.';
@@ -230,7 +238,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
                value="<?php echo htmlspecialchars($customerQuery !== '' ? $customerQuery : $receiptQuery); ?>" autofocus>
         <input type="hidden" name="customer_id" id="customerIdField" value="<?php echo (int) $customerId; ?>">
         <div class="invoice-suggest-menu" id="paymentSuggestMenu"></div>
-        <div class="form-text">Credit invoices for one customer are grouped with Date, Invoice no, and Amount.</div>
+        <div class="form-text">Search a customer to open their credit wallet — all invoices combined into one balance.</div>
       </div>
       <div class="col-6 col-lg-2">
         <button class="btn btn-primary btn-lg w-100"><i class="fas fa-magnifying-glass me-1"></i>Find</button>
@@ -244,6 +252,15 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 </div>
 
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+<?php if (!empty($_SESSION['flash']['success'])): ?>
+  <div class="alert alert-success d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span><?php echo htmlspecialchars($_SESSION['flash']['success']); unset($_SESSION['flash']['success']); ?></span>
+    <?php if (!empty($_SESSION['flash']['receipt_url'])):
+      $ru = $_SESSION['flash']['receipt_url']; unset($_SESSION['flash']['receipt_url']); ?>
+      <a class="btn btn-sm btn-outline-success" href="<?php echo htmlspecialchars($ru); ?>" target="_blank" rel="noopener"><i class="fas fa-print me-1"></i>Print receipt</a>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
 
 <?php if ($searchMatches && !$order && !$customerInvoices): ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
@@ -268,8 +285,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
           <td class="fw-semibold"><?php echo htmlspecialchars($m['receipt_number'] ?? ''); ?></td>
           <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
           <td class="text-end">
-            <a class="btn btn-sm btn-outline-primary" href="<?php echo $paymentsBase . '?customer=' . urlencode($cust) . ($m['customer_id'] ? '&customer_id=' . (int) $m['customer_id'] : ''); ?>">Customer ledger</a>
-            <a class="btn btn-sm btn-success" href="<?php echo $paymentsBase . '?receipt=' . urlencode($m['receipt_number']) . ($preferDeposit ? '&deposit=1' : ''); ?>">Select</a>
+            <a class="btn btn-sm btn-success" href="<?php echo $paymentsBase . '?customer=' . urlencode($cust) . ($m['customer_id'] ? '&customer_id=' . (int) $m['customer_id'] : ''); ?>">Open wallet</a>
           </td>
         </tr>
         <?php endforeach; ?>
@@ -279,74 +295,101 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 </div>
 <?php endif; ?>
 
-<?php if ($customerInvoices): ?>
+<?php if ($customerInvoices || ($customerPayments && ($customerId > 0 || $customerQuery !== ''))): ?>
 <?php
   $statementUrl = $statementBase . '?name=' . urlencode($customerLabel) . ($customerId > 0 ? '&customer_id=' . $customerId : '');
+  $invoiceTotal = 0.0;
+  foreach ($customerInvoices as $inv) {
+      $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+      if ($due <= 0.0001) {
+          $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
+      }
+      $invoiceTotal += $due;
+  }
+  if ($customerBalance <= 0 && $invoiceTotal > 0) {
+      $customerBalance = $invoiceTotal;
+  }
+  $paidTotal = 0.0;
+  foreach ($customerPayments as $pay) {
+      $paidTotal += (float) ($pay['amount'] ?? 0);
+  }
 ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
       <div>
-        <div class="fw-bold fs-5"><?php echo htmlspecialchars($customerLabel); ?></div>
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Customer</div>
+        <div class="fw-bold" style="font-size:1.6rem;line-height:1.2;"><?php echo htmlspecialchars($customerLabel); ?></div>
         <?php if ($customerCompany !== ''): ?><div class="text-muted"><?php echo htmlspecialchars($customerCompany); ?></div><?php endif; ?>
-        <div class="mt-1">Total credit owed: <strong class="text-danger fs-5">KES <?php echo number_format($customerBalance, 0); ?></strong></div>
       </div>
-      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $statementUrl; ?>"><i class="fas fa-download me-1"></i>Download customer report</a>
+      <div class="text-end">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Wallet balance</div>
+        <div class="fw-bold text-danger" style="font-size:1.75rem;line-height:1.1;">KES <?php echo number_format($customerBalance, 0); ?></div>
+        <a class="btn btn-sm btn-outline-secondary mt-2" href="<?php echo $statementUrl; ?>"><i class="fas fa-download me-1"></i>Download report</a>
+      </div>
     </div>
 
-    <form method="post" id="customerPayForm">
+    <h2 class="h6 fw-bold mb-2">Open invoices</h2>
+    <div class="table-responsive mb-4">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr class="text-muted small text-uppercase">
+            <th>Date</th>
+            <th>Invoice no</th>
+            <th class="text-end">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (!$customerInvoices): ?>
+            <tr><td colspan="3" class="text-muted text-center py-3">No open invoices — wallet is clear.</td></tr>
+          <?php else: foreach ($customerInvoices as $inv):
+            $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+            if ($due <= 0.0001) {
+                $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
+            }
+          ?>
+          <tr>
+            <td><?php echo date('j M Y', strtotime($inv['created_at'])); ?></td>
+            <td class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number'] ?? ''); ?></td>
+            <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
+          </tr>
+          <?php endforeach; endif; ?>
+        </tbody>
+        <tfoot>
+          <tr class="border-top">
+            <th colspan="2" class="text-end">Total balance</th>
+            <th class="text-end text-danger fs-5" id="walletBalanceOut">KES <?php echo number_format($customerBalance, 0); ?></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <?php if ($customerInvoices): ?>
+    <form method="post" id="customerPayForm" class="border rounded-3 p-3 mb-4" style="background:#f8fafc;">
       <input type="hidden" name="action" value="settle_customer">
       <input type="hidden" name="customer_id" value="<?php echo (int) $customerId; ?>">
       <input type="hidden" name="customer_name" value="<?php echo htmlspecialchars($customerLabel); ?>">
       <input type="hidden" name="payment_provider" id="custPaymentProvider" value="">
       <input type="hidden" name="payment_account_name" id="custPaymentAccountName" value="">
       <input type="hidden" name="payment_reference" id="custPaymentReference" value="">
+      <?php foreach ($customerInvoices as $inv): ?>
+        <input type="hidden" name="order_ids[]" value="<?php echo (int) $inv['id']; ?>">
+      <?php endforeach; ?>
 
-      <div class="table-responsive mb-3">
-        <table class="table align-middle mb-0">
-          <thead>
-            <tr class="text-muted small text-uppercase">
-              <th style="width:40px;"><input type="checkbox" id="checkAllInvoices" checked></th>
-              <th>Date</th>
-              <th>Invoice no</th>
-              <th class="text-end">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($customerInvoices as $inv):
-              $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
-              if ($due <= 0.0001) {
-                  $due = max(0, (float) $inv['total'] - max(0, (float) ($inv['amount_paid'] ?? 0)));
-              }
-            ?>
-            <tr>
-              <td><input type="checkbox" class="inv-check" name="order_ids[]" value="<?php echo (int) $inv['id']; ?>" data-due="<?php echo htmlspecialchars((string) $due); ?>" checked></td>
-              <td><?php echo date('j M Y', strtotime($inv['created_at'])); ?></td>
-              <td class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number'] ?? ''); ?></td>
-              <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
-            </tr>
-            <?php endforeach; ?>
-          </tbody>
-          <tfoot>
-            <tr>
-              <th colspan="3" class="text-end">Selected balance</th>
-              <th class="text-end text-danger" id="selectedBalanceOut">KES <?php echo number_format($customerBalance, 0); ?></th>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+      <div class="fw-semibold mb-2">Pay against wallet total</div>
+      <div class="text-muted small mb-3">Deposits reduce the customer’s overall balance (applied oldest invoice first). You do not pick one invoice.</div>
 
       <div class="row g-3 mb-3">
         <div class="col-md-4">
           <label class="form-label small">Payment type</label>
           <select name="pay_mode" id="custPayMode" class="form-select">
             <option value="deposit" <?php echo $preferDeposit ? 'selected' : ''; ?>>Deposit / part pay</option>
-            <option value="full">Pay full selected balance</option>
+            <option value="full">Pay full wallet balance</option>
           </select>
         </div>
         <div class="col-md-4" id="custAmountWrap">
           <label class="form-label small">Amount paid</label>
-          <input type="number" step="0.01" min="0" name="amount_received" id="custAmount" class="form-control" value="" placeholder="0">
+          <input type="number" step="0.01" min="0" name="amount_received" id="custAmount" class="form-control" value="" placeholder="0" autofocus>
         </div>
         <div class="col-md-4">
           <label class="form-label small">Mode of payment</label>
@@ -361,7 +404,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
       <div id="custCashBox" class="row g-2 mb-2" style="display:none;">
         <div class="col-md-6">
           <label class="form-label small">Cash given</label>
-          <input type="number" step="0.01" min="0" name="amount_tendered" id="custCashGiven" class="form-control" placeholder="0">
+          <input type="number" step="0.01" min="0" name="amount_tendered" id="custCashGiven" class="form-control" placeholder="Optional — defaults to amount paid">
         </div>
       </div>
       <div id="custDetailBox" class="row g-2 mb-3" style="display:none;">
@@ -376,35 +419,51 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         </div>
       </div>
 
-      <button type="submit" class="btn btn-success btn-lg w-100" id="custPayBtn"><i class="fas fa-check me-1"></i>Record payment &amp; print receipt</button>
-      <div class="form-text text-center mt-2">Payment date is recorded automatically. A receipt opens after saving.</div>
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div class="small text-muted">After payment, balance becomes: <strong id="balanceAfterOut">KES <?php echo number_format($customerBalance, 0); ?></strong></div>
+        <button type="submit" class="btn btn-success btn-lg" id="custPayBtn"><i class="fas fa-check me-1"></i>Record payment</button>
+      </div>
     </form>
+    <?php endif; ?>
 
-    <?php if ($customerPayments): ?>
-      <hr class="my-4">
-      <h2 class="h6 fw-bold mb-2">Recent payments</h2>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle mb-0">
-          <thead><tr class="text-muted small text-uppercase"><th>Date</th><th>Invoice</th><th>Mode</th><th class="text-end">Amount paid</th></tr></thead>
-          <tbody>
-            <?php foreach ($customerPayments as $pay): ?>
+    <h2 class="h6 fw-bold mb-2">Payments</h2>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr class="text-muted small text-uppercase">
+            <th>Date</th>
+            <th class="text-end">Paid amount</th>
+            <th>Mode of payment</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if (!$customerPayments): ?>
+            <tr><td colspan="3" class="text-muted text-center py-3">No payments recorded yet.</td></tr>
+          <?php else: foreach ($customerPayments as $pay): ?>
             <tr>
               <td class="small"><?php echo date('j M Y, g:i a', strtotime($pay['created_at'])); ?></td>
-              <td><?php echo htmlspecialchars($pay['receipt_number'] ?? ''); ?></td>
-              <td><?php echo htmlspecialchars(PaymentOptions::label($pay)); ?></td>
               <td class="text-end fw-semibold">KES <?php echo number_format((float) $pay['amount'], 0); ?></td>
+              <td><?php echo htmlspecialchars(PaymentOptions::label($pay)); ?></td>
             </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-    <?php endif; ?>
+          <?php endforeach; endif; ?>
+        </tbody>
+        <?php if ($customerPayments): ?>
+        <tfoot>
+          <tr class="border-top">
+            <th>Total paid</th>
+            <th class="text-end">KES <?php echo number_format($paidTotal, 0); ?></th>
+            <th></th>
+          </tr>
+        </tfoot>
+        <?php endif; ?>
+      </table>
+    </div>
   </div>
 </div>
+<?php if ($customerInvoices): ?>
 <script>
 (function(){
-  var checks = Array.prototype.slice.call(document.querySelectorAll('.inv-check'));
-  var all = document.getElementById('checkAllInvoices');
+  var WALLET_DUE = <?php echo json_encode((float) $customerBalance); ?>;
   var amountInput = document.getElementById('custAmount');
   var modeSel = document.getElementById('custPayMode');
   var methodSel = document.getElementById('custPayMethod');
@@ -417,16 +476,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   var cardTypes = <?php echo json_encode(array_values($cardTypes)); ?>;
   var banks = <?php echo json_encode(array_values($banks)); ?>;
   var saccos = <?php echo json_encode(array_values($saccos)); ?>;
-  function selectedDue(){
-    return checks.reduce(function(sum, c){ return sum + (c.checked ? (parseFloat(c.dataset.due)||0) : 0); }, 0);
-  }
   function money(n){ return 'KES ' + (Math.round(n*100)/100).toLocaleString('en-KE', {maximumFractionDigits:0}); }
-  function refreshSelected(){
-    var due = selectedDue();
-    document.getElementById('selectedBalanceOut').textContent = money(due);
-    if (modeSel.value === 'full') amountInput.value = due.toFixed(2);
-    syncDetails();
-  }
   function fillList(items){
     detailList.innerHTML = '';
     (items||[]).forEach(function(v){
@@ -439,10 +489,8 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     var m = methodSel.value;
     cashBox.style.display = m === 'cash' ? 'flex' : 'none';
     document.getElementById('custAmountWrap').style.display = modeSel.value === 'deposit' ? '' : 'none';
-    if (m === 'cash') {
-      detailBox.style.display = 'none';
-      return;
-    }
+    if (modeSel.value === 'full') amountInput.value = WALLET_DUE.toFixed(2);
+    if (m === 'cash') { detailBox.style.display = 'none'; syncHidden(); return; }
     detailBox.style.display = 'flex';
     if (m === 'mpesa' || m === 'paybill') {
       detailLabel.textContent = m === 'paybill' ? 'Paybill / Till' : 'Name on M-Pesa';
@@ -463,6 +511,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     } else {
       detailBox.style.display = 'none';
     }
+    syncHidden();
   }
   function syncHidden(){
     var m = methodSel.value;
@@ -474,25 +523,28 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     document.getElementById('custPaymentProvider').value = provider;
     document.getElementById('custPaymentAccountName').value = account;
     document.getElementById('custPaymentReference').value = refInput.value || '';
-    var due = selectedDue();
-    var amt = modeSel.value === 'full' ? due : (parseFloat(amountInput.value)||0);
-    document.getElementById('custPayBtn').innerHTML = '<i class="fas fa-check me-1"></i>Record ' + money(amt) + ' &amp; print receipt';
+    var amt = modeSel.value === 'full' ? WALLET_DUE : (parseFloat(amountInput.value)||0);
+    if (amt > WALLET_DUE) amt = WALLET_DUE;
+    var after = Math.max(0, Math.round((WALLET_DUE - amt) * 100) / 100);
+    document.getElementById('balanceAfterOut').textContent = money(after);
+    document.getElementById('custPayBtn').innerHTML = '<i class="fas fa-check me-1"></i>Record ' + money(amt);
   }
-  if (all) all.addEventListener('change', function(){ checks.forEach(function(c){ c.checked = all.checked; }); refreshSelected(); });
-  checks.forEach(function(c){ c.addEventListener('change', refreshSelected); });
-  modeSel.addEventListener('change', refreshSelected);
-  methodSel.addEventListener('change', function(){ syncDetails(); syncHidden(); });
+  modeSel.addEventListener('change', syncDetails);
+  methodSel.addEventListener('change', syncDetails);
   [amountInput, detailInput, refInput, document.getElementById('custCashGiven')].forEach(function(el){
     if (el) { el.addEventListener('input', syncHidden); el.addEventListener('change', syncHidden); }
   });
   document.getElementById('customerPayForm').addEventListener('submit', function(e){
     syncHidden();
-    if (!checks.some(function(c){ return c.checked; })) { e.preventDefault(); alert('Select at least one invoice.'); return; }
-    if (modeSel.value === 'deposit' && (parseFloat(amountInput.value)||0) <= 0) { e.preventDefault(); alert('Enter the deposit amount.'); }
+    if (modeSel.value === 'deposit' && (parseFloat(amountInput.value)||0) <= 0) {
+      e.preventDefault();
+      alert('Enter the deposit amount.');
+    }
   });
-  refreshSelected();
+  syncDetails();
 })();
 </script>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($order):
@@ -523,7 +575,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         <?php endif; ?>
       </div>
       <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-primary" href="<?php echo $ledgerUrl; ?>">Customer ledger</a>
+        <a class="btn btn-sm btn-outline-primary" href="<?php echo $ledgerUrl; ?>">Customer wallet</a>
         <a class="btn btn-sm btn-outline-secondary" href="<?php echo $receiptBase . '?id=' . (int) $order['id']; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
       </div>
     </div>
