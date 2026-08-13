@@ -216,6 +216,24 @@ ob_start();
   <div class="col-6 col-md-3">
     <div class="card border-0 shadow-sm" style="border-radius:14px;">
       <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Credit sales</div>
+        <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($sum['credit_due'] ?? 0, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;"><?php echo (int) ($sum['credit_count'] ?? 0); ?> open / part-paid · still owed</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Collected on credit</div>
+        <div class="h5 mb-0 fw-bold">KES <?php echo number_format($sum['collected'] ?? 0, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Cash received (incl. deposits)</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
         <div class="text-muted small text-uppercase fw-semibold mb-1">Retail sales</div>
         <div class="h5 mb-0 fw-bold"><?php echo (int)($sum['retail'] ?? 0); ?></div>
       </div>

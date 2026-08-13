@@ -34,6 +34,10 @@ $weekSum  = Models\SaleModel::summarize($week);
 $lowStock  = $P->lowStock();
 $staffList = $svc->listForTenant((int) TenantContext::tenantId());
 $openTabs  = $OR->openOrders();
+$dashCreditOwed = 0.0;
+foreach ($openTabs as $tab) {
+    $dashCreditOwed += max(0, (float) ($tab['total'] ?? 0) - max(0, (float) ($tab['amount_paid'] ?? 0)));
+}
 
 $weekProfitRows = [];
 $profitAvailable = true;
@@ -167,14 +171,14 @@ ob_start();
         </div>
         <div class="wallets">
           <div class="wallet"><span>Today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small>Active</small></div>
-          <div class="wallet"><span>Open tabs</span><strong><?php echo count($openTabs); ?></strong><small>Pending</small></div>
+          <div class="wallet"><span>Credit owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo count($openTabs); ?> invoice<?php echo count($openTabs) === 1 ? '' : 's'; ?></small></div>
           <div class="wallet"><span>Low stock</span><strong><?php echo count($lowStock); ?></strong><small><?php echo $lowStock ? 'Review' : 'Clear'; ?></small></div>
         </div>
       </section>
 
       <section class="metric-grid">
         <article class="metric hot"><span>Total Earnings</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small><i class="fas fa-arrow-up"></i> Today</small></article>
-        <article class="metric"><span>Cost of Goods</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekCogs, 0); ?></strong><small><i class="fas fa-arrow-down"></i> This week</small></article>
+        <article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><i class="fas fa-file-invoice-dollar"></i> <?php echo count($openTabs); ?> open</small></article>
         <article class="metric"><span>Sales Revenue</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 0); ?></strong><small><i class="fas fa-arrow-up"></i> This week</small></article>
         <article class="metric <?php echo $profitAfterLoss < 0 ? 'danger' : ''; ?>"><span>Net Profit</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($profitAvailable ? $profitAfterLoss : 0, 0); ?></strong><small><i class="fas fa-chart-line"></i> After losses</small></article>
       </section>

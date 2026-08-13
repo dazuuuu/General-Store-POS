@@ -18,6 +18,7 @@ try {
             'loyalty_points' => (float) ($c['loyalty_points'] ?? 0),
             'loyalty_tier' => (string) ($c['loyalty_tier'] ?? 'standard'),
             'credit_limit' => (float) ($c['credit_limit'] ?? 0),
+            'credit_balance' => (float) ($c['credit_balance'] ?? 0),
         ];
     }, $rows);
     echo json_encode(['ok' => true, 'items' => $items]);

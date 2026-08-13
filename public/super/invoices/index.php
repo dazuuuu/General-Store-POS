@@ -4,9 +4,8 @@ PageGuard::capability(Capabilities::SALES_RECORD);
 
 $pdo = Database::pdo();
 $O = new Models\OrderModel($pdo);
-$P = new Models\ProductModel($pdo);
-$products = $P->sellable();
 $customerSearchUrl = public_url('api/customers/search.php');
+$productSearchUrl = public_url('api/inventory/sellable_search.php');
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -172,27 +171,13 @@ ob_start();
 <template id="invoiceRowTpl">
   <div class="invoice-row row g-2 align-items-end mb-2">
     <div class="col-md-5">
-      <label class="form-label small mb-1">Product</label>
-      <select name="items[__I__][product_id]" class="form-select product-select">
-        <option value="">Choose product</option>
-        <?php foreach ($products as $p): ?>
-          <?php $eff = Models\ProductModel::effectivePrice($p); ?>
-          <?php
-            $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
-            $packUnit = (string) ($p['pack_unit'] ?? '');
-            $packPrice = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float) $p['pack_price'] : 0;
-          ?>
-          <option value="<?php echo (int) $p['id']; ?>"
-            data-retail="<?php echo (float) $eff['price']; ?>"
-            data-wholesale="<?php echo (float) ($p['wholesale_price'] ?: $eff['price']); ?>"
-            data-stock="<?php echo (float) $p['quantity']; ?>"
-            data-units-per-pack="<?php echo $unitsPerPack; ?>"
-            data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
-            data-pack-price="<?php echo $packPrice; ?>">
-            <?php echo htmlspecialchars($p['name'] . ' - stock ' . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' ' . ($p['unit'] ?? '')); ?>
-          </option>
-        <?php endforeach; ?>
-      </select>
+      <label class="form-label small mb-1">Search product</label>
+      <div class="product-search-wrap">
+        <input type="text" class="form-control product-search" placeholder="Type at least 2 letters…" autocomplete="off">
+        <input type="hidden" name="items[__I__][product_id]" class="product-id" value="">
+        <div class="product-search-menu"></div>
+      </div>
+      <div class="selected-product small text-muted mt-1">No product selected</div>
     </div>
     <div class="col-md-2"><label class="form-label small mb-1 qty-label">Qty</label><input type="hidden" name="items[__I__][quantity]" class="stock-qty" value=""><input type="number" step="0.01" min="0" class="form-control invoice-qty" placeholder="0"></div>
     <div class="col-md-2"><label class="form-label small mb-1">Price type</label><select name="items[__I__][price_type]" class="form-select invoice-price-type"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
@@ -208,6 +193,12 @@ ob_start();
 .customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
 .customer-suggest-menu button:hover{background:#f8fafc;}
 .customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
+.product-search-wrap{position:relative;}
+.product-search-menu{position:absolute;left:0;right:0;top:100%;z-index:80;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:260px;overflow:auto;}
+.product-search-menu.show{display:block;}
+.product-search-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
+.product-search-menu button:hover{background:#f8fafc;}
+.product-search-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
 .invoice-actions{white-space:nowrap;}
 .invoice-actions .btn{margin:.1rem;}
 @media (max-width: 576px){
@@ -223,7 +214,9 @@ ob_start();
   var tpl = document.getElementById('invoiceRowTpl').innerHTML;
   var idx = 0;
   var customerUrl = <?php echo json_encode($customerSearchUrl); ?>;
+  var productSearchUrl = <?php echo json_encode($productSearchUrl); ?>;
   function money(n){ return 'KES ' + (Math.round(n * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits:2}); }
+  function formatQty(n){ return (Math.round((parseFloat(n) || 0) * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits:2}); }
   function attachCustomerLookup(){
     var input = document.getElementById('customerName');
     var menu = document.getElementById('customerSuggestMenu');
@@ -255,7 +248,7 @@ ob_start();
       if (picked && input.value !== picked) { id.value = ''; picked = ''; }
       clearTimeout(timer);
       var q = input.value.trim();
-      if (!q) { hide(); return; }
+      if (q.length < 2) { hide(); return; }
       timer = setTimeout(function(){
         fetch(customerUrl + '?q=' + encodeURIComponent(q) + '&limit=8')
           .then(function(r){ return r.json(); })
@@ -276,27 +269,33 @@ ob_start();
     var el = row.querySelector('.invoice-price-type');
     return el && el.value === 'wholesale' ? 'wholesale' : 'retail';
   }
+  function rowMeta(row){
+    return {
+      retail: parseFloat(row.dataset.retailPrice) || 0,
+      wholesale: parseFloat(row.dataset.wholesalePrice) || 0,
+      stock: parseFloat(row.dataset.stock) || 0,
+      unitsPerPack: parseFloat(row.dataset.unitsPerPack) || 1,
+      packUnit: row.dataset.packUnit || '',
+      packPrice: parseFloat(row.dataset.packPrice) || 0
+    };
+  }
   function rowPrice(row){
-    var opt = row.querySelector('.product-select').selectedOptions[0];
-    if (!opt) return 0;
+    var m = rowMeta(row);
     var type = rowSaleType(row);
-    if (type === 'wholesale' && opt.dataset.packUnit && parseFloat(opt.dataset.unitsPerPack) > 1 && parseFloat(opt.dataset.packPrice) > 0) {
-      return parseFloat(opt.dataset.packPrice) || 0;
-    }
-    return parseFloat(type === 'wholesale' ? opt.dataset.wholesale : opt.dataset.retail) || 0;
+    if (type === 'wholesale' && m.packUnit && m.unitsPerPack > 1 && m.packPrice > 0) return m.packPrice;
+    return type === 'wholesale' ? m.wholesale : m.retail;
   }
   function recalc(){
     var total = 0;
     rows.querySelectorAll('.invoice-row').forEach(function(row){
-      var opt = row.querySelector('.product-select').selectedOptions[0];
+      var m = rowMeta(row);
       var qty = parseFloat(row.querySelector('.invoice-qty').value) || 0;
-      var byPack = opt && rowSaleType(row) === 'wholesale' && opt.dataset.packUnit && parseFloat(opt.dataset.unitsPerPack) > 1 && parseFloat(opt.dataset.packPrice) > 0;
-      var perPack = opt ? (parseFloat(opt.dataset.unitsPerPack) || 1) : 1;
-      var stock = opt ? (parseFloat(opt.dataset.stock) || 0) : 0;
-      var max = byPack ? Math.floor((stock / perPack) * 100) / 100 : stock;
-      if (qty > max) { qty = max; row.querySelector('.invoice-qty').value = max; }
-      row.querySelector('.qty-label').textContent = byPack ? ('Qty (' + opt.dataset.packUnit + ')') : 'Qty';
-      row.querySelector('.stock-qty').value = qty > 0 ? (qty * (byPack ? perPack : 1)).toFixed(2) : '';
+      var byPack = rowSaleType(row) === 'wholesale' && m.packUnit && m.unitsPerPack > 1 && m.packPrice > 0;
+      var max = byPack ? Math.floor((m.stock / m.unitsPerPack) * 100) / 100 : m.stock;
+      if (qty > max) { qty = max; row.querySelector('.invoice-qty').value = max || ''; }
+      row.querySelector('.qty-label').textContent = byPack ? ('Qty (' + m.packUnit + ')') : 'Qty';
+      row.querySelector('.stock-qty').value = (row.querySelector('.product-id').value && qty > 0)
+        ? (qty * (byPack ? m.unitsPerPack : 1)).toFixed(2) : '';
       var line = qty * rowPrice(row);
       row.querySelector('.line-total').textContent = money(line);
       total += line;
@@ -304,8 +303,71 @@ ob_start();
     total = Math.max(0, total - (parseFloat(document.getElementById('discountAmount').value) || 0));
     document.getElementById('invoiceTotal').textContent = money(total);
   }
+  function attachProductSearch(row){
+    var input = row.querySelector('.product-search');
+    var hidden = row.querySelector('.product-id');
+    var menu = row.querySelector('.product-search-menu');
+    var selected = row.querySelector('.selected-product');
+    if (!input || !hidden || !menu) return;
+    var timer = null;
+    function hide(){ menu.classList.remove('show'); }
+    function clearPick(){
+      hidden.value = '';
+      row.dataset.retailPrice = '0';
+      row.dataset.wholesalePrice = '0';
+      row.dataset.stock = '0';
+      row.dataset.unitsPerPack = '1';
+      row.dataset.packUnit = '';
+      row.dataset.packPrice = '0';
+      if (selected) selected.textContent = 'No product selected';
+    }
+    function render(items){
+      menu.innerHTML = '';
+      if (!items.length) { hide(); return; }
+      items.forEach(function(p){
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        var meta = ['Stock ' + formatQty(p.stock) + ' ' + (p.unit || ''), p.barcode, p.category_name, p.brand_name].filter(Boolean).join(' · ');
+        btn.innerHTML = '<strong></strong><span class="meta"></span>';
+        btn.querySelector('strong').textContent = p.name || '';
+        btn.querySelector('.meta').textContent = meta;
+        btn.addEventListener('mousedown', function(e){
+          e.preventDefault();
+          hidden.value = p.id || '';
+          input.value = p.name || '';
+          row.dataset.retailPrice = p.retail_price || 0;
+          row.dataset.wholesalePrice = p.wholesale_price || p.retail_price || 0;
+          row.dataset.stock = p.stock || 0;
+          row.dataset.unitsPerPack = p.units_per_pack || 1;
+          row.dataset.packUnit = p.pack_unit || '';
+          row.dataset.packPrice = p.pack_price || 0;
+          if (selected) {
+            selected.textContent = 'Selected: ' + (p.name || '') + ' · stock ' + formatQty(p.stock) + ' ' + (p.unit || '') + ' · ' + money(p.retail_price || 0);
+          }
+          hide();
+          recalc();
+        });
+        menu.appendChild(btn);
+      });
+      menu.classList.add('show');
+    }
+    input.addEventListener('input', function(){
+      clearPick();
+      recalc();
+      clearTimeout(timer);
+      var q = input.value.trim();
+      if (q.length < 2) { hide(); return; }
+      timer = setTimeout(function(){
+        fetch(productSearchUrl + '?q=' + encodeURIComponent(q) + '&limit=12')
+          .then(function(r){ return r.json(); })
+          .then(function(data){ render(data.items || []); })
+          .catch(function(){ hide(); });
+      }, 180);
+    });
+    input.addEventListener('blur', function(){ setTimeout(hide, 160); });
+  }
   function wire(row){
-    row.querySelector('.product-select').addEventListener('change', recalc);
+    attachProductSearch(row);
     row.querySelector('.invoice-qty').addEventListener('input', recalc);
     row.querySelector('.invoice-price-type').addEventListener('change', recalc);
     row.querySelector('.remove-invoice-row').addEventListener('click', function(){ row.remove(); recalc(); });
@@ -317,6 +379,16 @@ ob_start();
     recalc();
   });
   document.getElementById('discountAmount').addEventListener('input', recalc);
+  document.getElementById('invoiceForm').addEventListener('submit', function(e){
+    var ok = false;
+    rows.querySelectorAll('.invoice-row').forEach(function(row){
+      if ((row.querySelector('.product-id').value || '') && (parseFloat(row.querySelector('.invoice-qty').value) || 0) > 0) ok = true;
+    });
+    if (!ok) {
+      e.preventDefault();
+      alert('Search and select at least one product, then enter quantity.');
+    }
+  });
   attachCustomerLookup();
   addRow();
 })();

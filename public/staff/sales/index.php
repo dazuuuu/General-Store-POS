@@ -76,7 +76,16 @@ ob_start();
       </div>
     </div>
   </div>
-  <div class="col-12 col-md-6 d-flex align-items-center gap-2 flex-wrap">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold">Credit owed</div>
+        <div class="h5 mb-0 mt-1 fw-bold text-danger">KES <?php echo number_format($sum['credit_due'] ?? 0, 0); ?></div>
+        <div class="text-muted small"><?php echo (int) ($sum['credit_count'] ?? 0); ?> credit sale<?php echo (int) ($sum['credit_count'] ?? 0) !== 1 ? 's' : ''; ?></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-3 d-flex align-items-center gap-2 flex-wrap">
     <a href="<?php echo public_url('staff/dashboard/'); ?>" class="btn btn-primary"><i class="fas fa-cash-register me-1"></i>Home</a>
     <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#shareCatalogueModal">
       <i class="fas fa-share-nodes me-1"></i>Share Catalogue

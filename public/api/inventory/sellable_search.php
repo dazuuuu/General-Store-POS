@@ -13,7 +13,8 @@ if (!TenantContext::check() || (!$isOwner && !TenantContext::can(Capabilities::S
 
 $q = trim((string) ($_GET['q'] ?? ''));
 $limit = min(20, max(5, (int) ($_GET['limit'] ?? 12)));
-if ($q === '') {
+// Advanced search: wait until at least 2 characters so suggestions stay relevant.
+if (mb_strlen($q) < 2) {
     echo json_encode(['items' => []]);
     exit;
 }
@@ -27,6 +28,7 @@ $stmt = $pdo->prepare(
     "SELECT p.id, p.name, p.selling_price, p.wholesale_price, p.retail_price,
             p.offer_price, p.offer_starts_at, p.offer_ends_at,
             p.quantity, p.unit, p.barcode, p.status,
+            p.units_per_pack, p.pack_unit, p.pack_price,
             c.name AS category_name,
             br.name AS brand_name
        FROM products p
@@ -62,6 +64,9 @@ foreach ($stmt->fetchAll() as $row) {
         'stock' => (float) $row['quantity'],
         'retail_price' => $retail,
         'wholesale_price' => $wholesale,
+        'units_per_pack' => max(1, (float) ($row['units_per_pack'] ?? 1)),
+        'pack_unit' => (string) ($row['pack_unit'] ?? ''),
+        'pack_price' => ($row['pack_price'] ?? '') !== '' && $row['pack_price'] !== null ? (float) $row['pack_price'] : 0.0,
     ];
 }
 

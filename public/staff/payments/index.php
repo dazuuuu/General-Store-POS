@@ -27,6 +27,7 @@ $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
 $customerQuery = trim($_GET['customer'] ?? $_POST['customer_name'] ?? '');
 $customerId = (int) ($_GET['customer_id'] ?? $_POST['customer_id'] ?? 0);
 $preferDeposit = isset($_GET['deposit']) || (($_POST['pay_mode'] ?? '') === 'deposit');
+$openWallet = isset($_GET['open']) || (($_POST['action'] ?? '') === 'settle_customer');
 $order = null;
 $searchMatches = [];
 $customerInvoices = [];
@@ -71,6 +72,8 @@ if ($receiptQuery !== '') {
             $qs = '?customer=' . urlencode($cname);
             if ($cid > 0) { $qs .= '&customer_id=' . $cid; }
             if ($preferDeposit) { $qs .= '&deposit=1'; }
+            // Landing search shows summary only; open wallet when coming from an invoice.
+            $qs .= '&open=1';
             header('Location: ' . $paymentsBase . $qs);
             exit;
         }
@@ -152,6 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
         $firstId = (int) ($res['receipt_order_ids'][0] ?? 0);
         $returnQs = '?customer=' . urlencode($customerQuery !== '' ? $customerQuery : $customerLabel);
         if ($customerId > 0) { $returnQs .= '&customer_id=' . $customerId; }
+        $returnQs .= '&open=1';
         if ($firstId > 0) {
             $_SESSION['flash']['receipt_url'] = $receiptBase . '?id=' . $firstId . '&print=1'
                 . ((float) ($res['allocations'][0]['amount_due'] ?? 0) > 0.0001 ? '&deposit=1' : '');
@@ -238,7 +242,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
                value="<?php echo htmlspecialchars($customerQuery !== '' ? $customerQuery : $receiptQuery); ?>" autofocus>
         <input type="hidden" name="customer_id" id="customerIdField" value="<?php echo (int) $customerId; ?>">
         <div class="invoice-suggest-menu" id="paymentSuggestMenu"></div>
-        <div class="form-text">Search a customer to open their credit wallet — all invoices combined into one balance.</div>
+        <div class="form-text">Type at least 2 letters — pick a customer to see their name and total balance, then open the wallet to pay.</div>
       </div>
       <div class="col-6 col-lg-2">
         <button class="btn btn-primary btn-lg w-100"><i class="fas fa-magnifying-glass me-1"></i>Find</button>
@@ -263,29 +267,48 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 <?php endif; ?>
 
 <?php if ($searchMatches && !$order && !$customerInvoices): ?>
+<?php
+  // Group invoice hits into customer summary rows (name + total balance), not a full invoice dump.
+  $matchGroups = [];
+  foreach ($searchMatches as $m) {
+      $paid = max(0, (float) ($m['amount_paid'] ?? 0));
+      $due = (float) ($m['balance_due'] ?? $m['amount_due'] ?? 0);
+      if ($due <= 0.0001) { $due = max(0, (float) ($m['total'] ?? 0) - $paid); }
+      $cust = trim((string) ($m['table_name'] ?? ''));
+      $co = trim((string) ($m['customer_company'] ?? ''));
+      $cid = (int) ($m['customer_id'] ?? 0);
+      $key = $cid > 0 ? 'id:' . $cid : 'n:' . strtolower($cust !== '' ? $cust : ('inv-' . ($m['id'] ?? 0)));
+      if (!isset($matchGroups[$key])) {
+          $matchGroups[$key] = [
+              'name' => $cust !== '' ? $cust : ('Invoice ' . ($m['receipt_number'] ?? '')),
+              'company' => $co,
+              'customer_id' => $cid,
+              'balance' => 0.0,
+              'count' => 0,
+          ];
+      }
+      $matchGroups[$key]['balance'] += $due;
+      $matchGroups[$key]['count']++;
+      if ($matchGroups[$key]['company'] === '' && $co !== '') {
+          $matchGroups[$key]['company'] = $co;
+      }
+  }
+?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom"><strong><?php echo count($searchMatches); ?></strong> open invoices matched</div>
+  <div class="px-4 py-3 border-bottom"><strong><?php echo count($matchGroups); ?></strong> customer<?php echo count($matchGroups) === 1 ? '' : 's'; ?> matched</div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr class="text-muted small text-uppercase"><th>Date</th><th>Customer / company</th><th>Invoice no</th><th class="text-end">Amount</th><th></th></tr></thead>
+      <thead><tr class="text-muted small text-uppercase"><th>Customer / company</th><th class="text-end">Total balance</th><th></th></tr></thead>
       <tbody>
-        <?php foreach ($searchMatches as $m):
-          $paid = max(0, (float) ($m['amount_paid'] ?? 0));
-          $due = (float) ($m['balance_due'] ?? $m['amount_due'] ?? 0);
-          if ($due <= 0.0001) { $due = max(0, (float) ($m['total'] ?? 0) - $paid); }
-          $cust = trim((string) ($m['table_name'] ?? ''));
-          $co = trim((string) ($m['customer_company'] ?? ''));
-        ?>
+        <?php foreach ($matchGroups as $g): ?>
         <tr>
-          <td class="small"><?php echo date('j M Y', strtotime($m['created_at'])); ?></td>
           <td>
-            <div class="fw-semibold"><?php echo htmlspecialchars($cust !== '' ? $cust : '—'); ?></div>
-            <?php if ($co !== ''): ?><div class="text-muted small"><?php echo htmlspecialchars($co); ?></div><?php endif; ?>
+            <div class="fw-semibold"><?php echo htmlspecialchars($g['name']); ?></div>
+            <?php if ($g['company'] !== ''): ?><div class="text-muted small"><?php echo htmlspecialchars($g['company']); ?></div><?php endif; ?>
           </td>
-          <td class="fw-semibold"><?php echo htmlspecialchars($m['receipt_number'] ?? ''); ?></td>
-          <td class="text-end fw-bold text-danger">KES <?php echo number_format($due, 0); ?></td>
+          <td class="text-end fw-bold text-danger">KES <?php echo number_format($g['balance'], 0); ?></td>
           <td class="text-end">
-            <a class="btn btn-sm btn-success" href="<?php echo $paymentsBase . '?customer=' . urlencode($cust) . ($m['customer_id'] ? '&customer_id=' . (int) $m['customer_id'] : ''); ?>">Open wallet</a>
+            <a class="btn btn-sm btn-success" href="<?php echo $paymentsBase . '?customer=' . urlencode($g['name']) . ($g['customer_id'] ? '&customer_id=' . (int) $g['customer_id'] : ''); ?>">View</a>
           </td>
         </tr>
         <?php endforeach; ?>
@@ -313,7 +336,33 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   foreach ($customerPayments as $pay) {
       $paidTotal += (float) ($pay['amount'] ?? 0);
   }
+  $walletUrl = $paymentsBase . '?customer=' . urlencode($customerLabel)
+      . ($customerId > 0 ? '&customer_id=' . $customerId : '')
+      . '&open=1'
+      . ($preferDeposit ? '&deposit=1' : '');
 ?>
+
+<?php if (!$openWallet): ?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+  <div class="card-body p-4">
+    <div class="text-muted small text-uppercase fw-semibold mb-1">Customer</div>
+    <a href="<?php echo htmlspecialchars($walletUrl); ?>" class="text-decoration-none text-dark d-block">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>
+          <div class="fw-bold" style="font-size:1.5rem;line-height:1.2;"><?php echo htmlspecialchars($customerLabel); ?></div>
+          <?php if ($customerCompany !== ''): ?><div class="text-muted"><?php echo htmlspecialchars($customerCompany); ?></div><?php endif; ?>
+        </div>
+        <div class="text-end">
+          <div class="text-muted small text-uppercase fw-semibold mb-1">Total balance</div>
+          <div class="fw-bold text-danger" style="font-size:1.75rem;">KES <?php echo number_format($customerBalance, 0); ?></div>
+          <span class="btn btn-sm btn-success mt-2"><i class="fas fa-folder-open me-1"></i>Open wallet</span>
+        </div>
+      </div>
+    </a>
+    <div class="form-text mt-3 mb-0">Click the customer to see invoices and record a deposit or full payment.</div>
+  </div>
+</div>
+<?php else: ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
@@ -321,6 +370,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         <div class="text-muted small text-uppercase fw-semibold mb-1">Customer</div>
         <div class="fw-bold" style="font-size:1.6rem;line-height:1.2;"><?php echo htmlspecialchars($customerLabel); ?></div>
         <?php if ($customerCompany !== ''): ?><div class="text-muted"><?php echo htmlspecialchars($customerCompany); ?></div><?php endif; ?>
+        <div class="text-muted small mt-1"><?php echo count($customerInvoices); ?> open invoice<?php echo count($customerInvoices) === 1 ? '' : 's'; ?></div>
       </div>
       <div class="text-end">
         <div class="text-muted small text-uppercase fw-semibold mb-1">Wallet balance</div>
@@ -545,7 +595,8 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 })();
 </script>
 <?php endif; ?>
-<?php endif; ?>
+<?php endif; /* openWallet */ ?>
+<?php endif; /* customer found */ ?>
 
 <?php if ($order):
     $amountPaid = max(0, (float) ($order['amount_paid'] ?? 0));
@@ -558,7 +609,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         'paid' => '<span class="badge bg-success">Paid</span>',
         'void' => '<span class="badge bg-secondary">Voided</span>',
     ][$order['status']] ?? '';
-    $ledgerUrl = $paymentsBase . '?customer=' . urlencode($order['table_name'] ?? '') . (!empty($order['customer_id']) ? '&customer_id=' . (int) $order['customer_id'] : '');
+    $ledgerUrl = $paymentsBase . '?customer=' . urlencode($order['table_name'] ?? '') . (!empty($order['customer_id']) ? '&customer_id=' . (int) $order['customer_id'] : '') . '&open=1';
 ?>
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
@@ -786,6 +837,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 .invoice-suggest-menu button:hover{background:#f8fafc;}
 .invoice-suggest-menu .meta{display:block;color:#64748b;font-size:.78rem;margin-top:2px;}
 .invoice-suggest-menu .bal{float:right;font-weight:700;color:#b91c1c;}
+.invoice-suggest-menu .bal.paid{color:#15803d;}
 </style>
 <script>
 (function(){
@@ -800,26 +852,30 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   function hide(){ menu.classList.remove('show'); }
   function money(n){ return 'KES ' + (Number(n)||0).toLocaleString('en-KE', {maximumFractionDigits:0}); }
   function goCustomer(name, id){
+    // Summary first (name + total balance). Wallet opens only after click with &open=1.
     var url = '?customer=' + encodeURIComponent(name || '');
     if (id) url += '&customer_id=' + encodeURIComponent(id);
-    if (preferDeposit) url += '&deposit=1';
-    window.location.href = url;
-  }
-  function goReceipt(receipt){
-    var url = '?receipt=' + encodeURIComponent(receipt);
     if (preferDeposit) url += '&deposit=1';
     window.location.href = url;
   }
   function render(items, customers){
     menu.innerHTML = '';
     var any = false;
+    var seen = {};
     (customers || []).forEach(function(c){
       any = true;
+      var idKey = c.id ? String(c.id) : '';
+      var nameKey = c.name ? ('n:' + String(c.name).toLowerCase()) : '';
+      if (idKey) seen[idKey] = true;
+      if (nameKey) seen[nameKey] = true;
+      var bal = Number(c.credit_balance) || 0;
       var b = document.createElement('button');
       b.type = 'button';
-      b.innerHTML = '<strong></strong><span class="meta"></span>';
+      b.innerHTML = '<span class="bal"></span><strong></strong><span class="meta"></span>';
+      b.querySelector('.bal').textContent = money(bal);
+      if (bal <= 0) b.querySelector('.bal').classList.add('paid');
       b.querySelector('strong').textContent = (c.name || 'Customer') + (c.company_name ? ' · ' + c.company_name : '');
-      b.querySelector('.meta').textContent = 'Customer ledger' + (c.phone ? ' · ' + c.phone : '');
+      b.querySelector('.meta').textContent = (bal > 0 ? 'Total balance' : 'No balance') + (c.phone ? ' · ' + c.phone : '');
       b.addEventListener('mousedown', function(e){
         e.preventDefault();
         if (hidden) hidden.value = c.id || '';
@@ -827,17 +883,36 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
       });
       menu.appendChild(b);
     });
+    // Aggregate open invoices by customer — suggestions show total balance, not each invoice.
+    var byCust = {};
     (items || []).forEach(function(it){
+      var name = (it.customer_name || '').trim();
+      if (!name) return;
+      var id = it.customer_id || 0;
+      var key = id ? String(id) : ('n:' + name.toLowerCase());
+      if (seen[key] || seen['n:' + name.toLowerCase()]) return;
+      if (!byCust[key]) {
+        byCust[key] = { name: name, company_name: it.company_name || '', customer_id: id, balance: 0 };
+      }
+      byCust[key].balance += Number(it.balance) || 0;
+      if (!byCust[key].company_name && it.company_name) byCust[key].company_name = it.company_name;
+    });
+    Object.keys(byCust).forEach(function(key){
+      var it = byCust[key];
       any = true;
+      var bal = Number(it.balance) || 0;
       var b = document.createElement('button');
       b.type = 'button';
-      var title = (it.customer_name || 'Customer') + (it.company_name ? ' · ' + it.company_name : '');
-      b.innerHTML = '<span class="bal">' + money(it.balance) + '</span><strong></strong><span class="meta"></span>';
+      var title = it.name || 'Customer';
+      if (it.company_name) title += ' · ' + it.company_name;
+      b.innerHTML = '<span class="bal"></span><strong></strong><span class="meta"></span>';
+      b.querySelector('.bal').textContent = money(bal);
+      if (bal <= 0) b.querySelector('.bal').classList.add('paid');
       b.querySelector('strong').textContent = title;
-      b.querySelector('.meta').textContent = (it.receipt_number || '') + ' · open invoice';
+      b.querySelector('.meta').textContent = 'Total balance';
       b.addEventListener('mousedown', function(e){
         e.preventDefault();
-        goCustomer(it.customer_name || '', 0);
+        goCustomer(it.name, it.customer_id || 0);
       });
       menu.appendChild(b);
     });
@@ -847,13 +922,13 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     if (hidden) hidden.value = '';
     clearTimeout(timer);
     var q = input.value.trim();
-    if (q.length < 1) { hide(); return; }
+    if (q.length < 2) { hide(); return; }
     timer = setTimeout(function(){
       Promise.all([
-        fetch(api + '?q=' + encodeURIComponent(q) + '&limit=8&open_only=1').then(function(r){ return r.json(); }).catch(function(){ return {items:[]}; }),
-        fetch(custApi + '?q=' + encodeURIComponent(q) + '&limit=6').then(function(r){ return r.json(); }).catch(function(){ return {items:[]}; })
+        fetch(custApi + '?q=' + encodeURIComponent(q) + '&limit=8').then(function(r){ return r.json(); }).catch(function(){ return {items:[]}; }),
+        fetch(api + '?q=' + encodeURIComponent(q) + '&limit=20&open_only=1').then(function(r){ return r.json(); }).catch(function(){ return {items:[]}; })
       ]).then(function(res){
-        render((res[0] && res[0].items) || [], (res[1] && res[1].items) || []);
+        render((res[1] && res[1].items) || [], (res[0] && res[0].items) || []);
       });
     }, 180);
   });

@@ -152,7 +152,7 @@ ob_start();
     <div>
       <label class="form-label small mb-1">Search product</label>
       <div class="product-search-wrap">
-        <input type="text" class="form-control product-search" placeholder="Type product name or barcode" autocomplete="off">
+        <input type="text" class="form-control product-search" placeholder="Type at least 2 letters…" autocomplete="off">
         <input type="hidden" name="new_items[__I__][product_id]" class="product-id" value="">
         <div class="product-search-menu"></div>
       </div>
@@ -282,7 +282,7 @@ ob_start();
       recalc();
       clearTimeout(timer);
       var q = input.value.trim();
-      if (!q) { hide(); return; }
+      if (q.length < 2) { hide(); return; }
       timer = setTimeout(function(){
         fetch(productSearchUrl + '?q=' + encodeURIComponent(q) + '&limit=12')
           .then(function(r){ return r.json(); })

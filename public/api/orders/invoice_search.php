@@ -30,6 +30,7 @@ try {
         return [
             'id' => (int) $o['id'],
             'receipt_number' => (string) ($o['receipt_number'] ?? ''),
+            'customer_id' => (int) ($o['customer_id'] ?? 0),
             'customer_name' => $customer,
             'company_name' => $company,
             'phone' => (string) ($o['customer_phone'] ?? ''),
