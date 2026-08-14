@@ -358,71 +358,78 @@ ob_start();
     </div>
   </div>
 
-  <aside class="pos-side">
-    <h2 class="pos-side-title">Sale Details</h2>
-    <div class="pos-customer">
-      <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
-      <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>" autocomplete="off" placeholder="Search customer">
-      <div class="customer-suggest-menu" id="customerSuggestMenu"></div>
+  <aside class="pos-side" id="posSide">
+    <div class="pos-side-head">
+      <h2 class="pos-side-title">Sale Details</h2>
+      <div class="pos-customer">
+        <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
+        <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>" autocomplete="off" placeholder="Search customer">
+        <div class="customer-suggest-menu" id="customerSuggestMenu"></div>
+      </div>
     </div>
-    <div class="pos-cart" id="cartRows"><div class="text-muted small text-center py-4">Tap a product to add it.</div></div>
 
-    <div class="pos-totals">
-      <div class="d-flex justify-content-between"><span>Sub Total</span><span id="subtotalOut">KES 0</span></div>
-      <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Discount <span class="text-muted small">(if they negotiate)</span></span>
-        <input type="number" step="0.01" min="0" id="discountInput" name="discount_amount" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
-      </div>
-      <div class="d-flex justify-content-between align-items-center py-1 gap-2">
-        <span>Extra charge <span class="text-muted small">(delivery, packing…)</span></span>
-        <input type="number" step="0.01" min="0" id="extraChargeInput" name="additional_charges" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
-      </div>
-      <div class="py-1">
-        <input type="text" id="extraChargeNoteInput" name="additional_charges_note" class="form-control form-control-sm" placeholder="Charge note (optional)">
-      </div>
-      <div class="d-flex justify-content-between align-items-center py-1">
-        <span>VAT <span class="text-muted small" id="vatRateLabel"></span></span>
-        <span id="vatOut">KES 0</span>
-      </div>
-      <div class="d-flex justify-content-between align-items-center py-1">
-        <label class="form-check-label small" for="vatEnabledInput">Apply VAT</label>
-        <div class="form-check form-switch m-0">
-          <input class="form-check-input" type="checkbox" id="vatEnabledInput" <?php echo $vatRate > 0 ? 'checked' : ''; ?>>
+    <div class="pos-cart-wrap">
+      <div class="pos-cart" id="cartRows"><div class="text-muted small text-center py-4">Tap a product to add it.</div></div>
+      <button type="button" class="pos-cart-more" id="cartViewAll" style="display:none;"></button>
+    </div>
+
+    <div class="pos-side-foot" id="posSideFoot">
+      <div class="pos-totals">
+        <div class="d-flex justify-content-between"><span>Sub Total</span><span id="subtotalOut">KES 0</span></div>
+        <div class="d-flex justify-content-between align-items-center py-1">
+          <span>Discount <span class="text-muted small">(if they negotiate)</span></span>
+          <input type="number" step="0.01" min="0" id="discountInput" name="discount_amount" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
         </div>
+        <div class="d-flex justify-content-between align-items-center py-1 gap-2">
+          <span>Extra charge <span class="text-muted small">(delivery, packing…)</span></span>
+          <input type="number" step="0.01" min="0" id="extraChargeInput" name="additional_charges" class="form-control form-control-sm" style="width:100px;text-align:right;" placeholder="0" value="0">
+        </div>
+        <div class="py-1">
+          <input type="text" id="extraChargeNoteInput" name="additional_charges_note" class="form-control form-control-sm" placeholder="Charge note (optional)">
+        </div>
+        <div class="d-flex justify-content-between align-items-center py-1">
+          <span>VAT <span class="text-muted small" id="vatRateLabel"></span></span>
+          <span id="vatOut">KES 0</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center py-1">
+          <label class="form-check-label small" for="vatEnabledInput">Apply VAT</label>
+          <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="vatEnabledInput" <?php echo $vatRate > 0 ? 'checked' : ''; ?>>
+          </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center py-1">
+          <span>Tap Add adds to</span>
+          <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:150px;">
+            <option value="retail">Retail (items)</option>
+            <option value="wholesale">Wholesale (packs)</option>
+          </select>
+        </div>
+        <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
+        <input type="hidden" name="vat_inclusive" id="vatInclusiveInput" value="1">
+        <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
       </div>
-      <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Tap Add adds to</span>
-        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:150px;">
-          <option value="retail">Retail (items)</option>
-          <option value="wholesale">Wholesale (packs)</option>
-        </select>
-      </div>
-      <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
-      <input type="hidden" name="vat_inclusive" id="vatInclusiveInput" value="1">
-      <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
-    </div>
 
-    <div class="pos-actions" id="cartButtons">
-      <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
-      <button type="button" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Checkout</button>
-    </div>
-
-    <div id="payPanel" style="display:none;">
-      <hr>
-      <div class="btn-group w-100 mb-2 flex-wrap" role="group">
-        <input type="radio" class="btn-check" name="pm" id="pmCash" value="cash" checked>
-        <label class="btn btn-outline-primary btn-sm" for="pmCash"><i class="fas fa-money-bill-wave me-1"></i>Cash</label>
-        <input type="radio" class="btn-check" name="pm" id="pmMpesa" value="mpesa">
-        <label class="btn btn-outline-success btn-sm" for="pmMpesa"><i class="fas fa-mobile-screen me-1"></i>M-Pesa</label>
-        <input type="radio" class="btn-check" name="pm" id="pmCard" value="card">
-        <label class="btn btn-outline-dark btn-sm" for="pmCard"><i class="fas fa-credit-card me-1"></i>Card</label>
-        <input type="radio" class="btn-check" name="pm" id="pmBank" value="bank">
-        <label class="btn btn-outline-secondary btn-sm" for="pmBank"><i class="fas fa-building-columns me-1"></i>Bank</label>
-        <input type="radio" class="btn-check" name="pm" id="pmSacco" value="sacco">
-        <label class="btn btn-outline-secondary btn-sm" for="pmSacco"><i class="fas fa-landmark me-1"></i>SACCO</label>
-        <input type="radio" class="btn-check" name="pm" id="pmSplit" value="split">
-        <label class="btn btn-outline-secondary btn-sm" for="pmSplit"><i class="fas fa-divide me-1"></i>Split</label>
+      <div class="pos-actions" id="cartButtons">
+        <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
+        <button type="button" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Checkout</button>
       </div>
+
+      <div id="payPanel" style="display:none;">
+        <hr>
+        <div class="btn-group w-100 mb-2 flex-wrap" role="group">
+          <input type="radio" class="btn-check" name="pm" id="pmCash" value="cash" checked>
+          <label class="btn btn-outline-primary btn-sm" for="pmCash"><i class="fas fa-money-bill-wave me-1"></i>Cash</label>
+          <input type="radio" class="btn-check" name="pm" id="pmMpesa" value="mpesa">
+          <label class="btn btn-outline-success btn-sm" for="pmMpesa"><i class="fas fa-mobile-screen me-1"></i>M-Pesa</label>
+          <input type="radio" class="btn-check" name="pm" id="pmCard" value="card">
+          <label class="btn btn-outline-dark btn-sm" for="pmCard"><i class="fas fa-credit-card me-1"></i>Card</label>
+          <input type="radio" class="btn-check" name="pm" id="pmBank" value="bank">
+          <label class="btn btn-outline-secondary btn-sm" for="pmBank"><i class="fas fa-building-columns me-1"></i>Bank</label>
+          <input type="radio" class="btn-check" name="pm" id="pmSacco" value="sacco">
+          <label class="btn btn-outline-secondary btn-sm" for="pmSacco"><i class="fas fa-landmark me-1"></i>SACCO</label>
+          <input type="radio" class="btn-check" name="pm" id="pmSplit" value="split">
+          <label class="btn btn-outline-secondary btn-sm" for="pmSplit"><i class="fas fa-divide me-1"></i>Split</label>
+        </div>
       <div id="cashBox" class="row g-2 mb-2">
         <div class="col-6"><label class="form-label small mb-1">Cash given</label><input type="number" step="0.01" min="0" id="cashGivenInput" class="form-control form-control-sm"></div>
         <div class="col-6"><label class="form-label small mb-1">Balance</label><div class="form-control form-control-sm bg-light fw-semibold" id="balanceOut">KES 0</div></div>
@@ -469,6 +476,7 @@ ob_start();
         <span class="fw-bold fs-5" id="payableOut">KES 0</span>
       </div>
       <button type="submit" class="pos-btn pos-btn-primary w-100">Pay Now</button>
+      </div>
     </div>
   </aside>
 </div>
@@ -505,7 +513,8 @@ ob_start();
 <?php endif; ?>
 
 <style>
-.pos-grid{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;}
+.pos-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start;padding-right:min(380px,38vw);}
+.pos-main{min-width:0;}
 .pos-search{position:relative;margin-bottom:14px;}
 .pos-search i{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#b7bac3;}
 .pos-search input{width:100%;padding:12px 14px 12px 40px;border:1px solid #eef0f4;border-radius:12px;background:#fff;font-size:.92rem;}
@@ -546,10 +555,18 @@ ob_start();
 .pos-add-half{width:44px;border:1px solid var(--pos-green);border-radius:10px;background:#fff;color:var(--pos-green);font-weight:700;font-size:.95rem;line-height:1;}
 .pos-add-half:hover{background:var(--pos-green-light, #e8f8ef);}
 
-.pos-side{background:#fff;border:1px solid #eef0f4;border-radius:16px;padding:20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow-y:auto;}
-.pos-side.pay-open{max-height:none;overflow:visible;}
-.pos-side-title{font-size:1.1rem;font-weight:800;margin-bottom:14px;}
-.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:6px;position:relative;}
+/* Fixed Sale Details rail — stays visible like the left navbar. */
+.pos-side{
+  position:fixed; top:0; right:0; bottom:0;
+  width:min(360px,38vw); z-index:40;
+  background:#fff; border-left:1px solid #eef0f4;
+  padding:16px 16px 12px; border-radius:0;
+  display:flex; flex-direction:column; gap:0;
+  overflow:hidden; box-shadow:-6px 0 24px rgba(16,24,40,.06);
+}
+.pos-side-head{flex:0 0 auto; padding-bottom:8px;}
+.pos-side-title{font-size:1.05rem;font-weight:800;margin:0 0 12px;}
+.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:0;position:relative;}
 .pos-customer-icon{width:34px;height:34px;border-radius:50%;background:var(--pos-green-light);color:var(--pos-green);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .pos-customer-input{border:0;background:transparent;flex:1;font-weight:600;font-size:.9rem;}
 .pos-customer-input:focus{outline:none;}
@@ -558,7 +575,10 @@ ob_start();
 .customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
 .customer-suggest-menu button:hover{background:#f8fafc;}
 .customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
-.pos-cart{max-height:280px;overflow-y:auto;margin:14px 0;}
+.pos-cart-wrap{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;margin:10px 0 8px;border-top:1px solid #f1f5f9;border-bottom:1px solid #f1f5f9;}
+.pos-cart{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:6px 2px 8px;-webkit-overflow-scrolling:touch;}
+.pos-cart-more{flex:0 0 auto;border:0;background:#f8fafc;color:var(--pos-green);font-weight:700;font-size:.82rem;padding:8px 10px;border-radius:10px;margin:0 0 8px;text-align:left;}
+.pos-cart-more:hover{background:var(--pos-green-light);}
 .pos-cart-line{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f7;}
 .pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;margin-top:2px;}
 .pos-cart-name{font-weight:600;font-size:.85rem;color:#1f2330;}
@@ -571,19 +591,28 @@ ob_start();
 .pos-dual-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;}
 .pos-dual-label{font-size:.72rem;font-weight:600;color:#5b6070;min-width:0;flex:1;}
 .pos-cart-del{color:#64748b;background:none;border:0;font-size:.85rem;margin-top:4px;}
-.pos-totals{border-top:1px dashed #eef0f4;padding-top:12px;font-size:.9rem;color:#5b6070;}
+.pos-side-foot{flex:0 0 auto;max-height:52vh;overflow-y:auto;padding-top:4px;-webkit-overflow-scrolling:touch;}
+.pos-side.pay-open .pos-side-foot{max-height:62vh;}
+.pos-side.pay-open .pos-cart-wrap{flex:0 1 28%;}
+.pos-totals{border-top:0;padding-top:4px;font-size:.9rem;color:#5b6070;}
 .pos-total-line{font-weight:800;font-size:1.05rem;color:#1f2330;margin-top:6px;}
-.pos-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
+.pos-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;position:sticky;bottom:0;background:#fff;padding-top:8px;padding-bottom:4px;z-index:2;}
 .pos-btn{border-radius:12px;padding:12px 0;font-weight:700;font-size:.9rem;border:1px solid #eef0f4;}
 .pos-btn-outline{background:#fff;color:#5b6070;}
 .pos-btn-primary{background:var(--pos-green);border-color:var(--pos-green);color:#fff;}
 .pos-btn:disabled{opacity:.5;}
 @media (max-width:900px){
-  .pos-grid{grid-template-columns:1fr;}
-  /* Cart stays put — pinned to the top of the screen, not lost below a long
-     product list. It scrolls its own contents (bounded height) while the
-     product grid scrolls with the page underneath it. */
-  .pos-side{position:static;top:auto;order:-1;max-height:none;overflow:visible;z-index:20;box-shadow:0 6px 16px rgba(16,24,40,.1);margin-bottom:14px;}
+  .pos-grid{padding-right:0;padding-bottom:min(48vh,420px);}
+  .pos-side{
+    top:auto; left:0; right:0; bottom:0;
+    width:100%; height:auto; max-height:min(58vh,520px);
+    border-left:0; border-top:1px solid #eef0f4;
+    border-radius:16px 16px 0 0; z-index:1050;
+    box-shadow:0 -8px 28px rgba(16,24,40,.14);
+  }
+  .pos-side-foot{max-height:none;}
+  .pos-side.pay-open{max-height:min(78vh,680px);}
+  .pos-side.pay-open .pos-side-foot{max-height:none;flex:1 1 auto;min-height:0;}
   .pos-actions{grid-template-columns:1fr;}
   #payPanel .btn-group{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
   #payPanel .btn-group>.btn{border-radius:8px!important;margin:0!important;}
@@ -608,6 +637,8 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
 });
 var cart = {};
+var cartExpanded = false;
+var CART_PREVIEW_LIMIT = 3;
 try {
     (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) {
         var id = String(c.product_id);
@@ -800,8 +831,13 @@ function updateTotals() {
 
 function render() {
     var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
+    var moreBtn = document.getElementById('cartViewAll');
     wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4">Tap a product to add it. Type qty for retail items and/or wholesale packs.</div>';
-    ids.forEach(function (id) {
+    var visibleIds = ids;
+    if (ids.length > CART_PREVIEW_LIMIT && !cartExpanded) {
+        visibleIds = ids.slice(0, CART_PREVIEW_LIMIT);
+    }
+    visibleIds.forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
         if (!p || !c) return;
         var retailMax = Math.max(c.retail || 0, maxRetail(id));
@@ -833,6 +869,17 @@ function render() {
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);
     });
+    if (moreBtn) {
+        if (ids.length > CART_PREVIEW_LIMIT) {
+            moreBtn.style.display = 'block';
+            moreBtn.textContent = cartExpanded
+                ? 'Show fewer items'
+                : ('View all details (' + ids.length + ' items)');
+        } else {
+            moreBtn.style.display = 'none';
+            cartExpanded = false;
+        }
+    }
     var empty = !cartHasItems();
     document.getElementById('holdBtn').disabled = empty;
     document.getElementById('checkoutBtn').disabled = empty;
@@ -966,14 +1013,26 @@ var offerBanner = document.getElementById('offerBanner');
 if (offerBanner) { offerBanner.addEventListener('click', function () { selectDim('offers'); }); }
 
 document.getElementById('holdBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'hold'; document.getElementById('orderForm').submit(); });
+var cartViewAll = document.getElementById('cartViewAll');
+if (cartViewAll) {
+    cartViewAll.addEventListener('click', function () {
+        cartExpanded = !cartExpanded;
+        render();
+        if (cartExpanded) {
+            var cartEl = document.getElementById('cartRows');
+            if (cartEl) cartEl.scrollTop = 0;
+        }
+    });
+}
 document.getElementById('checkoutBtn').addEventListener('click', function () {
     document.getElementById('formAction').value = 'pay';
     document.getElementById('cartButtons').style.display = 'none';
     document.getElementById('payPanel').style.display = 'block';
-    var side = document.querySelector('.pos-side');
+    var side = document.getElementById('posSide') || document.querySelector('.pos-side');
     if (side) {
         side.classList.add('pay-open');
-        side.scrollIntoView({block: 'start', behavior: 'smooth'});
+        var foot = document.getElementById('posSideFoot');
+        if (foot) foot.scrollTop = foot.scrollHeight;
     }
 });
 
