@@ -56,26 +56,29 @@ function store_handle_image(array $file): array
 
 function store_package_fields(array $row, array $units): array
 {
-    $receiveUnit = in_array($row['unit'] ?? '', $units, true) ? $row['unit'] : 'piece';
+    $receiveUnit = in_array($row['unit'] ?? '', $units, true) ? $row['unit'] : 'carton';
+    if ($receiveUnit === 'piece') {
+        $receiveUnit = 'pack';
+    }
     $packageQty = max(0, (float) ($row['package_quantity'] ?? 0));
     $inside = max(0, (float) ($row['units_per_package'] ?? 0));
+    $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
+    $packageWholesale = max(0, (float) ($row['wholesale_price'] ?? 0));
+    $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
     if ($packageQty <= 0 || $inside <= 0) {
         return [
-            'quantity' => (float) ($row['quantity'] ?? 0),
+            'quantity' => 0,
             'faulty_quantity' => max(0, (float) ($row['faulty_quantity'] ?? 0)),
-            'unit' => $receiveUnit,
-            'buying_price' => (float) ($row['buying_price'] ?? 0),
-            'package_buying_price' => null,
-            'wholesale_price' => $row['wholesale_price'] ?? '',
-            'package_unit' => null,
-            'package_quantity' => null,
-            'units_per_package' => 1,
-            'package_price' => null,
+            'unit' => $innerUnit,
+            'buying_price' => 0,
+            'package_buying_price' => $packageCost > 0 ? $packageCost : null,
+            'wholesale_price' => '',
+            'package_unit' => $receiveUnit,
+            'package_quantity' => $packageQty > 0 ? $packageQty : null,
+            'units_per_package' => $inside > 0 ? $inside : 1,
+            'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
         ];
     }
-    $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
-    $packageWholesale = ($row['wholesale_price'] ?? '') !== '' ? max(0, (float) $row['wholesale_price']) : null;
-    $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
 
     return [
         'quantity' => round($packageQty * $inside, 2),
@@ -83,10 +86,10 @@ function store_package_fields(array $row, array $units): array
         'unit' => $innerUnit,
         'buying_price' => round($packageCost / $inside, 2),
         'package_buying_price' => $packageCost,
-        'wholesale_price' => $packageWholesale !== null ? round($packageWholesale / $inside, 2) : '',
+        'wholesale_price' => round($packageWholesale / $inside, 2),
         'package_unit' => $receiveUnit,
         'package_quantity' => $packageQty,
-        'units_per_package' => $inside > 0 ? $inside : 1,
+        'units_per_package' => $inside,
         'package_price' => $packageWholesale,
     ];
 }
@@ -100,19 +103,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $items = [];
         foreach ($_POST['items'] ?? [] as $i => $row) {
             $pkg = store_package_fields($row, $units);
-            if ($pkg['package_unit'] !== null) {
-                if (($pkg['package_buying_price'] ?? 0) <= 0) {
-                    $error = 'Enter the package buying price for packaged products.';
-                    break;
-                }
-                if (($pkg['package_price'] ?? 0) <= 0) {
-                    $error = 'Enter the package wholesale price for packaged products.';
-                    break;
-                }
+            $nameProbe = trim((string) ($row['title'] ?? ''));
+            $productChoiceProbe = (int) ($row['product_choice'] ?? 0);
+            $hasContent = $nameProbe !== '' || $productChoiceProbe > 0
+                || (float) ($row['package_quantity'] ?? 0) > 0
+                || (float) ($row['buying_price'] ?? 0) > 0;
+            if (!$hasContent) {
+                continue;
+            }
+            if ((float) ($row['package_quantity'] ?? 0) <= 0) {
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter how many packages (cartons/bales) you received.';
+                break;
+            }
+            if ((float) ($row['units_per_package'] ?? 0) <= 0) {
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter how many items are inside each package.';
+                break;
+            }
+            if (($pkg['package_buying_price'] ?? 0) <= 0) {
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package buying price.';
+                break;
+            }
+            if ($productChoiceProbe <= 0 && ($pkg['package_price'] ?? 0) <= 0) {
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package wholesale price.';
+                break;
+            }
+            if ($productChoiceProbe <= 0 && (float) ($row['selling_price'] ?? 0) <= 0) {
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the retail price of a single item inside.';
+                break;
             }
             $qty = (float) $pkg['quantity'];
             if ($qty <= 0) {
-                continue;
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Packages × items inside must be greater than zero.';
+                break;
             }
             $productId = (int) ($row['product_choice'] ?? 0);
             $existing = $productId > 0 ? $P->find($productId) : null;
@@ -155,8 +177,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'colors' => '',
                 'quantity' => $qty,
                 'faulty_quantity' => $pkg['faulty_quantity'],
-                'buying_price' => ($row['buying_price'] ?? '') !== '' ? $pkg['buying_price'] : ($existing['buying_price'] ?? 0),
-                'package_buying_price' => ($row['buying_price'] ?? '') !== '' ? $pkg['package_buying_price'] : ($existing['package_buying_price'] ?? null),
+                'buying_price' => $pkg['buying_price'],
+                'package_buying_price' => $pkg['package_buying_price'],
                 'retail_price' => ($row['selling_price'] ?? '') !== '' ? $row['selling_price'] : ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
                 'wholesale_price' => ($row['wholesale_price'] ?? '') !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? $existing['selling_price'] ?? 0),
                 'offer_price' => $existing ? '' : ($row['offer_price'] ?? ''),
@@ -169,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$error) {
             $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' stored. Generate an invoice when you want to move them into inventory.';
+                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' in Store warehouse. Select them below and generate an internal transfer invoice to move stock into shop Inventory.';
                 header('Location: ' . public_url('super/store/'));
                 exit;
             }
@@ -180,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ids = is_array($ids) ? $ids : [];
         $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_qty'] ?? []);
         if ($res['ok']) {
-            $_SESSION['flash']['success'] = 'Store invoice ' . $res['invoice_number'] . ' generated. Products moved to normal inventory.';
+            $_SESSION['flash']['success'] = 'Internal transfer invoice ' . $res['invoice_number'] . ' generated. Selected products moved from Store into shop Inventory.';
             header('Location: ' . public_url('super/store/invoice.php?id=' . (int) $res['invoice_id']));
             exit;
         }
@@ -224,7 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'delete_store_invoice') {
         $res = $SP->deleteInvoice((int) ($_POST['invoice_id'] ?? 0));
         if ($res['ok']) {
-            $_SESSION['flash']['success'] = 'Store invoice deleted and products returned to store.';
+            $_SESSION['flash']['success'] = 'Internal transfer invoice deleted and products returned to Store warehouse.';
             header('Location: ' . public_url('super/store/'));
             exit;
         }
@@ -234,24 +256,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $pending = $SP->pending();
 $invoices = $SP->invoices(30);
-$page_title = 'Store';
+$page_title = 'Store warehouse';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
   <div>
-    <h1 class="h5 fw-bold mb-1">Store products</h1>
-    <p class="text-muted small mb-0">Record bulk products into store first. Store invoices later transfer them to normal inventory for selling.</p>
+    <h1 class="h5 fw-bold mb-1">Store · main warehouse</h1>
+    <p class="text-muted small mb-0">Receive stock here first. Generate an <strong>internal transfer invoice</strong> to move selected products into shop Inventory for selling — balances stay tracked for capital.</p>
   </div>
-  <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/stationery/new.php'); ?>"><i class="fas fa-box-open me-1"></i>Record one</a>
+    <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/stock/new.php'); ?>"><i class="fas fa-boxes-stacked me-1"></i>Record in bulk</a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-store me-1"></i>Shop Inventory</a>
+  </div>
 </div>
 
 <form method="post" enctype="multipart/form-data" id="storeForm" novalidate>
   <input type="hidden" name="action" value="store">
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
-      <h2 class="h5 mb-3">This store batch</h2>
+      <h2 class="h5 mb-3">Warehouse batch</h2>
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
@@ -271,7 +297,7 @@ ob_start();
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Products received into store</h2>
+        <h2 class="h5 mb-0">Products received into warehouse</h2>
         <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"><i class="fas fa-plus me-1"></i>Add another product</button>
       </div>
       <div id="rows"></div>
@@ -288,21 +314,22 @@ ob_start();
     </div>
   </div>
 
-  <button class="btn btn-primary btn-lg mb-4"><i class="fas fa-box-archive me-1"></i>Save products to store</button>
+  <button class="btn btn-primary btn-lg mb-4"><i class="fas fa-box-archive me-1"></i>Save products to Store warehouse</button>
 </form>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
   <div class="px-4 py-3 border-bottom bg-white">
-    <h2 class="h6 fw-bold mb-0">Stored products waiting for invoice</h2>
+    <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select to transfer into shop Inventory</h2>
+    <p class="text-muted small mb-0 mt-1">Tick products, set transfer qty, then generate an internal transfer invoice. Stock moves Store → Inventory automatically.</p>
   </div>
   <?php if (!$pending): ?>
-    <div class="p-4 text-muted small">No products in store right now.</div>
+    <div class="p-4 text-muted small">No products in Store right now. Use Record product / Record in bulk, or the form above.</div>
   <?php else: ?>
   <form method="post">
     <input type="hidden" name="action" value="invoice">
     <div class="table-responsive">
       <table class="table align-middle mb-0">
-        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">Available</th><th style="width:120px;">Invoice qty</th><th class="text-end">Cost</th><th class="text-end">Line</th><th></th></tr></thead>
+        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">Available</th><th style="width:120px;">Transfer qty</th><th class="text-end">Cost</th><th class="text-end">Line</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($pending as $p): $line = (float) $p['quantity'] * (float) $p['buying_price']; ?>
           <tr>
@@ -350,10 +377,10 @@ ob_start();
     </div>
     <div class="p-3 border-top bg-light">
       <div class="row g-2 align-items-end">
-        <div class="col-md-4"><label class="form-label small mb-1">Invoice to</label><input name="invoice_to" class="form-control form-control-sm" placeholder="Supplier / store name"></div>
+        <div class="col-md-4"><label class="form-label small mb-1">Transfer to (shop / note)</label><input name="invoice_to" class="form-control form-control-sm" placeholder="e.g. Main shop floor"></div>
         <div class="col-md-4"><label class="form-label small mb-1">Notes</label><input name="notes" class="form-control form-control-sm" placeholder="Optional"></div>
-        <div class="col-md-2 fw-bold">Total: <span id="selectedTotal">KES 0</span></div>
-        <div class="col-md-2"><button class="btn btn-primary btn-sm w-100" id="invoiceBtn" disabled>Generate invoice</button></div>
+        <div class="col-md-2 fw-bold">Capital: <span id="selectedTotal">KES 0</span></div>
+        <div class="col-md-2"><button class="btn btn-primary btn-sm w-100" id="invoiceBtn" disabled>Generate transfer invoice</button></div>
       </div>
     </div>
   </form>
@@ -361,12 +388,12 @@ ob_start();
 </div>
 
 <div class="card border-0 shadow-sm" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom bg-white"><h2 class="h6 fw-bold mb-0">Store invoices</h2></div>
+  <div class="px-4 py-3 border-bottom bg-white"><h2 class="h6 fw-bold mb-0">Internal transfer invoices (Store → Inventory)</h2></div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>To</th><th>Items</th><th>When</th><th class="text-end">Total</th><th></th></tr></thead>
+      <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>To</th><th>Items</th><th>When</th><th class="text-end">Capital moved</th><th></th></tr></thead>
       <tbody>
-        <?php if (!$invoices): ?><tr><td colspan="6" class="text-center text-muted py-4">No store invoices yet.</td></tr><?php endif; ?>
+        <?php if (!$invoices): ?><tr><td colspan="6" class="text-center text-muted py-4">No internal transfer invoices yet.</td></tr><?php endif; ?>
         <?php foreach ($invoices as $inv): ?>
         <tr>
           <td class="fw-semibold"><?php echo htmlspecialchars($inv['invoice_number']); ?></td>
@@ -376,7 +403,7 @@ ob_start();
           <td class="text-end fw-semibold">KES <?php echo number_format((float) $inv['total'], 2); ?></td>
           <td class="text-end store-actions">
             <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>">Print</a>
-            <form method="post" class="d-inline" onsubmit="return confirm('Delete this store invoice and reverse its stock transfer?');">
+            <form method="post" class="d-inline" onsubmit="return confirm('Delete this transfer invoice and reverse its stock move back to Store?');">
               <input type="hidden" name="action" value="delete_store_invoice">
               <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
               <button class="btn btn-sm btn-outline-danger">Delete</button>
@@ -471,16 +498,19 @@ ob_start();
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Received as</label>
+        <label class="form-label small mb-1">Received as <span class="text-danger">*</span></label>
         <select name="items[__I__][unit]" class="form-select form-select-sm unitSelect">
-          <?php foreach ($units as $u): ?>
-            <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
+          <?php
+            $packageUnits = array_values(array_filter($units, fn($u) => $u !== 'piece'));
+            foreach ($packageUnits as $u):
+          ?>
+            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $u === 'carton' ? 'selected' : ''; ?>><?php echo htmlspecialchars($u); ?></option>
           <?php endforeach; ?>
         </select>
       </div>
-      <div class="col-12 mt-2 packageFields" style="display:none;">
+      <div class="col-12 mt-2 packageFields">
         <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
-          <div class="small fw-semibold mb-2"><i class="fas fa-boxes-stacked me-1 text-primary"></i>Package contents</div>
+          <div class="small fw-semibold mb-2 text-danger"><i class="fas fa-boxes-stacked me-1"></i>Package details (required)</div>
           <div class="row g-2">
             <div class="col-6 col-sm-3">
               <label class="form-label small mb-1 packageQtyLabel">Number of packages</label>
@@ -663,9 +693,9 @@ ob_start();
       row.querySelector('.qtyLabel').textContent = 'Qty to store';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';
-      note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in inventory' +
+      note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in shop catalogue' +
         (bits.length ? ' — ' + bits.join(' · ') : '') +
-        '. Current balance: <strong>' + (item.balance != null ? item.balance : '') + '</strong>. It will transfer after invoice.';
+        '. Shop balance: <strong>' + (item.balance != null ? item.balance : '') + '</strong>. Saving here keeps it in Store until you generate a transfer invoice.';
       recalc();
     }
 

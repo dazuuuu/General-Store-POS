@@ -47,7 +47,8 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
     <?php if ($poBox): ?><div style="font-size:15px;"><?php echo htmlspecialchars($poBox); ?></div><?php endif; ?>
     <?php if ($location): ?><div style="font-size:15px;"><?php echo htmlspecialchars($location); ?></div><?php endif; ?>
     <?php if ($phone): ?><div style="font-size:16px;">TEL: <?php echo htmlspecialchars($phone); ?></div><?php endif; ?>
-    <div style="font-size:16px;margin-top:5px;">Store invoice <?php echo htmlspecialchars($invoice['invoice_number']); ?></div>
+    <div style="font-size:16px;margin-top:5px;">Internal transfer <?php echo htmlspecialchars($invoice['invoice_number']); ?></div>
+    <div style="font-size:14px;">Store warehouse → shop Inventory</div>
     <div style="font-size:15px;"><?php echo date('j M Y, g:i a', strtotime($invoice['created_at'])); ?></div>
     <?php if (!empty($invoice['invoice_to'])): ?><div style="font-size:15px;">To: <?php echo htmlspecialchars($invoice['invoice_to']); ?></div><?php endif; ?>
   </div>
@@ -69,7 +70,7 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
 </div>
 <div class="actions">
   <button class="btn btn-primary w-100 mb-2" onclick="window.print()">Print / Download invoice</button>
-  <a class="btn btn-link w-100" href="<?php echo public_url('super/store/'); ?>">Back to store</a>
+  <a class="btn btn-link w-100" href="<?php echo public_url('super/store/'); ?>">Back to Store warehouse</a>
 </div>
 </body>
 </html>

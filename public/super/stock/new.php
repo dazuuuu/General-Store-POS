@@ -9,7 +9,8 @@ $pdo = Database::pdo();
 $SUP = new Models\SupplierModel($pdo);
 $C   = new Models\CategoryModel($pdo);
 $BA  = new Models\BookAttributeModel($pdo);
-$SI  = new Models\StockIntakeModel($pdo);
+$SP  = new Models\StoreProductModel($pdo);
+$P   = new Models\ProductModel($pdo);
 
 $base = public_url('super/stock/new.php');
 $apiBase = public_url('api/inventory/');
@@ -146,21 +147,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $remark = trim($row['remark'] ?? '');
             $unit = $pkg['unit'];
+            $batchNotes = trim((string) ($_POST['notes'] ?? ''));
+            $lineNotes = $remark !== '' ? $remark : $batchNotes;
 
             if ($productChoice !== '') {
+                $existing = $P->find((int) $productChoice);
+                if (!$existing || (int) $existing['tenant_id'] !== (int) TenantContext::tenantId()) {
+                    $error = ($title !== '' ? $title . ': ' : '') . 'Matched inventory product was not found.';
+                    break;
+                }
                 $items[] = [
-                    'mode'            => 'restock',
-                    'product_id'      => (int) $productChoice,
-                    'quantity'        => $qty,
-                    'faulty_quantity' => $faulty,
-                    'unit'            => $unit,
-                    'package_unit'    => $pkg['package_unit'],
+                    'product_id' => (int) $existing['id'],
+                    'name' => $existing['name'],
+                    'category_id' => (int) ($existing['category_id'] ?? 0),
+                    'brand_id' => (int) ($existing['brand_id'] ?? 0),
+                    'supplier_id' => $supplierId,
+                    'barcode' => $existing['barcode'] ?? '',
+                    'unit' => $unit,
+                    'package_unit' => $pkg['package_unit'],
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
-                    'package_price'   => $pkg['package_price'],
-                    'buying_price'    => $pkg['buying_price'],
+                    'package_price' => $pkg['package_price'],
                     'package_buying_price' => $pkg['package_buying_price'],
-                    'remark'          => $remark,
+                    'colors' => '',
+                    'quantity' => $qty,
+                    'faulty_quantity' => $faulty,
+                    'buying_price' => $pkg['buying_price'],
+                    'retail_price' => $existing['retail_price'] ?? $existing['selling_price'] ?? 0,
+                    'wholesale_price' => $pkg['wholesale_price'] !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? 0),
+                    'offer_price' => '',
+                    'offer_starts_at' => '',
+                    'offer_ends_at' => '',
+                    'image_path' => '',
+                    'notes' => $lineNotes,
                 ];
                 continue;
             }
@@ -172,29 +191,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$img['ok']) { $error = $title . ': ' . $img['error']; break; }
 
             $items[] = [
-                'mode'            => 'new',
-                'product_type'    => 'product',
-                'name'            => $title,
-                'category_id'     => (int) $C->findOrCreate($row['category'] ?? '', 'product'),
-                'brand_id'        => (int) $BA->findOrCreate('brand', $row['brand'] ?? ''),
-                'barcode'         => trim($row['barcode'] ?? ''),
-                'unit'            => $unit,
-                'package_unit'    => $pkg['package_unit'],
+                'product_id' => 0,
+                'name' => $title,
+                'category_id' => (int) $C->findOrCreate($row['category'] ?? '', 'product'),
+                'brand_id' => (int) $BA->findOrCreate('brand', $row['brand'] ?? ''),
+                'supplier_id' => $supplierId,
+                'barcode' => trim($row['barcode'] ?? ''),
+                'unit' => $unit,
+                'package_unit' => $pkg['package_unit'],
                 'package_quantity' => $pkg['package_quantity'],
                 'units_per_package' => $pkg['units_per_package'],
-                'package_price'   => $pkg['package_price'],
-                'colors'          => [],
-                'quantity'        => $qty,
-                'faulty_quantity' => $faulty,
-                'buying_price'    => $pkg['buying_price'],
+                'package_price' => $pkg['package_price'],
                 'package_buying_price' => $pkg['package_buying_price'],
-                'selling_price'   => $row['selling_price'] ?? 0,
+                'colors' => '',
+                'quantity' => $qty,
+                'faulty_quantity' => $faulty,
+                'buying_price' => $pkg['buying_price'],
+                'retail_price' => $row['selling_price'] ?? 0,
                 'wholesale_price' => $pkg['wholesale_price'],
-                'offer_price'     => $row['offer_price'] ?? '',
+                'offer_price' => $row['offer_price'] ?? '',
                 'offer_starts_at' => $row['offer_starts_at'] ?? '',
-                'offer_ends_at'   => $row['offer_ends_at'] ?? '',
-                'image_path'      => $img['path'] ?? '',
-                'remark'          => $remark,
+                'offer_ends_at' => $row['offer_ends_at'] ?? '',
+                'image_path' => $img['path'] ?? '',
+                'notes' => $lineNotes,
             ];
         }
 
@@ -203,22 +222,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$error) {
-            $res = $SI->create([
-                'supplier_id' => $supplierId,
-                'staff_id'    => TenantContext::userId(),
-                'notes'       => $_POST['notes'] ?? '',
-            ], $items);
+            $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = 'Stock recorded — ' . count($items) . ' product' . (count($items) === 1 ? '' : 's') . '.';
-                header('Location: ' . public_url('super/inventory/'));
+                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' saved to Store (warehouse). Generate an internal transfer invoice to move them into shop Inventory.';
+                header('Location: ' . public_url('super/store/'));
                 exit;
             }
-            $error = $res['errors']['_'] ?? (reset($res['errors']) ?: 'Could not record this delivery.');
+            $error = $res['error'] ?? 'Could not record this delivery to Store.';
         }
     }
 }
 
-$page_title = 'Record products in bulk';
+$page_title = 'Record products to Store';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
@@ -226,7 +241,8 @@ ob_start();
 <form method="post" enctype="multipart/form-data" id="stockForm" novalidate>
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
-      <h2 class="h5 mb-3">This delivery</h2>
+      <h2 class="h5 mb-3">Warehouse delivery (Store)</h2>
+      <p class="text-muted small mb-3">Products land in the <strong>Store warehouse</strong> first. Use <a href="<?php echo public_url('super/store/'); ?>">Store → Generate invoice</a> to transfer into shop Inventory for selling — no double entry.</p>
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
@@ -246,7 +262,7 @@ ob_start();
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Products received</h2>
+        <h2 class="h5 mb-0">Products received into Store</h2>
         <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"><i class="fas fa-plus me-1"></i>Add another product</button>
       </div>
       <div id="rows"></div>
@@ -263,7 +279,7 @@ ob_start();
     </div>
   </div>
 
-  <button class="btn btn-primary btn-lg"><i class="fas fa-boxes-stacked me-1"></i>Record products in bulk</button>
+  <button class="btn btn-primary btn-lg"><i class="fas fa-boxes-stacked me-1"></i>Save products to Store warehouse</button>
 </form>
 
 <template id="rowTpl">

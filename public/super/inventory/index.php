@@ -75,13 +75,13 @@ ob_start();
 ?>
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
   <div>
-    <h1 class="h5 fw-bold mb-1">Inventory by <?php echo $groupLabels[$groupBy]; ?></h1>
-    <p class="text-muted small mb-0">Sellable stock, units, colors, VAT, and faulty/broken quantities.</p>
+    <h1 class="h5 fw-bold mb-1">Shop Inventory by <?php echo $groupLabels[$groupBy]; ?></h1>
+    <p class="text-muted small mb-0">Sellable stock for the till. New deliveries go to <a href="<?php echo $storeUrl; ?>">Store warehouse</a> first — transfer here with an internal invoice so you never record twice.</p>
   </div>
   <?php if ($canEdit): ?>
-    <a href="<?php echo $storeUrl; ?>" class="btn btn-outline-secondary btn-sm"><i class="fas fa-box-archive me-1"></i>Store</a>
-    <a href="<?php echo $productUrl; ?>" class="btn btn-outline-primary btn-sm"><i class="fas fa-box-open me-1"></i>Record product</a>
-    <a href="<?php echo $stockUrl; ?>" class="btn btn-primary btn-sm"><i class="fas fa-boxes-stacked me-1"></i>Record in bulk</a>
+    <a href="<?php echo $storeUrl; ?>" class="btn btn-outline-secondary btn-sm"><i class="fas fa-box-archive me-1"></i>Store warehouse</a>
+    <a href="<?php echo $productUrl; ?>" class="btn btn-outline-primary btn-sm"><i class="fas fa-box-open me-1"></i>Record to Store</a>
+    <a href="<?php echo $stockUrl; ?>" class="btn btn-primary btn-sm"><i class="fas fa-boxes-stacked me-1"></i>Bulk to Store</a>
   <?php endif; ?>
 </div>
 

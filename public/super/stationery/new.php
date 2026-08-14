@@ -8,7 +8,8 @@ $pdo = Database::pdo();
 $SUP = new Models\SupplierModel($pdo);
 $C   = new Models\CategoryModel($pdo);
 $BA  = new Models\BookAttributeModel($pdo);
-$SI  = new Models\StockIntakeModel($pdo);
+$SP  = new Models\StoreProductModel($pdo);
+$P   = new Models\ProductModel($pdo);
 $units = Models\ProductModel::UNITS;
 $apiBase = public_url('api/inventory/');
 
@@ -107,29 +108,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = $img['error'];
         } else {
             $productChoice = (int) ($_POST['product_choice'] ?? 0);
-            if ($productChoice > 0) {
+            $existing = $productChoice > 0 ? $P->find($productChoice) : null;
+            if ($existing && (int) $existing['tenant_id'] !== (int) TenantContext::tenantId()) {
+                $existing = null;
+                $productChoice = 0;
+            }
+            $batchNotes = trim((string) ($_POST['notes'] ?? ''));
+            $lineNotes = trim((string) ($_POST['remark'] ?? '')) ?: $batchNotes;
+            if ($existing) {
                 $items = [[
-                    'mode' => 'restock',
-                    'product_id' => $productChoice,
-                    'quantity' => $qty,
-                    'faulty_quantity' => $faulty,
+                    'product_id' => (int) $existing['id'],
+                    'name' => $existing['name'],
+                    'category_id' => (int) ($existing['category_id'] ?? 0),
+                    'brand_id' => (int) ($existing['brand_id'] ?? 0),
+                    'supplier_id' => $supplierId,
+                    'barcode' => $existing['barcode'] ?? '',
                     'unit' => $unit,
                     'package_unit' => $pkg['package_unit'],
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
                     'package_buying_price' => $pkg['package_buying_price'],
-                    'colors' => [],
+                    'colors' => '',
+                    'quantity' => $qty,
+                    'faulty_quantity' => $faulty,
                     'buying_price' => $pkg['buying_price'],
-                    'remark' => trim($_POST['remark'] ?? ''),
+                    'retail_price' => ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
+                    'wholesale_price' => $pkg['wholesale_price'] !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? 0),
+                    'offer_price' => '',
+                    'offer_starts_at' => '',
+                    'offer_ends_at' => '',
+                    'image_path' => '',
+                    'notes' => $lineNotes,
                 ]];
             } else {
                 $items = [[
-                    'mode' => 'new',
-                    'product_type' => 'product',
+                    'product_id' => 0,
                     'name' => $name,
                     'category_id' => (int) $C->findOrCreate($_POST['category'] ?? '', 'product'),
                     'brand_id' => (int) $BA->findOrCreate('brand', $_POST['brand'] ?? ''),
+                    'supplier_id' => $supplierId,
                     'barcode' => trim($_POST['barcode'] ?? ''),
                     'unit' => $unit,
                     'package_unit' => $pkg['package_unit'],
@@ -137,41 +155,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
                     'package_buying_price' => $pkg['package_buying_price'],
-                    'colors' => [],
+                    'colors' => '',
                     'quantity' => $qty,
                     'faulty_quantity' => $faulty,
                     'buying_price' => $pkg['buying_price'],
-                    'selling_price' => $_POST['selling_price'] ?? 0,
+                    'retail_price' => $_POST['selling_price'] ?? 0,
                     'wholesale_price' => $pkg['wholesale_price'],
                     'offer_price' => $_POST['offer_price'] ?? '',
                     'offer_starts_at' => $_POST['offer_starts_at'] ?? '',
                     'offer_ends_at' => $_POST['offer_ends_at'] ?? '',
                     'image_path' => $img['path'] ?? '',
-                    'remark' => trim($_POST['remark'] ?? ''),
+                    'notes' => $lineNotes,
                 ]];
             }
-            $res = $SI->create([
-                'supplier_id' => $supplierId,
-                'staff_id' => TenantContext::userId(),
-                'notes' => $_POST['notes'] ?? '',
-            ], $items);
+            $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = 'Product recorded.';
-                header('Location: ' . public_url('super/inventory/'));
+                $_SESSION['flash']['success'] = 'Product saved to Store (warehouse). Generate an internal transfer invoice when you want it in shop Inventory.';
+                header('Location: ' . public_url('super/store/'));
                 exit;
             }
-            $error = $res['errors']['_'] ?? 'Could not record this product.';
+            $error = $res['error'] ?? 'Could not record this product to Store.';
         }
     }
 }
 
-$page_title = 'Record product';
+$page_title = 'Record product to Store';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-  <p class="text-muted small mb-0">Add one product at a time. Need many lines? <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products in bulk</a>.</p>
+  <p class="text-muted small mb-0">Records into the <strong>Store warehouse</strong> (not shop Inventory). Transfer later from <a href="<?php echo public_url('super/store/'); ?>">Store</a>. Need many lines? <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products in bulk</a>.</p>
 </div>
 
 <form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm" style="border-radius:12px;">
@@ -312,7 +326,7 @@ ob_start();
       </div>
     </div>
     <div class="mt-4">
-      <button class="btn btn-primary"><i class="fas fa-box-open me-1"></i>Record product</button>
+      <button class="btn btn-primary"><i class="fas fa-box-open me-1"></i>Save to Store warehouse</button>
     </div>
   </div>
 </form>

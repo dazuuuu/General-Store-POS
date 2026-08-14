@@ -8,6 +8,7 @@ $F = new Models\FinanceModel($pdo);
 $SA = new Models\SaleModel($pdo);
 $OR = new Models\OrderModel($pdo);
 $P = new Models\ProductModel($pdo);
+$SP = new Models\StoreProductModel($pdo);
 
 $allowed = ['today', 'week', 'month', 'all'];
 $period = in_array($_GET['period'] ?? '', $allowed, true) ? $_GET['period'] : 'month';
@@ -131,6 +132,10 @@ $moneyIn = round($salesCollected + $otherRevenue, 2);
 $moneyOut = round($expenseTotal + $cogs + $damagedLoss, 2);
 $netProfit = round($grossProfit + $saleCharges + $otherRevenue - $expenseTotal - $damagedLoss, 2);
 
+$capital = $SP->capitalSummary();
+$transferTotal = $SP->transferTotalForPeriod($period);
+$transferInvoices = $SP->transfersForPeriod($period, 40);
+
 // Combined flow rows for the ledger table.
 $flow = [];
 foreach ($salesRows as $s) {
@@ -177,6 +182,16 @@ foreach ($expenses as $e) {
         'in' => 0.0,
         'out' => (float) $e['amount'],
         'note' => '',
+    ];
+}
+foreach ($transferInvoices as $inv) {
+    $flow[] = [
+        'when' => $inv['created_at'] ?? '',
+        'type' => 'Store → Inventory',
+        'detail' => ($inv['invoice_number'] ?? 'Transfer') . ($inv['invoice_to'] ? ' · ' . $inv['invoice_to'] : ''),
+        'in' => 0.0,
+        'out' => 0.0,
+        'note' => 'Capital moved KES ' . number_format((float) ($inv['total'] ?? 0), 0) . ' · ' . (int) ($inv['item_count'] ?? 0) . ' lines',
     ];
 }
 usort($flow, fn($a, $b) => strtotime($b['when'] ?? 'now') <=> strtotime($a['when'] ?? 'now'));
@@ -258,6 +273,45 @@ ob_start();
       <div class="text-muted small text-uppercase fw-semibold">Damaged stock loss</div>
       <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($damagedLoss, 0); ?></div>
       <div class="text-muted" style="font-size:.7rem;">Faulty × buying price</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
+      <div class="text-muted small text-uppercase fw-semibold">Store warehouse capital</div>
+      <div class="h5 mb-0 fw-bold">KES <?php echo number_format((float) ($capital['warehouse']['capital'] ?? 0), 0); ?></div>
+      <div class="text-muted" style="font-size:.7rem;"><a href="<?php echo public_url('super/store/'); ?>">Store</a> · <?php echo (int) ($capital['warehouse']['lines'] ?? 0); ?> lines waiting</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
+      <div class="text-muted small text-uppercase fw-semibold">Shop inventory capital</div>
+      <div class="h5 mb-0 fw-bold">KES <?php echo number_format((float) ($capital['shop']['capital'] ?? 0), 0); ?></div>
+      <div class="text-muted" style="font-size:.7rem;"><a href="<?php echo public_url('super/inventory/'); ?>">Inventory</a> · sellable stock</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
+      <div class="text-muted small text-uppercase fw-semibold">Transfers this period</div>
+      <div class="h5 mb-0 fw-bold">KES <?php echo number_format($transferTotal, 0); ?></div>
+      <div class="text-muted" style="font-size:.7rem;">Store → Inventory capital moved</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
+      <div class="text-muted small text-uppercase fw-semibold">Total stock capital</div>
+      <div class="h5 mb-0 fw-bold">KES <?php echo number_format((float) ($capital['total_capital'] ?? 0), 0); ?></div>
+      <div class="text-muted" style="font-size:.7rem;">Warehouse + shop buying cost</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;"><div class="card-body p-3">
+      <div class="text-muted small">Internal transfer invoices move capital from Store warehouse into shop Inventory without recording products twice. Cash P&amp;L still comes from sales, expenses, and deposits.</div>
     </div></div>
   </div>
 </div>
@@ -352,6 +406,39 @@ ob_start();
               </tr>
             <?php endforeach; endif; ?>
           </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
+      <div class="px-4 py-3 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="h6 fw-bold mb-0">Internal transfers · Store → Inventory</h2>
+        <a class="small" href="<?php echo public_url('super/store/'); ?>">Open Store</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>To</th><th>When</th><th class="text-end">Lines</th><th class="text-end">Capital</th></tr></thead>
+          <tbody>
+            <?php if (!$transferInvoices): ?>
+              <tr><td colspan="5" class="text-center text-muted py-4">No warehouse transfers in this period.</td></tr>
+            <?php else: foreach ($transferInvoices as $inv): ?>
+              <tr>
+                <td class="fw-semibold small"><a href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>"><?php echo htmlspecialchars($inv['invoice_number']); ?></a></td>
+                <td class="small"><?php echo htmlspecialchars($inv['invoice_to'] ?: '—'); ?></td>
+                <td class="small text-muted"><?php echo htmlspecialchars(date('j M Y, g:i a', strtotime($inv['created_at']))); ?></td>
+                <td class="text-end small"><?php echo (int) ($inv['item_count'] ?? 0); ?></td>
+                <td class="text-end fw-semibold small">KES <?php echo number_format((float) $inv['total'], 0); ?></td>
+              </tr>
+            <?php endforeach; endif; ?>
+          </tbody>
+          <?php if ($transferInvoices): ?>
+          <tfoot>
+            <tr class="border-top">
+              <th colspan="4">Capital moved this period</th>
+              <th class="text-end">KES <?php echo number_format($transferTotal, 0); ?></th>
+            </tr>
+          </tfoot>
+          <?php endif; ?>
         </table>
       </div>
     </div>

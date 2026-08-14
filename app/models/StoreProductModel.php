@@ -84,6 +84,96 @@ class StoreProductModel extends Model
         return $stmt->fetchAll();
     }
 
+    /** Warehouse capital still in Store + shop Inventory capital (buying cost). */
+    public function capitalSummary(): array
+    {
+        $tid = \TenantContext::tenantId();
+        $warehouse = ['qty' => 0.0, 'capital' => 0.0, 'lines' => 0];
+        $shop = ['qty' => 0.0, 'capital' => 0.0, 'lines' => 0];
+        try {
+            $st = $this->db->prepare(
+                "SELECT COUNT(*) AS lines,
+                        COALESCE(SUM(quantity),0) AS qty,
+                        COALESCE(SUM(quantity * COALESCE(buying_price,0)),0) AS capital
+                   FROM store_products
+                  WHERE tenant_id = ? AND status = 'stored'"
+            );
+            $st->execute([$tid]);
+            $row = $st->fetch() ?: [];
+            $warehouse = [
+                'qty' => round((float) ($row['qty'] ?? 0), 2),
+                'capital' => round((float) ($row['capital'] ?? 0), 2),
+                'lines' => (int) ($row['lines'] ?? 0),
+            ];
+        } catch (\Throwable $ignored) {
+        }
+        try {
+            $st = $this->db->prepare(
+                "SELECT COUNT(*) AS lines,
+                        COALESCE(SUM(quantity),0) AS qty,
+                        COALESCE(SUM(quantity * COALESCE(buying_price,0)),0) AS capital
+                   FROM products
+                  WHERE tenant_id = ? AND status IN ('active','draft')"
+            );
+            $st->execute([$tid]);
+            $row = $st->fetch() ?: [];
+            $shop = [
+                'qty' => round((float) ($row['qty'] ?? 0), 2),
+                'capital' => round((float) ($row['capital'] ?? 0), 2),
+                'lines' => (int) ($row['lines'] ?? 0),
+            ];
+        } catch (\Throwable $ignored) {
+        }
+        return [
+            'warehouse' => $warehouse,
+            'shop' => $shop,
+            'total_capital' => round($warehouse['capital'] + $shop['capital'], 2),
+        ];
+    }
+
+    /** Internal transfer invoices in a period (Store → Inventory). */
+    public function transfersForPeriod(string $period = 'all', int $limit = 100): array
+    {
+        $tid = \TenantContext::tenantId();
+        $where = $this->periodSql($period, 'si.created_at');
+        $stmt = $this->db->prepare(
+            "SELECT si.*, u.username AS created_by_name,
+                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count
+               FROM store_invoices si
+          LEFT JOIN users u ON u.id = si.created_by
+              WHERE si.tenant_id = ? AND {$where}
+           ORDER BY si.created_at DESC, si.id DESC
+              LIMIT " . (int) $limit
+        );
+        $stmt->execute([$tid]);
+        return $stmt->fetchAll();
+    }
+
+    public function transferTotalForPeriod(string $period = 'all'): float
+    {
+        $tid = \TenantContext::tenantId();
+        $where = $this->periodSql($period, 'created_at');
+        $stmt = $this->db->prepare(
+            "SELECT COALESCE(SUM(total),0) FROM store_invoices WHERE tenant_id = ? AND {$where}"
+        );
+        $stmt->execute([$tid]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    private function periodSql(string $period, string $col): string
+    {
+        if ($period === 'today') {
+            return "DATE({$col}) = CURDATE()";
+        }
+        if ($period === 'week') {
+            return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+        }
+        if ($period === 'month') {
+            return "{$col} >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+        }
+        return '1=1';
+    }
+
     public function invoice(int $id): ?array
     {
         $tid = \TenantContext::tenantId();

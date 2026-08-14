@@ -82,10 +82,10 @@ $isOn = function (string $needle) use ($uri): string {
 
         <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_VIEW) || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/inventory'); ?>" href="<?php echo public_url('super/inventory/'); ?>">
-            <i class="fas fa-warehouse"></i><span>Inventory</span>
+            <i class="fas fa-warehouse"></i><span>Shop Inventory</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/store'); ?>" href="<?php echo public_url('super/store/'); ?>">
-            <i class="fas fa-box-archive"></i><span>Store</span>
+            <i class="fas fa-box-archive"></i><span>Store warehouse</span>
         </a>
         <?php endif; ?>
         <?php if ($isOwner): ?>
@@ -107,10 +107,10 @@ $isOn = function (string $needle) use ($uri): string {
             <i class="fas fa-truck-field"></i><span>Suppliers</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">
-            <i class="fas fa-box-open"></i><span>Record product</span>
+            <i class="fas fa-box-open"></i><span>Record to Store</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">
-            <i class="fas fa-boxes-stacked"></i><span>Record products in bulk</span>
+            <i class="fas fa-boxes-stacked"></i><span>Bulk to Store</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/inventory/low-stock'); ?>" href="<?php echo public_url('super/inventory/low-stock.php'); ?>">
             <i class="fas fa-bell"></i><span>Low stock alerts</span>
@@ -118,10 +118,10 @@ $isOn = function (string $needle) use ($uri): string {
         <?php endif; ?>
         <?php if (TenantContext::can(Capabilities::STOCK_ENTER) && !TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">
-            <i class="fas fa-box-open"></i><span>Record product</span>
+            <i class="fas fa-box-open"></i><span>Record to Store</span>
         </a>
         <a class="t-link <?php echo $isOn('/super/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">
-            <i class="fas fa-boxes-stacked"></i><span>Record products in bulk</span>
+            <i class="fas fa-boxes-stacked"></i><span>Bulk to Store</span>
         </a>
         <?php endif; ?>
 
