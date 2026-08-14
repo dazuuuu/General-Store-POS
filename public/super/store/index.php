@@ -325,7 +325,7 @@ ob_start();
   <?php if (!$pending): ?>
     <div class="p-4 text-muted small">No products in Store right now. Use Record product / Record in bulk, or the form above.</div>
   <?php else: ?>
-  <form method="post">
+  <form method="post" id="transferInvoiceForm" action="">
     <input type="hidden" name="action" value="invoice">
     <div class="table-responsive">
       <table class="table align-middle mb-0">
@@ -343,9 +343,10 @@ ob_start();
                 : round((float) $p['buying_price'] * $unitsPerPkg, 2);
             $line = $availPkgs * $pkgBuy;
             $availPkgsInt = (int) floor($availPkgs + 1e-9);
+            $sid = (int) $p['id'];
           ?>
           <tr>
-            <td><input class="form-check-input store-check" type="checkbox" name="store_ids[]" value="<?php echo (int) $p['id']; ?>" data-line="<?php echo $line; ?>"></td>
+            <td><input class="form-check-input store-check" type="checkbox" name="store_ids[]" value="<?php echo $sid; ?>" form="transferInvoiceForm" data-line="<?php echo $line; ?>"></td>
             <td>
               <div class="fw-semibold"><?php echo htmlspecialchars($p['name']); ?></div>
               <div class="text-muted small"><?php echo htmlspecialchars($p['barcode'] ?: 'No barcode'); ?><?php if (!empty($p['product_id'])): ?> · matched inventory<?php endif; ?> · <?php echo rtrim(rtrim(number_format($unitsPerPkg, 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['unit']); ?> / <?php echo htmlspecialchars($pkgUnit); ?></div>
@@ -359,16 +360,16 @@ ob_start();
             </td>
             <td>
               <div class="input-group input-group-sm">
-                <input type="number" step="1" min="0" max="<?php echo (int) $availPkgsInt; ?>" name="transfer_packages[<?php echo (int) $p['id']; ?>]" class="form-control form-control-sm transfer-qty" value="" placeholder="0" data-price="<?php echo htmlspecialchars((string) $pkgBuy); ?>" data-id="<?php echo (int) $p['id']; ?>" data-units="<?php echo htmlspecialchars((string) $unitsPerPkg); ?>" data-pkg-unit="<?php echo htmlspecialchars($pkgUnit); ?>">
+                <input type="number" step="1" min="0" max="<?php echo (int) $availPkgsInt; ?>" name="transfer_packages[<?php echo $sid; ?>]" form="transferInvoiceForm" class="form-control form-control-sm transfer-qty" value="" placeholder="0" data-price="<?php echo htmlspecialchars((string) $pkgBuy); ?>" data-id="<?php echo $sid; ?>" data-units="<?php echo htmlspecialchars((string) $unitsPerPkg); ?>" data-pkg-unit="<?php echo htmlspecialchars($pkgUnit); ?>">
                 <span class="input-group-text"><?php echo htmlspecialchars($pkgUnit); ?>s</span>
               </div>
               <div class="text-muted" style="font-size:.68rem;">max <?php echo (int) $availPkgsInt; ?></div>
             </td>
             <td class="text-end">KES <?php echo number_format($pkgBuy, 2); ?></td>
-            <td class="text-end fw-semibold transfer-line" data-id="<?php echo (int) $p['id']; ?>">KES 0.00</td>
+            <td class="text-end fw-semibold transfer-line" data-id="<?php echo $sid; ?>">KES 0.00</td>
             <td class="text-end store-actions">
               <button type="button" class="btn btn-sm btn-outline-secondary edit-store"
-                data-id="<?php echo (int) $p['id']; ?>"
+                data-id="<?php echo $sid; ?>"
                 data-name="<?php echo htmlspecialchars($p['name']); ?>"
                 data-category="<?php echo htmlspecialchars($p['category_name'] ?? ''); ?>"
                 data-brand="<?php echo htmlspecialchars($p['brand_name'] ?? ''); ?>"
@@ -385,11 +386,7 @@ ob_start();
                 data-retail="<?php echo htmlspecialchars((string) $p['retail_price']); ?>"
                 data-wholesale="<?php echo htmlspecialchars((string) $p['wholesale_price']); ?>"
                 data-notes="<?php echo htmlspecialchars($p['notes'] ?? ''); ?>">Edit</button>
-              <form method="post" class="d-inline" onsubmit="return confirm('Delete this stored product?');">
-                <input type="hidden" name="action" value="delete_store_product">
-                <input type="hidden" name="id" value="<?php echo (int) $p['id']; ?>">
-                <button class="btn btn-sm btn-outline-danger">Delete</button>
-              </form>
+              <button type="submit" class="btn btn-sm btn-outline-danger" form="deleteStoreProductForm-<?php echo $sid; ?>" onclick="return confirm('Delete this stored product?');">Delete</button>
             </td>
           </tr>
           <?php endforeach; ?>
@@ -398,37 +395,45 @@ ob_start();
     </div>
     <div class="p-3 border-top bg-light">
       <div class="row g-2 align-items-end">
-        <div class="col-md-4"><label class="form-label small mb-1">Transfer to (shop / note)</label><input name="invoice_to" class="form-control form-control-sm" placeholder="e.g. Main shop floor"></div>
+        <div class="col-md-4"><label class="form-label small mb-1">Invoice to (shop / note)</label><input name="invoice_to" class="form-control form-control-sm" placeholder="e.g. Main shop floor" value="Shop Inventory"></div>
         <div class="col-md-4"><label class="form-label small mb-1">Notes</label><input name="notes" class="form-control form-control-sm" placeholder="Optional"></div>
         <div class="col-md-2 fw-bold">Capital: <span id="selectedTotal">KES 0</span></div>
-        <div class="col-md-2"><button class="btn btn-primary btn-sm w-100" id="invoiceBtn" disabled>Generate transfer invoice</button></div>
+        <div class="col-md-2"><button type="submit" class="btn btn-primary btn-sm w-100" id="invoiceBtn" disabled>Generate &amp; save invoice</button></div>
       </div>
+      <p class="text-muted small mb-0 mt-2">This creates a saved transfer invoice (<code>STR-######</code>), moves only the packages you entered into shop Inventory, and keeps the invoice on this page for printing and capital tracking.</p>
     </div>
   </form>
+  <?php foreach ($pending as $p): $sid = (int) $p['id']; ?>
+  <form method="post" id="deleteStoreProductForm-<?php echo $sid; ?>" class="d-none">
+    <input type="hidden" name="action" value="delete_store_product">
+    <input type="hidden" name="id" value="<?php echo $sid; ?>">
+  </form>
+  <?php endforeach; ?>
   <?php endif; ?>
 </div>
 
-<div class="card border-0 shadow-sm" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom bg-white"><h2 class="h6 fw-bold mb-0">Internal transfer invoices (Store → Inventory)</h2></div>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
+  <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <h2 class="h6 fw-bold mb-0">Saved transfer invoices (Store → Inventory)</h2>
+      <p class="text-muted small mb-0">Every transfer is saved as <strong>STR-######</strong>. Open Print to view or reprint.</p>
+    </div>
+  </div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>To</th><th>Items</th><th>When</th><th class="text-end">Capital moved</th><th></th></tr></thead>
+      <thead><tr class="text-muted small text-uppercase"><th>Invoice #</th><th>To</th><th>Items</th><th>When</th><th class="text-end">Capital moved</th><th></th></tr></thead>
       <tbody>
-        <?php if (!$invoices): ?><tr><td colspan="6" class="text-center text-muted py-4">No internal transfer invoices yet.</td></tr><?php endif; ?>
+        <?php if (!$invoices): ?><tr><td colspan="6" class="text-center text-muted py-4">No saved transfer invoices yet. Generate one from the warehouse list above.</td></tr><?php endif; ?>
         <?php foreach ($invoices as $inv): ?>
         <tr>
-          <td class="fw-semibold"><?php echo htmlspecialchars($inv['invoice_number']); ?></td>
+          <td class="fw-semibold"><a href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>"><?php echo htmlspecialchars($inv['invoice_number']); ?></a></td>
           <td><?php echo htmlspecialchars($inv['invoice_to'] ?: '—'); ?></td>
           <td><?php echo (int) $inv['item_count']; ?></td>
           <td class="small text-muted"><?php echo date('j M Y, g:i a', strtotime($inv['created_at'])); ?></td>
           <td class="text-end fw-semibold">KES <?php echo number_format((float) $inv['total'], 2); ?></td>
           <td class="text-end store-actions">
-            <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>">Print</a>
-            <form method="post" class="d-inline" onsubmit="return confirm('Delete this transfer invoice and reverse its stock move back to Store?');">
-              <input type="hidden" name="action" value="delete_store_invoice">
-              <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
-              <button class="btn btn-sm btn-outline-danger">Delete</button>
-            </form>
+            <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>">Open / Print</a>
+            <button type="submit" class="btn btn-sm btn-outline-danger" form="deleteStoreInvoiceForm-<?php echo (int) $inv['id']; ?>" onclick="return confirm('Delete this transfer invoice and reverse its stock move back to Store?');">Delete</button>
           </td>
         </tr>
         <?php endforeach; ?>
@@ -436,6 +441,12 @@ ob_start();
     </table>
   </div>
 </div>
+<?php foreach ($invoices as $inv): ?>
+<form method="post" id="deleteStoreInvoiceForm-<?php echo (int) $inv['id']; ?>" class="d-none">
+  <input type="hidden" name="action" value="delete_store_invoice">
+  <input type="hidden" name="invoice_id" value="<?php echo (int) $inv['id']; ?>">
+</form>
+<?php endforeach; ?>
 
 <div class="modal fade" id="editStoreModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -949,7 +960,38 @@ ob_start();
   var supplierInput = document.querySelector('.ta-input[data-field="supplier"]');
   if (supplierInput) attachTypeahead(supplierInput, 'supplier');
   document.querySelectorAll('.store-check').forEach(function(c){ c.addEventListener('change', refreshSelectedTotal); });
-  document.querySelectorAll('.transfer-qty').forEach(function(q){ q.addEventListener('input', refreshSelectedTotal); });
+  document.querySelectorAll('.transfer-qty').forEach(function(q){
+    q.addEventListener('input', function(){
+      var id = q.dataset.id;
+      var check = document.querySelector('.store-check[value="' + id + '"]');
+      var pkgs = Math.floor(parseFloat(q.value) || 0);
+      if (check && pkgs > 0) check.checked = true;
+      refreshSelectedTotal();
+    });
+    q.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') e.preventDefault();
+    });
+  });
+  var transferForm = document.getElementById('transferInvoiceForm');
+  if (transferForm) {
+    transferForm.addEventListener('submit', function(e){
+      var ready = 0;
+      document.querySelectorAll('.store-check').forEach(function(c){
+        if (!c.checked) return;
+        var qtyInput = document.querySelector('.transfer-qty[data-id="' + c.value + '"]');
+        var pkgs = qtyInput ? Math.floor(parseFloat(qtyInput.value) || 0) : 0;
+        if (pkgs > 0) ready++;
+      });
+      if (ready === 0) {
+        e.preventDefault();
+        alert('Select products and enter how many packages to transfer.');
+        return;
+      }
+      if (!confirm('Generate and save transfer invoice for ' + ready + ' product line(s)? Stock will move to shop Inventory and the invoice will be stored as STR-######.')) {
+        e.preventDefault();
+      }
+    });
+  }
   document.querySelectorAll('.edit-store').forEach(function(btn){
     btn.addEventListener('click', function(){
       document.getElementById('editStoreId').value = btn.dataset.id || '';

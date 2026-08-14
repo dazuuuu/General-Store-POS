@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../../app/app.php';
-PageGuard::capability(Capabilities::INVENTORY_VIEW);
+// Same staff who transfer from Store must be able to open/print the saved invoice.
+PageGuard::capability(Capabilities::STOCK_ENTER);
 
 $pdo = Database::pdo();
 $SP = new Models\StoreProductModel($pdo);

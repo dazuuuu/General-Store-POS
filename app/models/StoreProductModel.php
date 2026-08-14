@@ -312,6 +312,8 @@ class StoreProductModel extends Model
                 $copy['quantity'] = $qty;
                 $copy['transfer_packages'] = $pkgs;
                 $copy['package_quantity'] = $pkgs;
+                // Sealed packages only — do not move opened/faulty units from the warehouse.
+                $copy['faulty_quantity'] = 0;
                 $invoiceItems[] = $copy;
                 $pkgBuy = ($it['package_buying_price'] ?? '') !== '' && (float) $it['package_buying_price'] > 0
                     ? (float) $it['package_buying_price']
@@ -324,17 +326,25 @@ class StoreProductModel extends Model
             }
 
             $db->prepare('INSERT INTO store_invoices (tenant_id, invoice_number, invoice_to, total, notes, created_by) VALUES (?,?,?,?,?,?)')
-               ->execute([$tid, 'PENDING', trim($invoiceTo) ?: null, round($subtotal, 2), trim($notes) ?: null, $staffId]);
+               ->execute([$tid, 'PENDING', trim($invoiceTo) ?: 'Shop Inventory', round($subtotal, 2), trim($notes) ?: null, $staffId]);
             $invoiceId = (int) $db->lastInsertId();
+            if ($invoiceId <= 0) {
+                $db->rollBack();
+                return ['ok' => false, 'invoice_id' => null, 'error' => 'Could not save the transfer invoice record.'];
+            }
             $number = 'STR-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT);
-            $db->prepare('UPDATE store_invoices SET invoice_number = ? WHERE id = ?')->execute([$number, $invoiceId]);
+            $db->prepare('UPDATE store_invoices SET invoice_number = ? WHERE id = ? AND tenant_id = ?')->execute([$number, $invoiceId, $tid]);
 
             foreach ($invoiceItems as $it) {
                 $productId = $this->transferOneToInventory($productModel, $it);
+                if ($productId <= 0) {
+                    throw new \RuntimeException('Transfer did not create/update an inventory product for ' . ($it['name'] ?? 'item'));
+                }
                 $qty = (float) $it['quantity'];
                 $unitPrice = (float) $it['buying_price'];
                 $unitPackageQty = max(0.01, (float) ($it['units_per_package'] ?? 1));
                 $packageQty = (float) ($it['transfer_packages'] ?? $it['package_quantity'] ?? round($qty / $unitPackageQty, 2));
+                $lineTotal = round($qty * $unitPrice, 2);
                 $db->prepare(
                     'INSERT INTO store_invoice_items
                         (tenant_id, invoice_id, store_product_id, product_id, product_name, quantity, unit, package_unit, package_quantity, units_per_package, package_price, unit_price, line_total)
@@ -342,7 +352,7 @@ class StoreProductModel extends Model
                 )->execute([
                     $tid, $invoiceId, (int) $it['id'], $productId, $it['name'], $qty, $it['unit'],
                     $it['package_unit'] ?? null, $packageQty, ($it['units_per_package'] ?? null), ($it['package_price'] ?? null),
-                    $unitPrice, round($qty * $unitPrice, 2),
+                    $unitPrice, $lineTotal,
                 ]);
                 $originalQty = 0.0;
                 $originalPkgs = 0.0;
@@ -368,14 +378,27 @@ class StoreProductModel extends Model
                 }
             }
 
+            // Confirm the invoice row really exists before committing the stock move.
+            $check = $db->prepare('SELECT id, invoice_number FROM store_invoices WHERE id = ? AND tenant_id = ? LIMIT 1');
+            $check->execute([$invoiceId, $tid]);
+            $saved = $check->fetch();
+            if (!$saved) {
+                throw new \RuntimeException('Transfer invoice was not persisted.');
+            }
+
             $db->commit();
-            return ['ok' => true, 'invoice_id' => $invoiceId, 'invoice_number' => $number, 'error' => null];
+            return [
+                'ok' => true,
+                'invoice_id' => $invoiceId,
+                'invoice_number' => (string) ($saved['invoice_number'] ?: $number),
+                'error' => null,
+            ];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) {
                 $db->rollBack();
             }
             error_log('StoreProductModel::generateInvoice failed: ' . $e->getMessage());
-            return ['ok' => false, 'invoice_id' => null, 'error' => 'Could not generate the store invoice.'];
+            return ['ok' => false, 'invoice_id' => null, 'error' => 'Could not generate and save the transfer invoice. ' . $e->getMessage()];
         }
     }
 
