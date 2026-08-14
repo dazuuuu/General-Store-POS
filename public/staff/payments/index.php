@@ -108,6 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
     $amount = round((float) ($_POST['amount_received'] ?? 0), 2);
     $mode = $_POST['payment_method'] ?? 'cash';
     $payMode = ($_POST['pay_mode'] ?? 'deposit') === 'full' ? 'full' : 'deposit';
+    $extraCharge = round(max(0, (float) ($_POST['additional_charges'] ?? 0)), 2);
+    $extraNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
     $totalDue = 0.0;
     foreach ($openRows as $inv) {
         $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
@@ -117,6 +119,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
         $totalDue += $due;
     }
     $totalDue = round($totalDue, 2);
+
+    if ($extraCharge > 0 && $extraNote === '') {
+        $error = 'Enter a reason for the extra charge (e.g. delivery, packing).';
+    } elseif ($extraCharge > 0 && !$ids) {
+        $error = 'No open invoice to attach the extra charge to.';
+    } elseif ($extraCharge > 0) {
+        $chargeRes = $O->addAdditionalCharge((int) $ids[0], $extraCharge, $extraNote);
+        if (!$chargeRes['ok']) {
+            $error = $chargeRes['error'] ?? 'Could not save the extra charge.';
+        } else {
+            $totalDue = round($totalDue + $extraCharge, 2);
+        }
+    }
+
+    if (!$error) {
     if ($payMode === 'full') {
         $amount = $totalDue;
     }
@@ -151,7 +168,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
             $fresh = $CM->find($customerId);
             $newBalance = (float) ($fresh['credit_balance'] ?? $newBalance);
         }
-        $_SESSION['flash']['success'] = 'Payment of KES ' . number_format($applied, 0) . ' recorded. Wallet balance now KES ' . number_format($newBalance, 0) . '.';
+        $msg = 'Payment of KES ' . number_format($applied, 0) . ' recorded. Wallet balance now KES ' . number_format($newBalance, 0) . '.';
+        if ($extraCharge > 0) {
+            $msg .= ' Extra charge KES ' . number_format($extraCharge, 0)
+                . ($extraNote !== '' ? ' (' . $extraNote . ')' : '')
+                . ' added as profit.';
+        }
+        $_SESSION['flash']['success'] = $msg;
         $firstId = (int) ($res['receipt_order_ids'][0] ?? 0);
         $returnQs = '?customer=' . urlencode($customerQuery !== '' ? $customerQuery : $customerLabel);
         if ($customerId > 0) { $returnQs .= '&customer_id=' . $customerId; }
@@ -164,6 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
         exit;
     }
     $error = $res['error'] ?? 'Could not record the payment.';
+    }
     $customerInvoices = $O->openInvoicesForCustomer($customerId > 0 ? $customerId : null, $customerQuery);
     $customerPayments = $O->paymentsForCustomer($customerId > 0 ? $customerId : null, $customerQuery, 50);
 }
@@ -451,6 +475,23 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         </div>
       </div>
 
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label small">Extra charge <span class="text-muted">(optional profit)</span></label>
+          <input type="number" step="0.01" min="0" name="additional_charges" id="custExtraCharge" class="form-control" value="" placeholder="0">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label small">Reason for extra charge</label>
+          <input type="text" name="additional_charges_note" id="custExtraNote" class="form-control" maxlength="255" placeholder="e.g. Delivery, packing, late fee">
+          <div class="form-text">Shown on the receipt and tracked in Finances / Dashboard as pure profit.</div>
+        </div>
+      </div>
+      <div class="small mb-3" id="custCollectOut" style="display:none;">
+        Collecting: wallet <strong id="custWalletDueLabel">KES 0</strong>
+        + charge <strong id="custChargeLabel">KES 0</strong>
+        = <strong id="custCollectTotalLabel">KES 0</strong>
+      </div>
+
       <div id="custCashBox" class="row g-2 mb-2" style="display:none;">
         <div class="col-md-6">
           <label class="form-label small">Cash given</label>
@@ -523,10 +564,14 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   var detailLabel = document.getElementById('custDetailLabel');
   var detailList = document.getElementById('custDetailList');
   var refInput = document.getElementById('custRefInput');
+  var chargeInput = document.getElementById('custExtraCharge');
+  var chargeNote = document.getElementById('custExtraNote');
   var cardTypes = <?php echo json_encode(array_values($cardTypes)); ?>;
   var banks = <?php echo json_encode(array_values($banks)); ?>;
   var saccos = <?php echo json_encode(array_values($saccos)); ?>;
   function money(n){ return 'KES ' + (Math.round(n*100)/100).toLocaleString('en-KE', {maximumFractionDigits:0}); }
+  function chargeAmt(){ return Math.max(0, Math.round((parseFloat(chargeInput && chargeInput.value)||0) * 100) / 100); }
+  function dueWithCharge(){ return Math.round((WALLET_DUE + chargeAmt()) * 100) / 100; }
   function fillList(items){
     detailList.innerHTML = '';
     (items||[]).forEach(function(v){
@@ -539,7 +584,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     var m = methodSel.value;
     cashBox.style.display = m === 'cash' ? 'flex' : 'none';
     document.getElementById('custAmountWrap').style.display = modeSel.value === 'deposit' ? '' : 'none';
-    if (modeSel.value === 'full') amountInput.value = WALLET_DUE.toFixed(2);
+    if (modeSel.value === 'full') amountInput.value = dueWithCharge().toFixed(2);
     if (m === 'cash') { detailBox.style.display = 'none'; syncHidden(); return; }
     detailBox.style.display = 'flex';
     if (m === 'mpesa' || m === 'paybill') {
@@ -573,19 +618,40 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     document.getElementById('custPaymentProvider').value = provider;
     document.getElementById('custPaymentAccountName').value = account;
     document.getElementById('custPaymentReference').value = refInput.value || '';
-    var amt = modeSel.value === 'full' ? WALLET_DUE : (parseFloat(amountInput.value)||0);
-    if (amt > WALLET_DUE) amt = WALLET_DUE;
-    var after = Math.max(0, Math.round((WALLET_DUE - amt) * 100) / 100);
+    var due = dueWithCharge();
+    var ch = chargeAmt();
+    if (modeSel.value === 'full') amountInput.value = due.toFixed(2);
+    var amt = modeSel.value === 'full' ? due : (parseFloat(amountInput.value)||0);
+    if (amt > due) amt = due;
+    var after = Math.max(0, Math.round((due - amt) * 100) / 100);
     document.getElementById('balanceAfterOut').textContent = money(after);
     document.getElementById('custPayBtn').innerHTML = '<i class="fas fa-check me-1"></i>Record ' + money(amt);
+    var collectOut = document.getElementById('custCollectOut');
+    if (collectOut) {
+      if (ch > 0) {
+        collectOut.style.display = '';
+        document.getElementById('custWalletDueLabel').textContent = money(WALLET_DUE);
+        document.getElementById('custChargeLabel').textContent = money(ch);
+        document.getElementById('custCollectTotalLabel').textContent = money(due);
+      } else {
+        collectOut.style.display = 'none';
+      }
+    }
   }
   modeSel.addEventListener('change', syncDetails);
   methodSel.addEventListener('change', syncDetails);
-  [amountInput, detailInput, refInput, document.getElementById('custCashGiven')].forEach(function(el){
+  [amountInput, detailInput, refInput, document.getElementById('custCashGiven'), chargeInput, chargeNote].forEach(function(el){
     if (el) { el.addEventListener('input', syncHidden); el.addEventListener('change', syncHidden); }
   });
   document.getElementById('customerPayForm').addEventListener('submit', function(e){
     syncHidden();
+    var ch = chargeAmt();
+    if (ch > 0 && !(chargeNote.value || '').trim()) {
+      e.preventDefault();
+      alert('Enter a reason for the extra charge.');
+      chargeNote.focus();
+      return;
+    }
     if (modeSel.value === 'deposit' && (parseFloat(amountInput.value)||0) <= 0) {
       e.preventDefault();
       alert('Enter the deposit amount.');

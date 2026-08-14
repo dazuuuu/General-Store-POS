@@ -69,6 +69,8 @@ foreach ($weekProfitRows as $pp) {
     }
 }
 $weekNetProfit = round(($weekSum['revenue'] ?? 0) - $weekCogs, 2);
+$weekExtraCharges = round((float) ($weekSum['additional_charges'] ?? 0), 2);
+$todayExtraCharges = round((float) ($todaySum['additional_charges'] ?? 0), 2);
 $damagedLoss = 0.0;
 try {
     $damagedStmt = $pdo->prepare(
@@ -187,6 +189,7 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
         <article class="metric hot"><span>Total Earnings</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todaySum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Today</small></article>
         <article class="metric"><span>Credit sales owed</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($dashCreditOwed, 0); ?></strong><small><?php echo $icon('invoice-dollar', 12); ?> <?php echo count($openTabs); ?> open</small></article>
         <article class="metric"><span>Sales Revenue</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekSum['revenue'], 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> This week</small></article>
+        <article class="metric"><span>Extra charges today</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($todayExtraCharges, 0); ?></strong><small><?php echo $icon('arrow-up', 11); ?> Pure profit</small></article>
         <article class="metric <?php echo $profitAfterLoss < 0 ? 'danger' : ''; ?>"><span>Net Profit</span><strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($profitAvailable ? $profitAfterLoss : 0, 0); ?></strong><small><?php echo $icon('chart', 12); ?> After losses</small></article>
       </section>
 
@@ -237,6 +240,11 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
               <span>Gross Profit</span>
               <strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekNetProfit, 0); ?></strong>
               <small>Revenue minus cost</small>
+            </div>
+            <div class="pnl-card profit">
+              <span>Extra charges (pure profit)</span>
+              <strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($weekExtraCharges, 0); ?></strong>
+              <small>Delivery, packing, wallet extras · today <?php echo htmlspecialchars($currency); ?> <?php echo number_format($todayExtraCharges, 0); ?></small>
             </div>
             <div class="pnl-card loss">
               <span>Sales Loss</span>

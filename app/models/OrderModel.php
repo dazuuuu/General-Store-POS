@@ -826,6 +826,80 @@ class OrderModel extends Model
      * @param int[] $orderIds
      * @return array{ok:bool,error:?string,allocations:array,receipt_order_ids:array,amount_remaining:float}
      */
+    /**
+     * Add an optional pure-profit extra charge (delivery, packing, etc.) onto an open invoice.
+     * Recalculates total + amount_due so wallet payments can collect the charge with the balance.
+     */
+    public function addAdditionalCharge(int $orderId, float $amount, string $note = ''): array
+    {
+        $amount = round(max(0, $amount), 2);
+        if ($amount <= 0) {
+            return ['ok' => true, 'order_id' => $orderId, 'added' => 0.0, 'error' => null];
+        }
+        $this->ensurePaymentSchema();
+        $tid = \TenantContext::tenantId();
+        $order = $this->find($orderId);
+        if (!$order || (int) ($order['tenant_id'] ?? 0) !== (int) $tid) {
+            return ['ok' => false, 'order_id' => $orderId, 'added' => 0.0, 'error' => 'Invoice not found.'];
+        }
+        if (($order['status'] ?? '') !== 'open') {
+            return ['ok' => false, 'order_id' => $orderId, 'added' => 0.0, 'error' => 'Extra charges can only be added on an open invoice.'];
+        }
+
+        $newCharges = round((float) ($order['additional_charges'] ?? 0) + $amount, 2);
+        $existingNote = trim((string) ($order['additional_charges_note'] ?? ''));
+        $note = trim($note);
+        if (strlen($note) > 255) {
+            $note = substr($note, 0, 255);
+        }
+        if ($note !== '') {
+            $merged = $existingNote === '' ? $note : ($existingNote . '; ' . $note);
+            if (strlen($merged) > 255) {
+                $merged = substr($merged, 0, 255);
+            }
+        } else {
+            $merged = $existingNote !== '' ? $existingNote : null;
+        }
+
+        $subtotal = (float) ($order['subtotal'] ?? 0);
+        $discount = (float) ($order['discount_amount'] ?? 0);
+        $vatRate = max(0, (float) ($order['vat_rate'] ?? 0));
+        $priced = \Pricing::totals($subtotal, $discount, $vatRate, true, $newCharges);
+        $paid = max(0, (float) ($order['amount_paid'] ?? 0));
+        $due = max(0, round($priced['total'] - $paid, 2));
+        $payStatus = $due <= 0.0001 ? 'paid' : ($paid > 0.0001 ? 'part_paid' : 'credit');
+
+        $stmt = $this->db->prepare(
+            "UPDATE orders
+                SET additional_charges = ?, additional_charges_note = ?, total = ?, vat_amount = ?,
+                    amount_due = ?, payment_status = ?
+              WHERE id = ? AND tenant_id = ? AND status = 'open'"
+        );
+        $stmt->execute([
+            $newCharges,
+            $merged,
+            $priced['total'],
+            $priced['vat_amount'],
+            $due,
+            $payStatus,
+            $orderId,
+            $tid,
+        ]);
+        if ($stmt->rowCount() < 1) {
+            return ['ok' => false, 'order_id' => $orderId, 'added' => 0.0, 'error' => 'Could not save the extra charge.'];
+        }
+
+        return [
+            'ok' => true,
+            'order_id' => $orderId,
+            'added' => $amount,
+            'additional_charges' => $newCharges,
+            'total' => $priced['total'],
+            'amount_due' => $due,
+            'error' => null,
+        ];
+    }
+
     public function applyCustomerPayment(array $orderIds, float $amount, array $payment, int $staffId): array
     {
         $amount = max(0, round($amount, 2));
