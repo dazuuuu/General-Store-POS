@@ -250,7 +250,12 @@ class StoreProductModel extends Model
             : ['ok' => false, 'error' => 'Stored product not found or already transferred.'];
     }
 
-    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $quantities = []): array
+    /**
+     * Internal transfer Store → Inventory.
+     * $packageQuantities[store_product_id] = how many sealed packages (cartons/bales) to move.
+     * Never opens a package — only whole packages. Does not default to transferring everything.
+     */
+    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = []): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         if (!$ids) {
@@ -273,20 +278,49 @@ class StoreProductModel extends Model
             $subtotal = 0.0;
             $invoiceItems = [];
             foreach ($items as $it) {
-                $available = (float) $it['quantity'];
-                $wanted = isset($quantities[(int) $it['id']]) ? (float) $quantities[(int) $it['id']] : $available;
-                $qty = min($available, max(0, $wanted));
+                $unitsPerPkg = max(0.01, (float) ($it['units_per_package'] ?? 1));
+                $availableItems = (float) $it['quantity'];
+                $availablePkgs = !empty($it['package_unit'])
+                    ? (float) ($it['package_quantity'] ?? 0)
+                    : 0.0;
+                if ($availablePkgs <= 0 && $availableItems > 0 && $unitsPerPkg > 0) {
+                    $availablePkgs = round($availableItems / $unitsPerPkg, 2);
+                }
+                if ($availablePkgs <= 0) {
+                    $db->rollBack();
+                    return ['ok' => false, 'invoice_id' => null, 'error' => ($it['name'] ?? 'Product') . ': no sealed packages left to transfer. Transfers are by package only.'];
+                }
+
+                $wantedPkgs = isset($packageQuantities[(int) $it['id']])
+                    ? (float) $packageQuantities[(int) $it['id']]
+                    : 0.0;
+                // Whole packages only — no opening cartons in the warehouse transfer.
+                $wantedPkgs = floor(max(0, $wantedPkgs) + 1e-9);
+                $pkgs = min($availablePkgs, $wantedPkgs);
+                if ($pkgs <= 0) {
+                    continue;
+                }
+                $qty = round($pkgs * $unitsPerPkg, 2);
+                if ($qty > $availableItems + 0.0001) {
+                    $qty = $availableItems;
+                    $pkgs = round($qty / $unitsPerPkg, 2);
+                }
                 if ($qty <= 0) {
                     continue;
                 }
                 $copy = $it;
                 $copy['quantity'] = $qty;
+                $copy['transfer_packages'] = $pkgs;
+                $copy['package_quantity'] = $pkgs;
                 $invoiceItems[] = $copy;
-                $subtotal += $qty * (float) $it['buying_price'];
+                $pkgBuy = ($it['package_buying_price'] ?? '') !== '' && (float) $it['package_buying_price'] > 0
+                    ? (float) $it['package_buying_price']
+                    : ((float) $it['buying_price'] * $unitsPerPkg);
+                $subtotal += $pkgs * $pkgBuy;
             }
             if (!$invoiceItems) {
                 $db->rollBack();
-                return ['ok' => false, 'invoice_id' => null, 'error' => 'Enter a transfer quantity for at least one stored product.'];
+                return ['ok' => false, 'invoice_id' => null, 'error' => 'Enter how many packages (cartons/bales) to transfer for at least one selected product.'];
             }
 
             $db->prepare('INSERT INTO store_invoices (tenant_id, invoice_number, invoice_to, total, notes, created_by) VALUES (?,?,?,?,?,?)')
@@ -300,7 +334,7 @@ class StoreProductModel extends Model
                 $qty = (float) $it['quantity'];
                 $unitPrice = (float) $it['buying_price'];
                 $unitPackageQty = max(0.01, (float) ($it['units_per_package'] ?? 1));
-                $packageQty = !empty($it['package_unit']) && $unitPackageQty > 0 ? round($qty / $unitPackageQty, 2) : null;
+                $packageQty = (float) ($it['transfer_packages'] ?? $it['package_quantity'] ?? round($qty / $unitPackageQty, 2));
                 $db->prepare(
                     'INSERT INTO store_invoice_items
                         (tenant_id, invoice_id, store_product_id, product_id, product_name, quantity, unit, package_unit, package_quantity, units_per_package, package_price, unit_price, line_total)
@@ -311,22 +345,26 @@ class StoreProductModel extends Model
                     $unitPrice, round($qty * $unitPrice, 2),
                 ]);
                 $originalQty = 0.0;
+                $originalPkgs = 0.0;
                 foreach ($items as $raw) {
                     if ((int) $raw['id'] === (int) $it['id']) {
                         $originalQty = (float) $raw['quantity'];
+                        $units = max(0.01, (float) ($raw['units_per_package'] ?? 1));
+                        $originalPkgs = (float) ($raw['package_quantity'] ?? 0);
+                        if ($originalPkgs <= 0 && $originalQty > 0) {
+                            $originalPkgs = round($originalQty / $units, 2);
+                        }
                         break;
                     }
                 }
                 $remaining = max(0, round($originalQty - $qty, 2));
-                $remainingPackageQty = !empty($it['package_unit']) && (float) ($it['units_per_package'] ?? 0) > 0
-                    ? round($remaining / (float) $it['units_per_package'], 2)
-                    : null;
+                $remainingPackageQty = max(0, round($originalPkgs - $packageQty, 2));
                 if ($remaining > 0.0001) {
                     $db->prepare('UPDATE store_products SET quantity = ?, package_quantity = ?, product_id = ? WHERE id = ? AND tenant_id = ?')
                        ->execute([$remaining, $remainingPackageQty, $productId, (int) $it['id'], $tid]);
                 } else {
-                    $db->prepare("UPDATE store_products SET status = 'transferred', quantity = ?, product_id = ?, transferred_invoice_id = ?, transferred_at = NOW() WHERE id = ? AND tenant_id = ?")
-                       ->execute([$qty, $productId, $invoiceId, (int) $it['id'], $tid]);
+                    $db->prepare("UPDATE store_products SET status = 'transferred', quantity = ?, package_quantity = ?, product_id = ?, transferred_invoice_id = ?, transferred_at = NOW() WHERE id = ? AND tenant_id = ?")
+                       ->execute([$qty, $packageQty, $productId, $invoiceId, (int) $it['id'], $tid]);
                 }
             }
 

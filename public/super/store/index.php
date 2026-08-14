@@ -200,9 +200,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'invoice') {
         $ids = $_POST['store_ids'] ?? [];
         $ids = is_array($ids) ? $ids : [];
-        $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_qty'] ?? []);
+        $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_packages'] ?? []);
         if ($res['ok']) {
-            $_SESSION['flash']['success'] = 'Internal transfer invoice ' . $res['invoice_number'] . ' generated. Selected products moved from Store into shop Inventory.';
+            $_SESSION['flash']['success'] = 'Internal transfer invoice ' . $res['invoice_number'] . ' generated. Selected packages moved from Store into shop Inventory.';
             header('Location: ' . public_url('super/store/invoice.php?id=' . (int) $res['invoice_id']));
             exit;
         }
@@ -319,8 +319,8 @@ ob_start();
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
   <div class="px-4 py-3 border-bottom bg-white">
-    <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select to transfer into shop Inventory</h2>
-    <p class="text-muted small mb-0 mt-1">Tick products, set transfer qty, then generate an internal transfer invoice. Stock moves Store → Inventory automatically.</p>
+    <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select packages to transfer into shop Inventory</h2>
+    <p class="text-muted small mb-0 mt-1">Tick products and enter how many <strong>sealed packages</strong> (cartons/bales) to move — you cannot open a package here. Only that package count is added to Inventory; the rest stays in Store.</p>
   </div>
   <?php if (!$pending): ?>
     <div class="p-4 text-muted small">No products in Store right now. Use Record product / Record in bulk, or the form above.</div>
@@ -329,22 +329,43 @@ ob_start();
     <input type="hidden" name="action" value="invoice">
     <div class="table-responsive">
       <table class="table align-middle mb-0">
-        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">Available</th><th style="width:120px;">Transfer qty</th><th class="text-end">Cost</th><th class="text-end">Line</th><th></th></tr></thead>
+        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">In warehouse</th><th style="width:140px;">Packages to transfer</th><th class="text-end">Pkg cost</th><th class="text-end">Line</th><th></th></tr></thead>
         <tbody>
-          <?php foreach ($pending as $p): $line = (float) $p['quantity'] * (float) $p['buying_price']; ?>
+          <?php foreach ($pending as $p):
+            $unitsPerPkg = max(0.01, (float) ($p['units_per_package'] ?? 1));
+            $pkgUnit = trim((string) ($p['package_unit'] ?? '')) ?: 'package';
+            $availPkgs = (float) ($p['package_quantity'] ?? 0);
+            if ($availPkgs <= 0 && (float) $p['quantity'] > 0) {
+                $availPkgs = round((float) $p['quantity'] / $unitsPerPkg, 2);
+            }
+            $pkgBuy = ($p['package_buying_price'] ?? '') !== '' && (float) $p['package_buying_price'] > 0
+                ? (float) $p['package_buying_price']
+                : round((float) $p['buying_price'] * $unitsPerPkg, 2);
+            $line = $availPkgs * $pkgBuy;
+            $availPkgsInt = (int) floor($availPkgs + 1e-9);
+          ?>
           <tr>
             <td><input class="form-check-input store-check" type="checkbox" name="store_ids[]" value="<?php echo (int) $p['id']; ?>" data-line="<?php echo $line; ?>"></td>
             <td>
               <div class="fw-semibold"><?php echo htmlspecialchars($p['name']); ?></div>
-              <div class="text-muted small"><?php echo htmlspecialchars($p['barcode'] ?: 'No barcode'); ?><?php if (!empty($p['product_id'])): ?> · matched inventory<?php endif; ?><?php if (!empty($p['package_unit'])): ?> · <?php echo rtrim(rtrim(number_format((float) ($p['package_quantity'] ?? 0), 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['package_unit']); ?><?php endif; ?></div>
+              <div class="text-muted small"><?php echo htmlspecialchars($p['barcode'] ?: 'No barcode'); ?><?php if (!empty($p['product_id'])): ?> · matched inventory<?php endif; ?> · <?php echo rtrim(rtrim(number_format($unitsPerPkg, 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['unit']); ?> / <?php echo htmlspecialchars($pkgUnit); ?></div>
             </td>
             <td class="small"><?php echo htmlspecialchars($p['supplier_name'] ?: '—'); ?></td>
             <td class="small"><?php echo htmlspecialchars($p['category_name'] ?: '—'); ?></td>
             <td class="small"><?php echo htmlspecialchars($p['brand_name'] ?: '—'); ?></td>
-            <td class="text-end"><?php echo rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['unit']); ?></td>
-            <td><input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $p['quantity']); ?>" name="transfer_qty[<?php echo (int) $p['id']; ?>]" class="form-control form-control-sm transfer-qty" value="<?php echo htmlspecialchars((string) rtrim(rtrim(number_format((float) $p['quantity'], 2, '.', ''), '0'), '.')); ?>" data-price="<?php echo (float) $p['buying_price']; ?>" data-id="<?php echo (int) $p['id']; ?>"></td>
-            <td class="text-end">KES <?php echo number_format((float) $p['buying_price'], 2); ?></td>
-            <td class="text-end fw-semibold">KES <?php echo number_format($line, 2); ?></td>
+            <td class="text-end">
+              <div class="fw-semibold"><?php echo rtrim(rtrim(number_format($availPkgs, 2), '0'), '.'); ?> <?php echo htmlspecialchars($pkgUnit); ?><?php echo $availPkgs == 1 ? '' : 's'; ?></div>
+              <div class="text-muted small"><?php echo rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['unit']); ?> sealed</div>
+            </td>
+            <td>
+              <div class="input-group input-group-sm">
+                <input type="number" step="1" min="0" max="<?php echo (int) $availPkgsInt; ?>" name="transfer_packages[<?php echo (int) $p['id']; ?>]" class="form-control form-control-sm transfer-qty" value="" placeholder="0" data-price="<?php echo htmlspecialchars((string) $pkgBuy); ?>" data-id="<?php echo (int) $p['id']; ?>" data-units="<?php echo htmlspecialchars((string) $unitsPerPkg); ?>" data-pkg-unit="<?php echo htmlspecialchars($pkgUnit); ?>">
+                <span class="input-group-text"><?php echo htmlspecialchars($pkgUnit); ?>s</span>
+              </div>
+              <div class="text-muted" style="font-size:.68rem;">max <?php echo (int) $availPkgsInt; ?></div>
+            </td>
+            <td class="text-end">KES <?php echo number_format($pkgBuy, 2); ?></td>
+            <td class="text-end fw-semibold transfer-line" data-id="<?php echo (int) $p['id']; ?>">KES 0.00</td>
             <td class="text-end store-actions">
               <button type="button" class="btn btn-sm btn-outline-secondary edit-store"
                 data-id="<?php echo (int) $p['id']; ?>"
@@ -904,18 +925,23 @@ ob_start();
   }
 
   function refreshSelectedTotal(){
-    var total = 0, checked = 0;
+    var total = 0, ready = 0;
     document.querySelectorAll('.store-check').forEach(function(c){
-      if(c.checked){
-        checked++;
-        var qty = document.querySelector('.transfer-qty[data-id="' + c.value + '"]');
-        var q = qty ? (parseFloat(qty.value) || 0) : 0;
-        var price = qty ? (parseFloat(qty.dataset.price) || 0) : 0;
-        total += q * price;
+      var qtyInput = document.querySelector('.transfer-qty[data-id="' + c.value + '"]');
+      var pkgs = qtyInput ? Math.floor(parseFloat(qtyInput.value) || 0) : 0;
+      var price = qtyInput ? (parseFloat(qtyInput.dataset.price) || 0) : 0;
+      var line = pkgs * price;
+      var lineEl = document.querySelector('.transfer-line[data-id="' + c.value + '"]');
+      if (lineEl) lineEl.textContent = money(line);
+      if (c.checked) {
+        if (pkgs > 0) {
+          ready++;
+          total += line;
+        }
       }
     });
     var out = document.getElementById('selectedTotal'); if(out) out.textContent = money(total);
-    var btn = document.getElementById('invoiceBtn'); if(btn) btn.disabled = checked === 0;
+    var btn = document.getElementById('invoiceBtn'); if(btn) btn.disabled = ready === 0;
   }
 
   document.getElementById('addRowBtn').addEventListener('click', addRow);

@@ -53,12 +53,25 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
     <?php if (!empty($invoice['invoice_to'])): ?><div style="font-size:15px;">To: <?php echo htmlspecialchars($invoice['invoice_to']); ?></div><?php endif; ?>
   </div>
   <table style="width:100%;border-collapse:collapse;font-size:16px;">
-    <tr style="border-bottom:1px solid #000;"><th style="text-align:left;">NO.</th><th style="text-align:left;">ITEM</th><th style="text-align:center;">QTY</th><th style="text-align:right;">AMT</th></tr>
-    <?php foreach ($items as $i => $it): ?>
+    <tr style="border-bottom:1px solid #000;"><th style="text-align:left;">NO.</th><th style="text-align:left;">ITEM</th><th style="text-align:center;">PACKAGES</th><th style="text-align:right;">AMT</th></tr>
+    <?php foreach ($items as $i => $it):
+      $pkgQty = (float) ($it['package_quantity'] ?? 0);
+      $pkgUnit = trim((string) ($it['package_unit'] ?? '')) ?: 'pkg';
+      $inside = (float) ($it['units_per_package'] ?? 0);
+      $itemQty = (float) ($it['quantity'] ?? 0);
+      if ($pkgQty <= 0 && $inside > 0) {
+          $pkgQty = round($itemQty / $inside, 2);
+      }
+    ?>
     <tr>
       <td style="padding:4px 4px 4px 0;vertical-align:top;"><?php echo $i + 1; ?></td>
-      <td style="padding:4px 4px 4px 0;"><?php echo htmlspecialchars($it['product_name']); ?></td>
-      <td style="padding:4px;text-align:center;"><?php echo rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.'); ?> <?php echo htmlspecialchars($it['unit'] ?? ''); ?></td>
+      <td style="padding:4px 4px 4px 0;">
+        <?php echo htmlspecialchars($it['product_name']); ?>
+        <?php if ($inside > 0): ?>
+          <div style="font-size:13px;"><?php echo rtrim(rtrim(number_format($itemQty, 2), '0'), '.'); ?> <?php echo htmlspecialchars($it['unit'] ?? ''); ?> (<?php echo rtrim(rtrim(number_format($inside, 2), '0'), '.'); ?>/<?php echo htmlspecialchars($pkgUnit); ?>)</div>
+        <?php endif; ?>
+      </td>
+      <td style="padding:4px;text-align:center;"><?php echo rtrim(rtrim(number_format($pkgQty, 2), '0'), '.'); ?> <?php echo htmlspecialchars($pkgUnit); ?><?php echo abs($pkgQty - 1) < 0.0001 ? '' : 's'; ?></td>
       <td style="padding:4px 0 4px 4px;text-align:right;"><?php echo number_format((float) $it['line_total'], 2); ?></td>
     </tr>
     <?php endforeach; ?>
