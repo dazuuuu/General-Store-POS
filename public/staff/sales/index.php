@@ -76,7 +76,16 @@ ob_start();
       </div>
     </div>
   </div>
-  <div class="col-12 col-md-6 d-flex align-items-center gap-2 flex-wrap">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold">Credit owed</div>
+        <div class="h5 mb-0 mt-1 fw-bold text-danger">KES <?php echo number_format($sum['credit_due'] ?? 0, 0); ?></div>
+        <div class="text-muted small"><?php echo (int) ($sum['credit_count'] ?? 0); ?> credit sale<?php echo (int) ($sum['credit_count'] ?? 0) !== 1 ? 's' : ''; ?></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-3 d-flex align-items-center gap-2 flex-wrap">
     <a href="<?php echo public_url('staff/dashboard/'); ?>" class="btn btn-primary"><i class="fas fa-cash-register me-1"></i>Home</a>
     <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#shareCatalogueModal">
       <i class="fas fa-share-nodes me-1"></i>Share Catalogue
@@ -121,11 +130,21 @@ ob_start();
               </td>
               <td class="small"><?php echo Models\SaleModel::itemsSummaryHtml($s['items']); ?></td>
               <td class="small"><?php
-                $pm = $s['payment_method'] ?? 'cash';
-                echo $pm === 'split' ? '<span class="badge bg-secondary">Split</span>' : ($pm === 'mpesa' ? '<span class="badge bg-success">M-Pesa</span>' : '<span class="badge bg-light text-dark">Cash</span>');
+                echo Models\SaleModel::paymentStatusBadge($s);
+                echo ' <span class="text-muted">' . htmlspecialchars(Models\SaleModel::paymentLabel($s)) . '</span>';
+                if ((float)($s['amount_due'] ?? 0) > 0.0001) {
+                    echo '<div class="text-danger" style="font-size:.7rem;">Owes KES ' . number_format((float)$s['amount_due'], 0) . '</div>';
+                }
               ?></td>
               <td class="text-end fw-semibold small">KES <?php echo number_format((float) $s['total'], 0); ?></td>
-              <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a></td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                  <a class="btn btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a>
+                  <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
+                    <a class="btn btn-outline-primary" href="<?php echo public_url('staff/returns/?receipt=' . urlencode($s['receipt_number'])); ?>">Return</a>
+                  <?php endif; ?>
+                </div>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>

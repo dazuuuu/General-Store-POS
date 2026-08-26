@@ -6,7 +6,7 @@ class CategoryModel extends Model
 {
     protected string $table = 'categories';
 
-    public const TYPES = ['subject', 'stationery'];
+    public const TYPES = ['subject', 'stationery', 'product'];
 
     public function __construct(?\PDO $db = null)
     {
@@ -21,30 +21,29 @@ class CategoryModel extends Model
     {
         try {
             $this->db->query("SELECT `type` FROM `categories` LIMIT 1");
+            try {
+                $this->db->exec("ALTER TABLE `categories` MODIFY COLUMN `type` ENUM('subject','stationery','product') NOT NULL DEFAULT 'product'");
+            } catch (\PDOException $ignored) {}
         } catch (\PDOException $e) {
             try {
-                $this->db->exec("ALTER TABLE `categories` ADD COLUMN `type` ENUM('subject','stationery') NOT NULL DEFAULT 'subject' AFTER `name`");
+                $this->db->exec("ALTER TABLE `categories` ADD COLUMN `type` ENUM('subject','stationery','product') NOT NULL DEFAULT 'product' AFTER `name`");
             } catch (\PDOException $ignored) {
-                return; // table missing entirely — nothing more to do here
+                return;
             }
-            // Widen the old (tenant_id, name) unique key to (tenant_id, type,
-            // name) so a Subject and a Stationery category can share a name.
             try {
                 $this->db->exec('ALTER TABLE `categories` DROP INDEX `uq_cat_tenant_name`');
             } catch (\PDOException $ignored) {
-                // Already gone/renamed — fine.
             }
             try {
                 $this->db->exec('ALTER TABLE `categories` ADD UNIQUE KEY `uq_cat_tenant_type_name` (`tenant_id`,`type`,`name`)');
             } catch (\PDOException $ignored) {
-                // Already exists — fine.
             }
         }
     }
 
-    public function create(string $name, ?string $imagePath = null, string $type = 'subject'): array
+    public function create(string $name, ?string $imagePath = null, string $type = 'product'): array
     {
-        $type = in_array($type, self::TYPES, true) ? $type : 'subject';
+        $type = in_array($type, self::TYPES, true) ? $type : 'product';
         $name = trim($name);
         if ($name === '') {
             return ['ok' => false, 'id' => null, 'error' => 'Category name is required.'];
@@ -116,9 +115,9 @@ class CategoryModel extends Model
     }
 
     /** Reuse the existing category for this name (within this type), or create one. Blank name -> null. */
-    public function findOrCreate(string $name, string $type = 'subject'): ?int
+    public function findOrCreate(string $name, string $type = 'product'): ?int
     {
-        $type = in_array($type, self::TYPES, true) ? $type : 'subject';
+        $type = in_array($type, self::TYPES, true) ? $type : 'product';
         $name = trim($name);
         if ($name === '') {
             return null;
@@ -137,9 +136,9 @@ class CategoryModel extends Model
     }
 
     /** Matching names for the type-ahead box, "starts with" ranked first. */
-    public function suggestions(string $q, int $limit = 8, string $type = 'subject'): array
+    public function suggestions(string $q, int $limit = 8, string $type = 'product'): array
     {
-        $type = in_array($type, self::TYPES, true) ? $type : 'subject';
+        $type = in_array($type, self::TYPES, true) ? $type : 'product';
         $tid = \TenantContext::tenantId();
         $q = trim($q);
         $stmt = $this->db->prepare(
@@ -153,10 +152,14 @@ class CategoryModel extends Model
     }
 
     /** Categories with their subcategory + product counts. */
-    public function listWithCounts(string $type = 'subject'): array
+    public function listWithCounts(string $type = 'product'): array
     {
-        $type = in_array($type, self::TYPES, true) ? $type : 'subject';
+        $type = in_array($type, self::TYPES, true) ? $type : 'product';
+        // Fall back to legacy 'subject' rows when no product categories exist yet.
         $cats = $this->all(['type' => $type], 'name ASC');
+        if (!$cats && $type === 'product') {
+            $cats = $this->all(['type' => 'subject'], 'name ASC');
+        }
         if (!$cats) {
             return [];
         }

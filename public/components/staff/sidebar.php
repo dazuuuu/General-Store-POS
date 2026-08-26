@@ -36,10 +36,19 @@ $isOn = function (string $needle) use ($uri): string {
 
         <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
         <a class="t-link <?php echo $isOn('/staff/orders/held') ? '' : $isOn('/staff/orders'); ?>" href="<?php echo public_url('staff/orders/'); ?>">
-            <i class="fas fa-receipt"></i><span>Orders</span>
+            <i class="fas fa-file-invoice-dollar"></i><span>Credit sales</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/staff/bulk'); ?>" href="<?php echo public_url('staff/bulk/'); ?>">
+            <i class="fas fa-boxes-stacked"></i><span>Bulk sales</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/staff/documents'); ?>" href="<?php echo public_url('staff/documents/'); ?>">
+            <i class="fas fa-file-lines"></i><span>Documents</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/staff/returns'); ?>" href="<?php echo public_url('staff/returns/'); ?>">
+            <i class="fas fa-rotate-left"></i><span>Returns</span>
         </a>
         <a class="t-link <?php echo $isOn('/staff/orders/held'); ?>" href="<?php echo public_url('staff/orders/held.php'); ?>">
-            <i class="fas fa-pause"></i><span>Held orders</span>
+            <i class="fas fa-pause"></i><span>Held sales</span>
         </a>
         <?php endif; ?>
 
@@ -55,26 +64,28 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <?php endif; ?>
 
-        <hr>
-
         <a class="t-link <?php echo $isOn('/staff/change-pin'); ?>" href="<?php echo public_url('staff/change-pin.php'); ?>">
             <i class="fas fa-key"></i><span>Change PIN</span>
         </a>
+    </nav>
+
+    <div class="t-sidebar-footer">
         <a class="t-link t-danger" href="<?php echo public_url('auth/logout.php'); ?>">
             <i class="fas fa-arrow-right-from-bracket"></i><span>Logout</span>
         </a>
-    </nav>
+    </div>
 </aside>
 
 <style>
-:root { --t-bg:#fff; --t-bg2:var(--pos-green-light,#f0fdf4); --t-line:#eef0f4; --t-accent:var(--pos-green,#16a34a); --t-text:#5b6070; }
-.t-sidebar { width:264px; background:var(--t-bg); color:var(--t-text); position:fixed; left:0; top:0; height:100vh; overflow-y:auto; z-index:1001; transition:transform .3s ease; border-right:1px solid var(--t-line); }
-.t-brand { padding:24px 20px; border-bottom:1px solid var(--t-line); text-align:center; position:relative; }
+:root { --t-bg:#fff; --t-bg2:var(--pos-green-light,#f5ecff); --t-line:#eef0f4; --t-accent:var(--pos-green,#4b006e); --t-text:#5b6070; }
+.t-sidebar { width:264px; background:var(--t-bg); color:var(--t-text); position:fixed; left:0; top:0; height:100vh; height:100dvh; overflow:hidden; display:flex; flex-direction:column; z-index:1001; transition:transform .3s ease; border-right:1px solid var(--t-line); }
+.t-brand { flex:0 0 auto; padding:24px 20px; border-bottom:1px solid var(--t-line); text-align:center; position:relative; }
 .t-logo { height:44px; max-width:160px; object-fit:contain; border-radius:8px; padding:4px; }
 .t-shop { margin-top:12px; font-weight:800; color:#1f2330; font-size:1.05rem; }
 .t-user { margin-top:6px; font-size:.8rem; color:#9aa0ac; }
 .t-role { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; background:#f3f4f7; color:#5b6070; font-size:.7rem; }
-.t-nav { padding:14px 12px; }
+.t-nav { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; padding:14px 12px 18px; }
+.t-sidebar-footer { flex:0 0 auto; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); border-top:1px solid var(--t-line); background:var(--t-bg); }
 .t-link { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:10px; color:var(--t-text); text-decoration:none; font-size:.9rem; margin-bottom:3px; font-weight:500; }
 .t-link i { width:20px; color:#b7bac3; text-align:center; }
 .t-link:hover{ background:#f7f7fb; color:#1f2330; }

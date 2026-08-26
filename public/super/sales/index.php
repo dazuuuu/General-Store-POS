@@ -10,6 +10,21 @@ $OR   = new Models\OrderModel($pdo);
 // Period filter
 $allowed = ['today', 'week', 'month', 'all'];
 $period  = in_array($_GET['period'] ?? '', $allowed, true) ? $_GET['period'] : 'today';
+$error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_sale') {
+    $source = ($_POST['source'] ?? '') === 'order' ? 'order' : 'sale';
+    $id = (int) ($_POST['id'] ?? 0);
+    $res = $source === 'order'
+        ? $OR->deleteSale($id, TenantContext::userId())
+        : $SA->deleteSale($id, TenantContext::userId());
+    if ($res['ok']) {
+        $_SESSION['flash']['success'] = 'Sale deleted and stock restored.';
+        header('Location: ' . public_url('super/sales/?period=' . urlencode($period)));
+        exit;
+    }
+    $error = $res['error'] ?? 'Could not delete this sale.';
+}
 
 /** Direct sales (legacy) + paid tabs (current), merged newest-first. Tabs are
  *  now the only way staff record a sale — direct sales stay for history. */
@@ -83,12 +98,16 @@ try {
             $byProduct[$pid]['qty']     += $op['qty'];
             $byProduct[$pid]['revenue'] += $op['revenue'];
             $byProduct[$pid]['cost']    += $op['cost'];
+            $byProduct[$pid]['retail_profit'] = ($byProduct[$pid]['retail_profit'] ?? 0) + ($op['retail_profit'] ?? 0);
+            $byProduct[$pid]['wholesale_profit'] = ($byProduct[$pid]['wholesale_profit'] ?? 0) + ($op['wholesale_profit'] ?? 0);
         } else {
             $byProduct[$pid] = $op;
         }
     }
     foreach ($byProduct as &$bp) {
         $bp['profit'] = round($bp['revenue'] - $bp['cost'], 2);
+        $bp['retail_profit'] = round((float) ($bp['retail_profit'] ?? 0), 2);
+        $bp['wholesale_profit'] = round((float) ($bp['wholesale_profit'] ?? 0), 2);
         $bp['margin'] = $bp['revenue'] > 0 ? round($bp['profit'] / $bp['revenue'] * 100, 1) : 0.0;
     }
     unset($bp);
@@ -105,10 +124,40 @@ $grossRevenue = round(array_sum(array_column($productProfit, 'revenue')), 2);
 $grossProfit  = round(array_sum(array_column($productProfit, 'profit')), 2);
 // Net profit deducts order-level discounts (already reflected in $sum['revenue']).
 $netProfit    = round(($sum['revenue'] ?? 0) - $cogs, 2);
+$salesLoss = 0.0;
+foreach ($productProfit as $pp) {
+    if ((float) ($pp['profit'] ?? 0) < 0) {
+        $salesLoss += abs((float) $pp['profit']);
+    }
+}
+$damagedProducts = [];
+$damagedLoss = 0.0;
+try {
+    $st = $pdo->prepare(
+        "SELECT id, name, unit, faulty_quantity, buying_price,
+                (COALESCE(faulty_quantity,0) * COALESCE(buying_price,0)) AS loss_value
+           FROM products
+          WHERE tenant_id = ? AND COALESCE(faulty_quantity,0) > 0
+       ORDER BY loss_value DESC, name ASC
+          LIMIT 100"
+    );
+    $st->execute([TenantContext::tenantId()]);
+    $damagedProducts = $st->fetchAll();
+    foreach ($damagedProducts as $dp) {
+        $damagedLoss += (float) ($dp['loss_value'] ?? 0);
+    }
+    $damagedLoss = round($damagedLoss, 2);
+} catch (Throwable $e) {
+    $damagedProducts = [];
+    $damagedLoss = 0.0;
+}
+$totalLoss = round($salesLoss + $damagedLoss, 2);
+$profitAfterDamage = round($netProfit - $damagedLoss, 2);
 
 $page_title = 'Sales';
 ob_start();
 ?>
+<?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 <!-- ===== Period tabs ===== -->
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
   <h1 class="h5 mb-0 fw-bold">Sales Overview</h1>
@@ -167,6 +216,24 @@ ob_start();
   <div class="col-6 col-md-3">
     <div class="card border-0 shadow-sm" style="border-radius:14px;">
       <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Credit sales</div>
+        <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($sum['credit_due'] ?? 0, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;"><?php echo (int) ($sum['credit_count'] ?? 0); ?> open / part-paid · still owed</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Collected on credit</div>
+        <div class="h5 mb-0 fw-bold">KES <?php echo number_format($sum['collected'] ?? 0, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Cash received (incl. deposits)</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
         <div class="text-muted small text-uppercase fw-semibold mb-1">Retail sales</div>
         <div class="h5 mb-0 fw-bold"><?php echo (int)($sum['retail'] ?? 0); ?></div>
       </div>
@@ -200,6 +267,45 @@ ob_start();
           <div class="h5 mb-0 text-muted">—</div>
           <div class="text-danger" style="font-size:.7rem;"><?php echo $profitReason === 'no_column' ? 'No product cost recorded' : 'Profit unavailable'; ?></div>
         <?php endif; ?>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Sales loss</div>
+        <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($salesLoss, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Products sold below cost</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Damaged stock loss</div>
+        <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($damagedLoss, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Faulty quantity × buying price</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Total loss</div>
+        <div class="h5 mb-0 fw-bold text-danger">KES <?php echo number_format($totalLoss, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Sales loss + damaged stock</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm" style="border-radius:14px;">
+      <div class="card-body p-3">
+        <div class="text-muted small text-uppercase fw-semibold mb-1">Profit after damage</div>
+        <div class="h5 mb-0 fw-bold <?php echo $profitAfterDamage < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($profitAfterDamage, 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Net profit − damaged stock loss</div>
       </div>
     </div>
   </div>
@@ -283,7 +389,9 @@ ob_start();
             <th class="text-end">Sold</th>
             <th class="text-end">Revenue</th>
             <th class="text-end">Cost</th>
-            <th class="text-end">Profit</th>
+            <th class="text-end">Retail Profit</th>
+            <th class="text-end">Wholesale Profit</th>
+            <th class="text-end">Total Profit</th>
             <th class="text-end">Margin</th>
           </tr></thead>
           <tbody>
@@ -295,6 +403,8 @@ ob_start();
               <td class="text-end small text-nowrap"><?php echo $qtyLabel; ?><?php echo $pp['unit'] ? ' '.htmlspecialchars($pp['unit']) : ''; ?></td>
               <td class="text-end small">KES <?php echo number_format($pp['revenue'],0); ?></td>
               <td class="text-end small text-muted"><?php echo $pp['cost'] > 0 ? 'KES '.number_format($pp['cost'],0) : '—'; ?></td>
+              <td class="text-end fw-semibold <?php echo ($pp['retail_profit'] ?? 0) < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format((float)($pp['retail_profit'] ?? 0),0); ?></td>
+              <td class="text-end fw-semibold <?php echo ($pp['wholesale_profit'] ?? 0) < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format((float)($pp['wholesale_profit'] ?? 0),0); ?></td>
               <td class="text-end fw-semibold <?php echo $pp['profit'] < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($pp['profit'],0); ?></td>
               <td class="text-end small">
                 <?php if ($pp['cost'] <= 0): ?>
@@ -312,6 +422,8 @@ ob_start();
               <td></td>
               <td class="text-end">KES <?php echo number_format($grossRevenue,0); ?></td>
               <td class="text-end text-muted">KES <?php echo number_format($cogs,0); ?></td>
+              <td class="text-end <?php echo array_sum(array_column($productProfit, 'retail_profit')) < 0 ? 'text-danger':'text-success'; ?>">KES <?php echo number_format(array_sum(array_column($productProfit, 'retail_profit')),0); ?></td>
+              <td class="text-end <?php echo array_sum(array_column($productProfit, 'wholesale_profit')) < 0 ? 'text-danger':'text-success'; ?>">KES <?php echo number_format(array_sum(array_column($productProfit, 'wholesale_profit')),0); ?></td>
               <td class="text-end <?php echo $grossProfit < 0 ? 'text-danger':'text-success'; ?>">KES <?php echo number_format($grossProfit,0); ?></td>
               <td class="text-end small text-muted"><?php echo $grossRevenue > 0 ? number_format($grossProfit / $grossRevenue * 100, 1).'%' : '—'; ?></td>
             </tr>
@@ -321,6 +433,29 @@ ob_start();
     <?php endif; ?>
   </div>
 </div>
+
+<?php if ($damagedProducts): ?>
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+  <div class="card-body p-4">
+    <h2 class="h6 fw-bold mb-3"><i class="fas fa-triangle-exclamation me-2 text-danger"></i>Damaged products loss</h2>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr class="text-muted small text-uppercase"><th>Product</th><th class="text-end">Damaged qty</th><th class="text-end">Buying price</th><th class="text-end">Loss</th></tr></thead>
+        <tbody>
+          <?php foreach ($damagedProducts as $dp): ?>
+          <tr>
+            <td class="small fw-semibold"><?php echo htmlspecialchars($dp['name']); ?></td>
+            <td class="text-end small"><?php echo rtrim(rtrim(number_format((float) $dp['faulty_quantity'], 2), '0'), '.'); ?> <?php echo htmlspecialchars($dp['unit'] ?: 'piece'); ?></td>
+            <td class="text-end small">KES <?php echo number_format((float) $dp['buying_price'], 2); ?></td>
+            <td class="text-end fw-semibold text-danger">KES <?php echo number_format((float) $dp['loss_value'], 0); ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <!-- ===== Full sales table ===== -->
 <div class="card border-0 shadow-sm" style="border-radius:14px;">
@@ -363,21 +498,31 @@ ob_start();
                 <?php endif; ?>
               </td>
               <td class="small"><?php echo Models\SaleModel::itemsSummaryHtml($s['items']); ?></td>
-              <td class="small"><?php
-                $pm = $s['payment_method'] ?? 'cash';
-                if ($pm === 'split') {
-                    echo '<span class="badge bg-secondary">Split</span><div class="text-muted" style="font-size:.7rem;">' . htmlspecialchars(Models\SaleModel::paymentLabel($s)) . '</div>';
-                } elseif ($pm === 'cash') {
-                    echo '<span class="badge bg-light text-dark">Cash</span>';
-                } else {
-                    echo '<span class="badge bg-success text-white">M-Pesa</span>';
+                            <td class="small"><?php
+                echo Models\SaleModel::paymentStatusBadge($s);
+                echo ' <span class="text-muted">' . htmlspecialchars(Models\SaleModel::paymentLabel($s)) . '</span>';
+                if ((float)($s['amount_due'] ?? 0) > 0.0001) {
+                    echo '<div class="text-danger" style="font-size:.7rem;">Owes KES ' . number_format((float)$s['amount_due'], 0) . '</div>';
+                } elseif ((float)($s['amount_paid'] ?? 0) > 0 && (float)($s['amount_paid'] ?? 0) + 0.0001 < (float)($s['total'] ?? 0)) {
+                    echo '<div class="text-muted" style="font-size:.7rem;">Paid KES ' . number_format((float)$s['amount_paid'], 0) . '</div>';
                 }
                 if ((float)($s['discount_amount'] ?? 0) > 0) {
                     echo '<div class="text-danger" style="font-size:.7rem;">−KES ' . number_format((float)$s['discount_amount'], 0) . '</div>';
                 }
               ?></td>
               <td class="text-end fw-semibold">KES <?php echo number_format((float)$s['total'],0); ?></td>
-              <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a></td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                  <a class="btn btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a>
+                  <a class="btn btn-outline-primary" href="<?php echo public_url('super/returns/?receipt=' . urlencode($s['receipt_number'])); ?>">Return</a>
+                </div>
+                <form method="post" class="d-inline" onsubmit="return confirm('Delete this sale and return its products to stock?');">
+                  <input type="hidden" name="action" value="delete_sale">
+                  <input type="hidden" name="source" value="<?php echo htmlspecialchars($s['source'] ?? 'sale'); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $s['id']; ?>">
+                  <button class="btn btn-sm btn-outline-danger mt-1"><i class="fas fa-trash me-1"></i>Delete</button>
+                </form>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>

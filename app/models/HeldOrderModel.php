@@ -23,9 +23,6 @@ class HeldOrderModel extends Model
             return ['ok' => false, 'errors' => ['_' => 'No shop in context.']];
         }
         $customerName = trim($in['customer_name'] ?? '');
-        if ($customerName === '') {
-            return ['ok' => false, 'errors' => ['customer_name' => 'Enter a table or customer name.']];
-        }
         $items = array_values(array_filter($in['items'] ?? [], fn($i) => (int) ($i['product_id'] ?? 0) > 0 && (float) ($i['quantity'] ?? 0) > 0));
         if (!$items) {
             return ['ok' => false, 'errors' => ['_' => 'Add at least one item to hold this order.']];
@@ -42,17 +39,20 @@ class HeldOrderModel extends Model
             $ins->execute([$tid, $customerName, $staffId]);
             $heldId = (int) $db->lastInsertId();
 
-            $sel = $db->prepare('SELECT id, name, selling_price, retail_price FROM products WHERE id = ? AND tenant_id = ?');
+            $sel = $db->prepare('SELECT id, name, selling_price, wholesale_price, retail_price FROM products WHERE id = ? AND tenant_id = ?');
             $insItem = $db->prepare(
-                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, quantity) VALUES (?,?,?,?,?,?)'
+                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, price_type, quantity) VALUES (?,?,?,?,?,?,?)'
             );
             foreach ($items as $it) {
                 $pid = (int) $it['product_id'];
                 $sel->execute([$pid, $tid]);
                 $p = $sel->fetch();
                 if (!$p) { continue; } // product removed since — skip it, don't fail the whole hold
-                $price = (float) ($p['retail_price'] ?: $p['selling_price']);
-                $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, (float) $it['quantity']]);
+                $priceType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+                $price = $priceType === 'wholesale'
+                    ? (float) (($p['wholesale_price'] ?? 0) ?: ($p['retail_price'] ?: $p['selling_price']))
+                    : (float) ($p['retail_price'] ?: $p['selling_price']);
+                $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, $priceType, (float) $it['quantity']]);
             }
 
             $db->commit();
@@ -108,12 +108,14 @@ class HeldOrderModel extends Model
                 product_id INT NULL,
                 product_name VARCHAR(160) NOT NULL,
                 unit_price DECIMAL(12,2) NOT NULL,
+                price_type VARCHAR(20) NOT NULL DEFAULT 'retail',
                 quantity DECIMAL(12,2) NOT NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 KEY idx_held_item_order (held_order_id),
                 KEY idx_held_item_tenant (tenant_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        $this->ensureColumn('held_order_items', 'price_type', "ALTER TABLE held_order_items ADD COLUMN price_type VARCHAR(20) NOT NULL DEFAULT 'retail' AFTER unit_price");
     }
 
     private function ensureTable(string $table, string $sql): void
@@ -123,6 +125,18 @@ class HeldOrderModel extends Model
         } catch (\PDOException $e) {
             try { $this->db->exec($sql); } catch (\PDOException $ignored) {}
         }
+    }
+
+    private function ensureColumn(string $table, string $column, string $sql): void
+    {
+        try {
+            $stmt = $this->db->prepare("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?");
+            $stmt->execute([$table, $column]);
+            if ((int) $stmt->fetchColumn() > 0) {
+                return;
+            }
+            $this->db->exec($sql);
+        } catch (\PDOException $ignored) {}
     }
 
     /** Delete a held order and its items — used both for "Discard" and after a successful resume→checkout. */

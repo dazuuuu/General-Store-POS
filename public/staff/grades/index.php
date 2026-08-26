@@ -1,6 +1,3 @@
 <?php
-// public/staff/grades/index.php
-// Staff entry point for grades — reuses the owner page (gated by
-// 'inventory.edit'), rendered in the staff layout for staff. Same pattern as
-// public/staff/suppliers/index.php.
+// public/staff/grades/index.php — grades removed; reuse owner redirect to categories.
 require __DIR__ . '/../../super/grades/index.php';

@@ -1,6 +1,7 @@
 <?php
 // public/components/public/footer.php
 require_once __DIR__ . '/../../../app/helpers/PathConfig.php';
+require_once __DIR__ . '/../../../app/helpers/ReceiptFooter.php';
 ?>
 <footer class="site-footer">
 
@@ -59,11 +60,11 @@ require_once __DIR__ . '/../../../app/helpers/PathConfig.php';
                 <h6 class="footer-col-title">Contact</h6>
                 <p class="footer-contact-item">
                     <i class="fas fa-envelope"></i>
-                    <a href="mailto:hello@ismano.dev">hello@ismano.dev</a>
+                    <a href="mailto:<?php echo htmlspecialchars(ReceiptFooter::SHOP_EMAIL); ?>"><?php echo htmlspecialchars(ReceiptFooter::SHOP_EMAIL); ?></a>
                 </p>
                 <p class="footer-contact-item">
                     <i class="fas fa-phone"></i>
-                    <a href="tel:+254700000000">+254 700 000 000</a>
+                    <a href="tel:<?php echo preg_replace('/\D+/', '', ReceiptFooter::SHOP_PHONE); ?>"><?php echo htmlspecialchars(ReceiptFooter::SHOP_PHONE); ?></a>
                 </p>
                 <a href="<?php echo public_url('auth/register.php'); ?>" class="btn btn--primary footer-cta-btn">
                     Let's Talk <i class="fas fa-arrow-right"></i>

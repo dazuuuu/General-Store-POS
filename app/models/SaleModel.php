@@ -46,8 +46,9 @@ class SaleModel extends Model
         try {
             $db->beginTransaction();
 
-            $priceCol = $saleType === 'wholesale' ? 'wholesale_price' : 'retail_price';
-            $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, quantity, unit FROM products WHERE id = ? AND tenant_id = ? AND status = 'active' FOR UPDATE";
+            $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
+                              quantity, unit, units_per_pack, pack_unit, pack_price
+                         FROM products WHERE id = ? AND tenant_id = ? AND status = 'active' FOR UPDATE";
             $sel = $db->prepare($selSql);
             $subtotal = 0.0;
             $lines = [];
@@ -64,7 +65,7 @@ class SaleModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float)$p['quantity'], 2), '0'), '.') . " left."]];
                 }
-                $unitPrice = (float) ($p[$priceCol] ?? 0);
+                $unitPrice = \Pricing::unitPriceForQty($p, $qty, $saleType);
                 if ($unitPrice <= 0) {
                     $unitPrice = (float) ($p['selling_price'] ?? 0);
                 }
@@ -327,15 +328,84 @@ class SaleModel extends Model
         $tid = \TenantContext::tenantId();
         $in = implode(',', array_fill(0, count($saleIds), '?'));
         $stmt = $this->db->prepare(
-            "SELECT sale_id, product_name, quantity, line_total FROM sale_items
-              WHERE tenant_id = ? AND sale_id IN ($in) ORDER BY id ASC"
+            "SELECT si.id, si.sale_id, si.product_name, si.quantity, si.line_total,
+                    si.product_id, p.quantity AS stock_left
+               FROM sale_items si
+          LEFT JOIN products p ON p.id = si.product_id AND p.tenant_id = si.tenant_id
+              WHERE si.tenant_id = ? AND si.sale_id IN ($in) ORDER BY si.id ASC"
         );
         $stmt->execute(array_merge([$tid], $saleIds));
+        $rows = $stmt->fetchAll();
+        $returns = (new ReturnModel($this->db))->returnsForItems('sale', array_column($rows, 'id'));
         $out = [];
-        foreach ($stmt->fetchAll() as $r) {
-            $out[(int) $r['sale_id']][] = ['name' => $r['product_name'], 'qty' => (float) $r['quantity'], 'total' => (float) $r['line_total']];
+        foreach ($rows as $r) {
+            $ret = $returns[(int) $r['id']] ?? ['returned' => 0.0, 'used' => 0.0];
+            $out[(int) $r['sale_id']][] = [
+                'name' => $r['product_name'],
+                'qty' => (float) $r['quantity'],
+                'total' => (float) $r['line_total'],
+                'returned' => (float) $ret['returned'],
+                'used' => (float) $ret['used'],
+                'stock_left' => $r['stock_left'] !== null ? (float) $r['stock_left'] : null,
+            ];
         }
         return $out;
+    }
+
+    /** Admin delete/void for a recorded direct sale. Restores unsold-returned stock and removes it from reports. */
+    public function deleteSale(int $saleId, int $staffId): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) { return ['ok' => false, 'error' => 'No shop in context.']; }
+        $db = $this->db;
+        try {
+            $db->beginTransaction();
+            $st = $db->prepare("SELECT id, status FROM sales WHERE id = ? AND tenant_id = ? FOR UPDATE");
+            $st->execute([$saleId, $tid]);
+            $sale = $st->fetch();
+            if (!$sale) {
+                $db->rollBack();
+                return ['ok' => false, 'error' => 'Sale not found.'];
+            }
+            if (($sale['status'] ?? '') === 'voided') {
+                $db->rollBack();
+                return ['ok' => false, 'error' => 'This sale is already deleted.'];
+            }
+
+            $items = $db->prepare(
+                "SELECT si.id, si.product_id, si.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
+                   FROM sale_items si
+              LEFT JOIN (
+                        SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                          FROM product_returns
+                         WHERE source_type = 'sale'
+                      GROUP BY tenant_id, source_item_id
+                   ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
+                  WHERE si.sale_id = ? AND si.tenant_id = ?"
+            );
+            $items->execute([$saleId, $tid]);
+            $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
+            foreach ($items->fetchAll() as $it) {
+                $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
+                if ($qty > 0 && !empty($it['product_id'])) {
+                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                }
+            }
+
+            $db->prepare(
+                "UPDATE sales
+                    SET status = 'voided', payment_status = 'deleted', amount_paid = 0, amount_due = 0,
+                        cash_amount = NULL, mpesa_amount = NULL
+                  WHERE id = ? AND tenant_id = ?"
+            )->execute([$saleId, $tid]);
+
+            $db->commit();
+            return ['ok' => true, 'error' => null];
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) { $db->rollBack(); }
+            error_log('SaleModel::deleteSale failed: ' . $e->getMessage());
+            return ['ok' => false, 'error' => 'Could not delete this sale.'];
+        }
     }
 
     /** This customer's completed sales (any status but voided), newest
@@ -365,7 +435,20 @@ class SaleModel extends Model
     {
         if (!$items) { return '<span class="text-muted">—</span>'; }
         $fmtQty = fn($q) => rtrim(rtrim(number_format((float) $q, 2), '0'), '.');
-        $parts = array_map(fn($i) => $fmtQty($i['qty']) . '× ' . $i['name'], $items);
+        $parts = array_map(function ($i) use ($fmtQty) {
+            $label = $fmtQty($i['qty']) . '× ' . $i['name'];
+            if ((float) ($i['returned'] ?? 0) > 0) {
+                $label .= ' (returned ' . $fmtQty($i['returned']);
+                if ((float) ($i['used'] ?? 0) > 0) {
+                    $label .= ', used ' . $fmtQty($i['used']);
+                }
+                $label .= ')';
+            }
+            if (array_key_exists('stock_left', $i) && $i['stock_left'] !== null) {
+                $label .= ' - left ' . $fmtQty($i['stock_left']);
+            }
+            return $label;
+        }, $items);
         $shown = array_slice($parts, 0, $max);
         $extra = count($parts) - count($shown);
         $html = htmlspecialchars(implode(', ', $shown));
@@ -483,7 +566,7 @@ class SaleModel extends Model
         $stmt = $this->db->prepare(
             "SELECT s.*, (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS item_count
                FROM sales s
-              WHERE s.tenant_id = ? AND s.staff_id = ? {$dateSql}
+              WHERE s.tenant_id = ? AND s.staff_id = ? AND s.status <> 'voided' {$dateSql}
            ORDER BY s.created_at DESC, s.id DESC
               LIMIT ?"
         );
@@ -508,7 +591,7 @@ class SaleModel extends Model
                     (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS item_count
                FROM sales s
           LEFT JOIN users u ON u.id = s.staff_id
-              WHERE s.tenant_id = ? {$periodSql}
+              WHERE s.tenant_id = ? AND s.status <> 'voided' {$periodSql}
            ORDER BY s.created_at DESC, s.id DESC
               LIMIT ?"
         );
@@ -524,7 +607,7 @@ class SaleModel extends Model
             "SELECT s.*, u.username AS staff_name
                FROM sales s
           LEFT JOIN users u ON u.id = s.staff_id
-              WHERE s.tenant_id = ? AND DATE(s.created_at) = ?
+              WHERE s.tenant_id = ? AND s.status <> 'voided' AND DATE(s.created_at) = ?
            ORDER BY s.created_at ASC"
         );
         $stmt->execute([$tenantId, $date]);
@@ -575,6 +658,7 @@ class SaleModel extends Model
         $tid = \TenantContext::tenantId();
         if ($tid === null) { return []; }
 
+        $this->ensureColumn('products', 'package_buying_price', "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $costCol = $this->resolveCostColumn($costCol);
         if ($costCol === null) {
             throw new \RuntimeException('NO_COST_COLUMN');
@@ -588,17 +672,44 @@ class SaleModel extends Model
         };
 
         $sql = "SELECT si.product_id,
-                       MAX(si.product_name)                           AS product_name,
-                       MAX(si.unit)                                   AS unit,
-                       SUM(si.quantity)                               AS qty,
-                       SUM(si.line_total)                             AS revenue,
-                       SUM(si.quantity * COALESCE(p.`{$costCol}`, 0)) AS cost
+                       MAX(si.product_name) AS product_name,
+                       MAX(si.unit) AS unit,
+                       SUM(GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0)) AS qty,
+                       SUM(si.line_total) AS revenue,
+                       SUM(
+                           CASE
+                               WHEN si.price_type = 'wholesale'
+                                    AND COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                       ) AS cost,
+                       SUM(CASE WHEN si.price_type = 'retail' THEN si.line_total ELSE 0 END)
+                       - SUM(CASE WHEN si.price_type = 'retail' THEN GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) ELSE 0 END) AS retail_profit,
+                       SUM(CASE WHEN si.price_type = 'wholesale' THEN si.line_total ELSE 0 END)
+                       - SUM(CASE WHEN si.price_type = 'wholesale' THEN
+                           CASE
+                               WHEN COALESCE(p.units_per_pack, 1) > 1
+                                    AND COALESCE(p.pack_unit, '') <> ''
+                                    AND p.package_buying_price IS NOT NULL
+                                   THEN (GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) / p.units_per_pack) * p.package_buying_price
+                               ELSE GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0)
+                           END
+                         ELSE 0 END) AS wholesale_profit
                   FROM sale_items si
                   JOIN sales s     ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
              LEFT JOIN products p  ON p.id = si.product_id AND p.tenant_id = si.tenant_id
-                 WHERE si.tenant_id = ? {$periodSql}
+             LEFT JOIN (
+                    SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                      FROM product_returns
+                     WHERE source_type = 'sale'
+                  GROUP BY tenant_id, source_item_id
+             ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
+                 WHERE si.tenant_id = ? AND s.status <> 'voided' {$periodSql}
               GROUP BY si.product_id
-              ORDER BY (SUM(si.line_total) - SUM(si.quantity * COALESCE(p.`{$costCol}`, 0))) DESC";
+              ORDER BY (SUM(si.line_total) - SUM(GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0))) DESC";
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute([$tid]);
@@ -611,6 +722,8 @@ class SaleModel extends Model
             $r['qty']        = (float) $r['qty'];
             $r['revenue']    = $rev;
             $r['cost']       = $cost;
+            $r['retail_profit'] = round((float) ($r['retail_profit'] ?? 0), 2);
+            $r['wholesale_profit'] = round((float) ($r['wholesale_profit'] ?? 0), 2);
             $r['profit']     = round($rev - $cost, 2);
             $r['margin']     = $rev > 0 ? round(($rev - $cost) / $rev * 100, 1) : 0.0;
         }
@@ -626,7 +739,9 @@ class SaleModel extends Model
             $name = $r['staff_name'] ?? 'Unknown';
             if (!isset($out[$name])) { $out[$name] = ['count' => 0, 'revenue' => 0.0]; }
             $out[$name]['count']++;
-            $out[$name]['revenue'] += (float) $r['total'];
+            $out[$name]['revenue'] += array_key_exists('_recognized_revenue', $r)
+                ? (float) $r['_recognized_revenue']
+                : (float) $r['total'];
         }
         uasort($out, fn($a, $b) => $b['revenue'] <=> $a['revenue']);
         return $out;
@@ -637,14 +752,22 @@ class SaleModel extends Model
     {
         $sum = [
             'count' => 0, 'revenue' => 0.0, 'collected' => 0.0, 'cash' => 0.0, 'mpesa' => 0.0,
+            'card' => 0.0, 'bank' => 0.0, 'sacco' => 0.0,
             'retail' => 0, 'wholesale' => 0, 'discount' => 0.0,
             'credit_due' => 0.0, 'credit_count' => 0,
+            'additional_charges' => 0.0,
         ];
         foreach ($rows as $r) {
+            $recognized = array_key_exists('_recognized_revenue', $r)
+                ? (float) $r['_recognized_revenue']
+                : (float) $r['total'];
             $sum['count']++;
-            $sum['revenue']  += (float) $r['total'];
-            $sum['collected'] += (float) ($r['amount_paid'] ?? $r['total']);
+            $sum['revenue']  += $recognized;
+            $sum['collected'] += array_key_exists('_recognized_revenue', $r)
+                ? $recognized
+                : (float) ($r['amount_paid'] ?? $r['total']);
             $sum['discount'] += (float) ($r['discount_amount'] ?? 0);
+            $sum['additional_charges'] += (float) ($r['additional_charges'] ?? 0);
             $sum['credit_due'] += (float) ($r['amount_due'] ?? 0);
             if (($r['payment_status'] ?? 'paid') !== 'paid') { $sum['credit_count']++; }
 
@@ -652,17 +775,41 @@ class SaleModel extends Model
             $sum[$stype] = ($sum[$stype] ?? 0) + 1;
 
             $method = $r['payment_method'] ?? 'cash';
+            if (array_key_exists('_recognized_revenue', $r)) {
+                $sum['cash'] += (float) ($r['_recognized_cash'] ?? 0);
+                $sum['mpesa'] += (float) ($r['_recognized_mpesa'] ?? 0);
+                $other = (float) ($r['_recognized_other'] ?? 0);
+                if ($other > 0) {
+                    $bucket = in_array($method, ['card', 'bank', 'sacco', 'paybill'], true) ? $method : 'paybill';
+                    if (!isset($sum[$bucket])) { $sum[$bucket] = 0.0; }
+                    $sum[$bucket] += $other;
+                }
+                continue;
+            }
             // For split/credit, use the actual cash/mpesa columns (deposit routed there).
-            if ($method === 'split' || $method === 'credit') {
+            if ($method === 'split' || $method === 'credit' || (($r['payment_status'] ?? '') === 'part_paid')) {
                 $sum['cash']  += (float) ($r['cash_amount'] ?? 0);
                 $sum['mpesa'] += (float) ($r['mpesa_amount'] ?? 0);
+                $paid = (float) ($r['amount_paid'] ?? 0);
+                $tracked = (float) ($r['cash_amount'] ?? 0) + (float) ($r['mpesa_amount'] ?? 0);
+                $other = max(0, round($paid - $tracked, 2));
+                if ($other > 0) {
+                    $bucket = in_array($method, ['card', 'bank', 'sacco', 'paybill'], true) ? $method : 'paybill';
+                    if (!isset($sum[$bucket])) { $sum[$bucket] = 0.0; }
+                    $sum[$bucket] += $other;
+                }
             } elseif ($method === 'cash') {
-                $sum['cash']  += (float) $r['total'];
+                $sum['cash']  += (float) ($r['amount_paid'] ?? $r['total']);
             } elseif ($method === 'mpesa') {
-                $sum['mpesa'] += (float) $r['total'];
+                $sum['mpesa'] += (float) ($r['amount_paid'] ?? $r['total']);
+            } elseif ($method === 'paybill') {
+                if (!isset($sum['paybill'])) { $sum['paybill'] = 0.0; }
+                $sum['paybill'] += (float) ($r['amount_paid'] ?? $r['total']);
+            } elseif (isset($sum[$method])) {
+                $sum[$method] += (float) ($r['amount_paid'] ?? $r['total']);
             }
         }
-        foreach (['revenue','collected','cash','mpesa','discount','credit_due'] as $k) {
+        foreach (['revenue','collected','cash','mpesa','card','bank','sacco','discount','credit_due','additional_charges'] as $k) {
             $sum[$k] = round($sum[$k], 2);
         }
         return $sum;
@@ -688,7 +835,7 @@ class SaleModel extends Model
             if ((float) ($sale['mpesa_amount'] ?? 0) > 0) { $parts[] = 'M-Pesa KES ' . number_format((float) $sale['mpesa_amount'], 0); }
             return $parts ? implode(' + ', $parts) : 'Split';
         }
-        return $method === 'cash' ? 'Cash' : 'M-Pesa';
+        return \PaymentOptions::label($sale);
     }
 
     /** Badge HTML for sale type. */

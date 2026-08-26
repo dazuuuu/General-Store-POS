@@ -47,8 +47,8 @@ ob_start();
     </div>
 
     <div class="row g-3 mb-4">
-      <?php foreach ([['Sales',$sum['count']],['Revenue',$money($sum['revenue'])],['Cash',$money($sum['cash'])],['M-Pesa',$money($sum['mpesa'])]] as $b): ?>
-      <div class="col-6 col-md-3">
+      <?php foreach ([['Sales',$sum['count']],['Revenue',$money($sum['revenue'])],['Cash',$money($sum['cash'])],['M-Pesa',$money($sum['mpesa'])],['Card',$money($sum['card'] ?? 0)],['Bank',$money($sum['bank'] ?? 0)],['SACCO',$money($sum['sacco'] ?? 0)]] as $b): ?>
+      <div class="col-6 col-md-3 col-xl">
         <div class="p-3" style="background:#f7f8fa;border:1px solid #e6e8ec;border-radius:10px;">
           <div class="text-muted small text-uppercase fw-semibold"><?php echo $b[0]; ?></div>
           <div class="h5 mb-0 fw-bold"><?php echo is_string($b[1]) ? htmlspecialchars($b[1]) : $b[1]; ?></div>
@@ -71,7 +71,24 @@ ob_start();
             <td class="small text-nowrap"><?php echo date('g:i a', strtotime($s['created_at'])); ?></td>
             <td class="small"><?php echo htmlspecialchars($s['staff_name'] ?: '—'); ?></td>
             <td class="small"><?php echo htmlspecialchars($s['customer_name'] ?: '—'); ?></td>
-            <td><?php echo $s['payment_method']==='cash' ? '<span class="badge bg-light text-dark">Cash</span>' : '<span class="badge bg-success text-white">M-Pesa</span>'; ?></td>
+            <td><?php
+              $pm = $s['payment_method'] ?? '';
+              $badge = match ($pm) {
+                  'cash' => '<span class="badge bg-light text-dark">Cash</span>',
+                  'mpesa' => '<span class="badge bg-success text-white">M-Pesa</span>',
+                  'split' => '<span class="badge bg-secondary">Split</span>',
+                  'card' => '<span class="badge bg-dark">Card</span>',
+                  'bank' => '<span class="badge bg-info text-dark">Bank</span>',
+                  'sacco' => '<span class="badge bg-primary">SACCO</span>',
+                  'credit' => '<span class="badge bg-warning text-dark">Credit</span>',
+                  default => '<span class="badge bg-light text-dark">'.htmlspecialchars(ucfirst($pm ?: '—')).'</span>',
+              };
+              echo $badge;
+              $detail = PaymentOptions::label($s);
+              if ($detail !== ucfirst($pm ?: '')) {
+                  echo '<div class="text-muted" style="font-size:.7rem;">' . htmlspecialchars($detail) . '</div>';
+              }
+            ?></td>
             <td class="text-end fw-semibold"><?php echo $money($s['total']); ?></td>
           </tr>
           <?php endforeach; ?>

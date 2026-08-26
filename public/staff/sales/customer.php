@@ -54,8 +54,14 @@ $paidTotal = 0.0; $owedTotal = 0.0; $visitCount = 0;
 foreach ($visits as $v) {
     $visitCount++;
     if ($v['source'] === 'order') {
-        if ($v['status'] === 'paid') { $paidTotal += (float) $v['total']; }
-        elseif ($v['status'] === 'open') { $owedTotal += (float) $v['total']; }
+        if ($v['status'] === 'paid') {
+            $paidTotal += (float) $v['total'];
+        } elseif ($v['status'] === 'open') {
+            $paidTotal += max(0, (float) ($v['amount_paid'] ?? 0));
+            $due = (float) ($v['amount_due'] ?? 0);
+            if ($due <= 0.0001) { $due = max(0, (float) $v['total'] - (float) ($v['amount_paid'] ?? 0)); }
+            $owedTotal += $due;
+        }
     } else {
         if (($v['payment_status'] ?? 'paid') === 'paid') { $paidTotal += (float) $v['total']; }
         else { $owedTotal += (float) ($v['amount_due'] ?? $v['total']); }
@@ -144,7 +150,7 @@ ob_start();
   <div class="col-12 col-lg-5">
     <div class="card border-0 shadow-sm" style="border-radius:14px;">
       <div class="card-body p-4">
-        <h2 class="h6 fw-bold mb-3"><i class="fas fa-book me-2 text-primary"></i>Products bought</h2>
+        <h2 class="h6 fw-bold mb-3"><i class="fas fa-box me-2 text-primary"></i>Products bought</h2>
         <?php if (!$productAgg): ?>
           <div class="text-muted small">No line items recorded.</div>
         <?php else: ?>
@@ -191,7 +197,12 @@ ob_start();
                   <?php else: ?><span class="badge bg-secondary"><?php echo htmlspecialchars(ucfirst($status)); ?></span>
                   <?php endif; ?>
                 </td>
-                <td class="text-end fw-semibold small">KES <?php echo number_format((float) $v['total'], 0); ?></td>
+                <td class="text-end fw-semibold small">
+                  KES <?php echo number_format((float) $v['total'], 0); ?>
+                  <?php if ($isOrder && $v['status'] === 'open' && (float) ($v['amount_paid'] ?? 0) > 0): ?>
+                    <div class="text-muted" style="font-size:.75rem;">paid KES <?php echo number_format((float) $v['amount_paid'], 0); ?></div>
+                  <?php endif; ?>
+                </td>
                 <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url($v['receipt_url']); ?>">Receipt</a></td>
               </tr>
               <?php endforeach; ?>

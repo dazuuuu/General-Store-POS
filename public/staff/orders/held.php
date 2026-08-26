@@ -1,27 +1,30 @@
 <?php
-// public/staff/orders/held.php — carts set aside with "Hold Order" (no stock
+// public/staff/orders/held.php — carts set aside with "Hold Sale" (no stock
 // touched yet). Resume loads one back into the selling screen; Discard drops it.
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::SALES_RECORD);
 
 $pdo = Database::pdo();
 $HO = new Models\HeldOrderModel($pdo);
+$isStaffViewer = TenantContext::role() === 'staff';
+$heldUrl = $isStaffViewer ? public_url('staff/orders/held.php') : public_url('super/orders/held.php');
+$newUrl = $isStaffViewer ? public_url('staff/orders/new.php') : public_url('super/orders/new.php');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'discard') {
     $id = (int) ($_POST['id'] ?? 0);
     $ok = $HO->discard($id);
     $_SESSION['flash'][$ok ? 'success' : 'error'] = $ok ? 'Held order discarded.' : 'Could not discard that order.';
-    header('Location: ' . public_url('staff/orders/held.php'));
+    header('Location: ' . $heldUrl);
     exit;
 }
 
 $held = $HO->listForTenant();
-$page_title = 'Held orders';
+$page_title = 'Held sales';
 ob_start();
 ?>
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-  <h1 class="h5 mb-0 fw-bold"><i class="fas fa-pause me-2 text-primary"></i>Held orders</h1>
-  <a href="<?php echo public_url('staff/orders/new.php'); ?>" class="btn btn-sm btn-primary"><i class="fas fa-plus me-1"></i>New order</a>
+  <h1 class="h5 mb-0 fw-bold"><i class="fas fa-pause me-2 text-primary"></i>Held sales</h1>
+  <a href="<?php echo $newUrl; ?>" class="btn btn-sm btn-primary"><i class="fas fa-plus me-1"></i>New credit sale</a>
 </div>
 
 <?php if (!$held): ?>
@@ -43,7 +46,7 @@ ob_start();
           </div>
           <div class="fw-bold fs-5 mb-3">KES <?php echo number_format((float) $h['total'], 0); ?></div>
           <div class="d-flex gap-2">
-            <a class="btn btn-sm btn-primary flex-fill" href="<?php echo public_url('staff/orders/new.php?resume=' . (int) $h['id']); ?>">Resume</a>
+            <a class="btn btn-sm btn-primary flex-fill" href="<?php echo $newUrl . '?resume=' . (int) $h['id']; ?>">Resume</a>
             <form method="post" class="d-inline" onsubmit="return confirm('Discard this held order?');">
               <input type="hidden" name="action" value="discard">
               <input type="hidden" name="id" value="<?php echo (int) $h['id']; ?>">
@@ -58,4 +61,4 @@ ob_start();
 <?php endif; ?>
 <?php
 $content = ob_get_clean();
-include __DIR__ . '/../../templates/staff/layout.php';
+include __DIR__ . '/../../templates/' . ($isStaffViewer ? 'staff' : 'tenants') . '/layout.php';

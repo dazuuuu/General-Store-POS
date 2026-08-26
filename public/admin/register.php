@@ -183,7 +183,7 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES);
         <p style="margin:0;font-size:.92rem;">Adding an admin to <strong><?php echo $h($shop['name']); ?></strong>.</p>
       <?php else: ?>
         <label for="shop_name">Shop name</label>
-        <input id="shop_name" name="shop_name" type="text" required value="<?php echo $h($old['shop_name']); ?>" placeholder="e.g. Archimedes Elite Bookshop">
+        <input id="shop_name" name="shop_name" type="text" required value="<?php echo $h($old['shop_name']); ?>" placeholder="e.g. Downtown General Shop">
       <?php endif; ?>
     </div>
 

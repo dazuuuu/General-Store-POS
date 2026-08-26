@@ -1,7 +1,6 @@
 <?php
-// public/api/inventory/suggest.php — type-ahead suggestions for the free-text
-// Subject / Grade / Publisher / Author / Supplier boxes on Record Stock and
-// Edit Product. Read-only, tenant-scoped (Model base class enforces that).
+// public/api/inventory/suggest.php — type-ahead for Category / Brand / Supplier
+// on Record Stock and Edit Product.
 require_once __DIR__ . '/../../../app/app.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -23,12 +22,21 @@ $q = trim((string) ($_GET['q'] ?? ''));
 $pdo = Database::pdo();
 $items = [];
 
-if ($field === 'subject') {
-    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'subject');
-} elseif ($field === 'stationery_category') {
-    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'stationery');
+if ($field === 'subject' || $field === 'category' || $field === 'stationery_category') {
+    $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'product');
+    if (!$items) {
+        $items = (new Models\CategoryModel($pdo))->suggestions($q, 8, 'subject');
+    }
+} elseif ($field === 'title') {
+    $items = [];
 } elseif ($field === 'supplier') {
     $items = (new Models\SupplierModel($pdo))->suggestions($q);
+} elseif ($field === 'brand' || $field === 'publisher') {
+    $BA = new Models\BookAttributeModel($pdo);
+    $items = $BA->suggestions('brand', $q);
+    if (!$items) {
+        $items = $BA->suggestions('publisher', $q);
+    }
 } elseif (in_array($field, Models\BookAttributeModel::TYPES, true)) {
     $items = (new Models\BookAttributeModel($pdo))->suggestions($field, $q);
 }

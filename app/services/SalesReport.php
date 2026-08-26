@@ -49,9 +49,15 @@ class SalesReport
     private static function productBreakdown(\PDO $db, int $tenantId, string $date): array
     {
         $st = $db->prepare(
-            "SELECT si.product_name, SUM(si.quantity) AS qty, SUM(si.line_total) AS revenue
+            "SELECT si.product_name, SUM(GREATEST(si.quantity - COALESCE(ret.returned_quantity,0), 0)) AS qty, SUM(si.line_total) AS revenue
                FROM sale_items si
                JOIN sales s ON s.id = si.sale_id
+          LEFT JOIN (
+                    SELECT tenant_id, source_item_id, SUM(returned_quantity) AS returned_quantity
+                      FROM product_returns
+                     WHERE source_type = 'sale'
+                  GROUP BY tenant_id, source_item_id
+               ) ret ON ret.tenant_id = si.tenant_id AND ret.source_item_id = si.id
               WHERE si.tenant_id = ? AND s.status = 'completed' AND DATE(s.created_at) = ?
            GROUP BY si.product_name"
         );
@@ -129,8 +135,11 @@ class SalesReport
             ['Revenue', self::money($cur, $sum['revenue'])],
             ['Cash', self::money($cur, $sum['cash'])],
             ['M-Pesa', self::money($cur, $sum['mpesa'])],
+            ['Card', self::money($cur, $sum['card'] ?? 0)],
+            ['Bank', self::money($cur, $sum['bank'] ?? 0)],
+            ['SACCO', self::money($cur, $sum['sacco'] ?? 0)],
         ];
-        $bw = $W / 4;
+        $bw = $W / count($boxes);
         $startX = $pdf->GetX();
         $top = $pdf->GetY();
         foreach ($boxes as $i => $b) {
@@ -168,7 +177,7 @@ class SalesReport
                     date('g:i a', strtotime($s['created_at'])),
                     $s['staff_name'] ?: '-',
                     $s['customer_name'] ?: '-',
-                    $s['payment_method'] === 'cash' ? 'Cash' : 'M-Pesa',
+                    \PaymentOptions::label($s),
                     self::money($cur, $s['total']),
                 ];
                 self::tableRow($pdf, $cols, $row, $fill);
@@ -264,7 +273,7 @@ class SalesReport
 
         $rows = '';
         foreach ($data['sales'] as $s) {
-            $pay = $s['payment_method'] === 'cash' ? 'Cash' : 'M-Pesa';
+            $pay = \PaymentOptions::label($s);
             $rows .= '<tr>'
                 . '<td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:13px;">' . $h($s['receipt_number']) . '</td>'
                 . '<td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:13px;">' . $h(date('g:i a', strtotime($s['created_at']))) . '</td>'
@@ -287,6 +296,8 @@ class SalesReport
             . '<table cellpadding="0" cellspacing="6" style="width:100%;border-collapse:separate;margin-bottom:18px;"><tr>'
             . $card('Sales', (string) $sum['count']) . $card('Revenue', self::money($cur, $sum['revenue']))
             . $card('Cash', self::money($cur, $sum['cash'])) . $card('M-Pesa', self::money($cur, $sum['mpesa']))
+            . $card('Card', self::money($cur, $sum['card'] ?? 0)) . $card('Bank', self::money($cur, $sum['bank'] ?? 0))
+            . $card('SACCO', self::money($cur, $sum['sacco'] ?? 0))
             . '</tr></table>'
             . '<table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;border:1px solid #eee;">'
             . '<thead><tr style="background:#212b36;color:#fff;">'

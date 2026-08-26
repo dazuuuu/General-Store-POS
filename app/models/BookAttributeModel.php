@@ -1,9 +1,7 @@
 <?php
 // app/models/BookAttributeModel.php
-// Small tenant-scoped lookup values shared across many books: Grade/Class,
-// Publisher, Author, Edition. Same dedupe idea as CategoryModel/SupplierModel
-// (trimmed exact match reuses the row) but generic across the four types so
-// entering "Grade Three" or "Longhorn" a second time never creates a duplicate.
+// Tenant-scoped lookup values (brand; legacy grade/publisher/author/edition kept
+// for older rows). Same dedupe idea as CategoryModel/SupplierModel.
 namespace Models;
 
 class BookAttributeModel extends Model
@@ -70,7 +68,7 @@ class BookAttributeModel extends Model
         }
     }
 
-    /** Rows of this type with a count of books currently assigned to them. */
+    /** Rows of this type with a count of products currently assigned to them. */
     public function listWithCounts(string $type): array
     {
         if (!in_array($type, self::TYPES, true)) {
@@ -83,7 +81,7 @@ class BookAttributeModel extends Model
         if (!$rows) {
             return [];
         }
-        $col = $type . '_id'; // grade_id / publisher_id / author_id / edition_id
+        $col = ($type === 'brand') ? 'brand_id' : ($type . '_id'); // grade_id / publisher_id / brand_id…
         $ids = array_column($rows, 'id');
         $in  = implode(',', array_fill(0, count($ids), '?'));
         $cstmt = $this->db->prepare("SELECT {$col}, COUNT(*) c FROM products WHERE tenant_id = ? AND {$col} IN ($in) GROUP BY {$col}");

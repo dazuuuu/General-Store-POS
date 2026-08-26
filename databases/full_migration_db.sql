@@ -178,8 +178,11 @@ CREATE TABLE IF NOT EXISTS tenants (
     currency       VARCHAR(8)   NOT NULL DEFAULT 'KES',
     phone          VARCHAR(30)  NULL,
     address        VARCHAR(255) NULL,
+    po_box         VARCHAR(120) NULL,
+    business_email VARCHAR(190) NULL,
     receipt_footer VARCHAR(255) NULL,
     kra_pin        VARCHAR(20)  NULL,
+    payment_credentials TEXT NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_tenant_slug (slug),
@@ -726,6 +729,7 @@ CREATE TABLE IF NOT EXISTS products (
     sizes                  JSON NULL,                              -- ["S","M","L"] or ["500ml","1L"]
     image_path             VARCHAR(255) NULL,
     low_stock_threshold    INT NOT NULL DEFAULT 10,
+    credit_limit           DECIMAL(12,2) NULL,
     low_stock_notified_at  DATETIME NULL,
     status                 ENUM('active','draft','archived') NOT NULL DEFAULT 'active',
     created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -774,6 +778,7 @@ ALTER TABLE products ADD COLUMN colors JSON NULL AFTER offer_ends_at;
 ALTER TABLE products ADD COLUMN sizes JSON NULL AFTER colors;
 ALTER TABLE products ADD COLUMN image_path VARCHAR(255) NULL AFTER sizes;
 ALTER TABLE products ADD COLUMN low_stock_threshold INT NOT NULL DEFAULT 10 AFTER image_path;
+ALTER TABLE products ADD COLUMN credit_limit DECIMAL(12,2) NULL AFTER low_stock_threshold;
 ALTER TABLE products ADD COLUMN low_stock_notified_at DATETIME NULL AFTER low_stock_threshold;
 UPDATE products SET status = 'draft' WHERE status = 'inactive';
 ALTER TABLE products MODIFY status ENUM('active','draft','archived') NOT NULL DEFAULT 'active';
@@ -918,7 +923,13 @@ CREATE TABLE IF NOT EXISTS orders (
     subtotal         DECIMAL(12,2) NOT NULL DEFAULT 0,
     discount_amount  DECIMAL(12,2) NOT NULL DEFAULT 0,
     total            DECIMAL(12,2) NOT NULL DEFAULT 0,
-    payment_method   ENUM('cash','mpesa','split') NULL,
+    amount_paid      DECIMAL(12,2) NOT NULL DEFAULT 0,
+    amount_due       DECIMAL(12,2) NOT NULL DEFAULT 0,
+    payment_method   ENUM('cash','mpesa','split','card','bank','sacco','credit') NULL,
+    payment_status   VARCHAR(20) NOT NULL DEFAULT 'credit',
+    payment_provider VARCHAR(100) NULL,
+    payment_account_name VARCHAR(160) NULL,
+    payment_reference VARCHAR(120) NULL,
     cash_amount      DECIMAL(12,2) NULL,
     mpesa_amount     DECIMAL(12,2) NULL,
     amount_tendered  DECIMAL(12,2) NULL,
@@ -938,8 +949,41 @@ ALTER TABLE orders ADD COLUMN customer_phone VARCHAR(30) NULL AFTER table_name;
 ALTER TABLE orders ADD COLUMN customer_email VARCHAR(255) NULL AFTER customer_phone;
 ALTER TABLE orders ADD COLUMN channel ENUM('walkin','tab') NOT NULL DEFAULT 'tab' AFTER customer_email;
 ALTER TABLE orders ADD COLUMN discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER subtotal;
+ALTER TABLE orders MODIFY COLUMN payment_method ENUM('cash','mpesa','split','card','bank','sacco','credit') DEFAULT NULL;
+ALTER TABLE orders ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'credit' AFTER payment_method;
+ALTER TABLE orders ADD COLUMN amount_paid DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER total;
+ALTER TABLE orders ADD COLUMN amount_due DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER amount_paid;
+ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(100) NULL AFTER payment_method;
+ALTER TABLE orders ADD COLUMN payment_account_name VARCHAR(160) NULL AFTER payment_provider;
+ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(120) NULL AFTER payment_account_name;
 ALTER TABLE orders ADD COLUMN invoice_sent_at DATETIME NULL AFTER updated_at;
 ALTER TABLE orders ADD COLUMN delivery_note_sent_at DATETIME NULL AFTER invoice_sent_at;
+
+UPDATE orders
+   SET amount_paid = CASE WHEN status = 'paid' THEN total ELSE COALESCE(amount_paid, 0) END,
+       amount_due = CASE WHEN status = 'paid' THEN 0 ELSE GREATEST(total - COALESCE(amount_paid, 0), 0) END,
+       payment_status = CASE WHEN status = 'paid' THEN 'paid' ELSE 'credit' END
+ WHERE amount_due = 0;
+
+CREATE TABLE IF NOT EXISTS order_payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    order_id INT NOT NULL,
+    staff_id INT NULL,
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    method VARCHAR(20) NOT NULL,
+    cash_amount DECIMAL(12,2) NULL,
+    mpesa_amount DECIMAL(12,2) NULL,
+    amount_tendered DECIMAL(12,2) NULL,
+    change_due DECIMAL(12,2) NULL,
+    provider VARCHAR(100) NULL,
+    account_name VARCHAR(160) NULL,
+    reference VARCHAR(120) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_order_payment_order (tenant_id, order_id),
+    KEY idx_order_payment_staff (tenant_id, staff_id),
+    CONSTRAINT fk_order_payments_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS order_items (
     id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -955,6 +999,32 @@ CREATE TABLE IF NOT EXISTS order_items (
     KEY idx_orderitem_order (order_id),
     KEY idx_orderitem_tenant (tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS product_returns (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    source_type ENUM('sale','order') NOT NULL,
+    source_id INT NOT NULL,
+    source_item_id INT NOT NULL,
+    product_id INT NULL,
+    product_name VARCHAR(160) NOT NULL,
+    receipt_number VARCHAR(32) NOT NULL,
+    returned_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    used_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    restocked_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    reason VARCHAR(120) NULL,
+    note VARCHAR(255) NULL,
+    processed_by INT NULL,
+    migrated_at DATETIME NULL,
+    migrated_by INT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_returns_source (tenant_id, source_type, source_id),
+    KEY idx_returns_item (tenant_id, source_type, source_item_id),
+    KEY idx_returns_product (tenant_id, product_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE product_returns ADD COLUMN migrated_at DATETIME NULL AFTER processed_by;
+ALTER TABLE product_returns ADD COLUMN migrated_by INT NULL AFTER migrated_at;
 
 -- "Hold Order": a cart set aside before it becomes a real sale/tab. Holding
 -- does NOT touch stock — nothing is committed until it's resumed.

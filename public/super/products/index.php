@@ -19,12 +19,12 @@ $apiBase = public_url('api/inventory/');
 
 // id => name maps so the activity log shows names, not raw ids.
 $catName = []; foreach ($C->all([], 'name ASC') as $c) { $catName[(int)$c['id']] = $c['name']; }
-$attrNames = ['grade' => [], 'publisher' => [], 'author' => [], 'edition' => []];
+$attrNames = ['brand' => []];
 foreach (array_keys($attrNames) as $type) {
     foreach ($BA->all(['type' => $type]) as $a) { $attrNames[$type][(int) $a['id']] = $a['name']; }
 }
 
-$editId  = (int) ($_GET['edit'] ?? $_POST['id'] ?? 0);
+$editId  = (int) ($_GET['edit'] ?? $_GET['id'] ?? $_POST['id'] ?? 0);
 $editRow = $editId > 0 ? $P->findWithMeta($editId) : null;
 
 // This page only edits an existing product — nothing to do without one.
@@ -47,15 +47,15 @@ function audit_product_view(array $r, array $catName, array $attrNames): array
     return [
         'name'                => $r['name'] ?? null,
         'category_id'         => $cid > 0 ? ($catName[$cid] ?? ('#' . $cid)) : null,
-        'grade_id'            => $idName('grade', $r['grade_id'] ?? 0),
-        'publisher_id'        => $idName('publisher', $r['publisher_id'] ?? 0),
-        'author_id'           => $idName('author', $r['author_id'] ?? 0),
-        'edition_id'          => $idName('edition', $r['edition_id'] ?? 0),
+        'brand_id'            => $idName('brand', $r['brand_id'] ?? 0),
+        'colors'              => is_array($r['colors'] ?? null) ? implode(', ', $r['colors']) : (($r['colors'] ?? '') !== '' ? $r['colors'] : null),
         'barcode'             => ($r['barcode'] ?? '') !== '' ? $r['barcode'] : null,
         'description'         => ($r['description'] ?? '') !== '' ? $r['description'] : null,
         'quantity'            => $r['quantity'] ?? null,
+        'faulty_quantity'     => $r['faulty_quantity'] ?? null,
         'unit'                => $r['unit'] ?? null,
         'buying_price'        => $r['buying_price'] ?? null,
+        'package_buying_price' => $r['package_buying_price'] ?? null,
         'wholesale_price'     => $r['wholesale_price'] ?? null,
         'retail_price'        => $r['retail_price'] ?? null,
         'offer_price'         => ($r['offer_price'] ?? '') !== '' && $r['offer_price'] !== null ? $r['offer_price'] : null,
@@ -95,44 +95,38 @@ function product_handle_image(array $file): array
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $supplierName = trim($_POST['supplier'] ?? '');
-    // This page's form only ever edits the book fields — product_type isn't
-    // a form field, so keep whatever the row already was (never silently
-    // flip a stationery item back to 'book' just by saving an edit).
-    $productType = in_array($editRow['product_type'] ?? 'book', ['book', 'stationery'], true) ? $editRow['product_type'] : 'book';
     $in = [
-        'product_type'        => $productType,
+        'product_type'        => 'product',
         'name'                => trim($_POST['name'] ?? ''),
-        'category_id'         => (int) $C->findOrCreate($_POST['subject'] ?? '', $productType === 'stationery' ? 'stationery' : 'subject'),
-        'grade_id'            => (int) $BA->findOrCreate('grade', $_POST['grade'] ?? ''),
-        'publisher_id'        => (int) $BA->findOrCreate('publisher', $_POST['publisher'] ?? ''),
-        'author_id'           => (int) $BA->findOrCreate('author', $_POST['author'] ?? ''),
-        'edition_id'          => (int) $BA->findOrCreate('edition', $_POST['edition'] ?? ''),
-        // This form has no Brand/Colors/Variants fields (those live on the
-        // Stationery pages) — preserve them as-is rather than wiping a
-        // stationery item's brand/colors/variants just by saving here.
-        'brand_id'            => (int) ($editRow['brand_id'] ?? 0),
-        'colors'              => $editRow['colors'] ? (json_decode($editRow['colors'], true) ?: []) : [],
+        'category_id'         => (int) $C->findOrCreate($_POST['category'] ?? '', 'product'),
+        'brand_id'            => (int) $BA->findOrCreate('brand', $_POST['brand'] ?? ''),
+        'colors'              => array_values(array_filter(array_map('trim', explode(',', $_POST['colors'] ?? '')))),
         'sizes'               => $editRow['sizes'] ? (json_decode($editRow['sizes'], true) ?: []) : [],
         'barcode'             => trim($_POST['barcode'] ?? ''),
         'supplier_id'         => $supplierName !== '' ? (int) $SUP->findOrCreate($supplierName) : 0,
         'description'         => trim($_POST['description'] ?? ''),
         'quantity'            => $_POST['quantity'] ?? '',
+        'faulty_quantity'     => $_POST['faulty_quantity'] ?? 0,
         'unit'                => $_POST['unit'] ?? 'piece',
         'buying_price'        => $_POST['buying_price'] ?? '',
+        'package_buying_price' => $_POST['package_buying_price'] ?? '',
         'wholesale_price'     => $_POST['wholesale_price'] ?? '',
         'retail_price'        => $_POST['retail_price'] ?? '',
         'offer_price'         => $_POST['offer_price'] ?? '',
         'offer_starts_at'     => $_POST['offer_starts_at'] ?? '',
         'offer_ends_at'       => $_POST['offer_ends_at'] ?? '',
         'low_stock_threshold' => (int) ($_POST['low_stock_threshold'] ?? 10),
-        // Draft always wins; otherwise keep an archived book archived instead
-        // of silently reactivating it just because its price was edited.
+        'credit_limit'        => $_POST['credit_limit'] ?? '',
+        'units_per_pack'      => $_POST['units_per_pack'] ?? 1,
+        'pack_unit'           => $_POST['pack_unit'] ?? '',
+        'pack_price'          => $_POST['pack_price'] ?? '',
         'status'              => ($_POST['action'] ?? '') === 'draft' ? 'draft' : ($editRow['status'] === 'archived' ? 'archived' : 'active'),
     ];
     $old = $in;
-    $old['subject'] = $_POST['subject'] ?? ''; $old['grade'] = $_POST['grade'] ?? '';
-    $old['publisher'] = $_POST['publisher'] ?? ''; $old['author'] = $_POST['author'] ?? '';
-    $old['edition'] = $_POST['edition'] ?? ''; $old['supplier'] = $supplierName;
+    $old['category'] = $_POST['category'] ?? '';
+    $old['brand'] = $_POST['brand'] ?? '';
+    $old['supplier'] = $supplierName;
+    $old['colors'] = $_POST['colors'] ?? '';
 
     // Image: keep existing unless a new one is uploaded.
     $img = product_handle_image($_FILES['image'] ?? []);
@@ -155,6 +149,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } catch (\Throwable $e) { /* logging must never block the save */ }
 
+            $tiers = [];
+            foreach (($_POST['tiers'] ?? []) as $tr) {
+                if ((float)($tr['min_qty'] ?? 0) > 0 && ($tr['unit_price'] ?? '') !== '') {
+                    $tiers[] = $tr;
+                }
+            }
+            (new Models\PriceTierModel($pdo))->replaceForProduct($editId, $tiers);
             $_SESSION['flash']['success'] = 'Product updated.';
             header('Location: ' . $inventoryUrl); exit;
         }
@@ -187,7 +188,7 @@ $activity = $AL->recent('product', 20);
 $page_title = 'Edit product';
 
 ob_start();
-$unitLabels = ['piece' => 'Piece(s)', 'g' => 'Grams (g)', 'kg' => 'Kilograms (kg)', 'tonne' => 'Tonnes', 'ml' => 'Millilitres (ml)', 'litre' => 'Litres'];
+$unitLabels = ['piece'=>'Piece(s)','kg'=>'Kilograms (kg)','g'=>'Grams (g)','bale'=>'Bale(s)','carton'=>'Carton(s)','pack'=>'Pack(s)','dozen'=>'Dozen','box'=>'Box(es)','ml'=>'Millilitres (ml)','litre'=>'Litres','tonne'=>'Tonnes'];
 
 $actionBadge = function (string $a): string {
     $map = [
@@ -210,7 +211,7 @@ $actionBadge = function (string $a): string {
   <div class="col-12 col-lg-6">
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-4">
-        <p class="text-muted small mb-3">Stock value = buying price &times; quantity. To add new stock or a new product, use <a href="<?php echo public_url('super/stock/new.php'); ?>">Record stock</a>.</p>
+        <p class="text-muted small mb-3">Stock value = buying price &times; quantity. To add new stock or a new product, use <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products</a>.</p>
 
         <?php if (!empty($errors['_'])): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($errors['_']); ?></div><?php endif; ?>
         <?php if (!empty($errors['image'])): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($errors['image']); ?></div><?php endif; ?>
@@ -219,24 +220,24 @@ $actionBadge = function (string $a): string {
           <input type="hidden" name="id" value="<?php echo (int)$editRow['id']; ?>">
 
           <div class="mb-3">
-            <label class="form-label">Book title</label>
-            <input name="name" class="form-control" value="<?php echo htmlspecialchars($val('name')); ?>" placeholder="e.g. Growing in Christ" required>
+            <label class="form-label">Product name</label>
+            <input name="name" class="form-control" value="<?php echo htmlspecialchars($val('name')); ?>" placeholder="e.g. Yellow beans / Soft drink 500ml" required>
             <?php if (!empty($errors['name'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['name']); ?></small><?php endif; ?>
           </div>
 
           <div class="row g-2">
             <div class="col-6 mb-3">
-              <label class="form-label">Subject <span class="text-muted">(optional)</span></label>
+              <label class="form-label">Category <span class="text-muted">(optional)</span></label>
               <div class="ta-wrap">
-                <input type="text" name="subject" class="form-control ta-input" data-field="subject" value="<?php echo htmlspecialchars($textVal('subject', 'category_name')); ?>" placeholder="e.g. Mathematics" autocomplete="off">
+                <input type="text" name="category" class="form-control ta-input" data-field="category" value="<?php echo htmlspecialchars($textVal('category', 'category_name')); ?>" placeholder="e.g. Cereals" autocomplete="off">
                 <div class="ta-menu"></div>
               </div>
               <?php if (!empty($errors['category_id'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['category_id']); ?></small><?php endif; ?>
             </div>
             <div class="col-6 mb-3">
-              <label class="form-label">Grade/Class <span class="text-muted">(optional)</span></label>
+              <label class="form-label">Brand <span class="text-muted">(optional)</span></label>
               <div class="ta-wrap">
-                <input type="text" name="grade" class="form-control ta-input" data-field="grade" value="<?php echo htmlspecialchars($textVal('grade', 'grade_name')); ?>" placeholder="e.g. Grade Three" autocomplete="off">
+                <input type="text" name="brand" class="form-control ta-input" data-field="brand" value="<?php echo htmlspecialchars($textVal('brand', 'brand_name')); ?>" placeholder="e.g. Coca-Cola" autocomplete="off">
                 <div class="ta-menu"></div>
               </div>
             </div>
@@ -244,33 +245,22 @@ $actionBadge = function (string $a): string {
 
           <div class="row g-2">
             <div class="col-6 mb-3">
-              <label class="form-label">Publisher <span class="text-muted">(optional)</span></label>
-              <div class="ta-wrap">
-                <input type="text" name="publisher" class="form-control ta-input" data-field="publisher" value="<?php echo htmlspecialchars($textVal('publisher', 'publisher_name')); ?>" placeholder="e.g. Longhorn" autocomplete="off">
-                <div class="ta-menu"></div>
-              </div>
-            </div>
-            <div class="col-6 mb-3">
-              <label class="form-label">Author <span class="text-muted">(optional)</span></label>
-              <div class="ta-wrap">
-                <input type="text" name="author" class="form-control ta-input" data-field="author" value="<?php echo htmlspecialchars($textVal('author', 'author_name')); ?>" placeholder="e.g. Kefa Masita" autocomplete="off">
-                <div class="ta-menu"></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="row g-2">
-            <div class="col-6 mb-3">
-              <label class="form-label">Edition <span class="text-muted">(optional)</span></label>
-              <div class="ta-wrap">
-                <input type="text" name="edition" class="form-control ta-input" data-field="edition" value="<?php echo htmlspecialchars($textVal('edition', 'edition_name')); ?>" placeholder="e.g. First" autocomplete="off">
-                <div class="ta-menu"></div>
-              </div>
+              <label class="form-label">Colors <span class="text-muted">(comma-separated)</span></label>
+              <?php
+                $colorVal = $val('colors');
+                if (is_array($colorVal)) { $colorVal = implode(', ', $colorVal); }
+                elseif ($colorVal === '' || $colorVal === null) {
+                  $raw = $editRow['colors'] ?? '';
+                  $decoded = $raw ? (json_decode($raw, true) ?: []) : [];
+                  $colorVal = is_array($decoded) ? implode(', ', $decoded) : (string)$raw;
+                }
+              ?>
+              <input type="text" name="colors" class="form-control" value="<?php echo htmlspecialchars((string)$colorVal); ?>" placeholder="e.g. Red, Blue, White">
             </div>
             <div class="col-6 mb-3">
               <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
               <div class="ta-wrap">
-                <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" value="<?php echo htmlspecialchars($textVal('supplier', 'supplier_name')); ?>" placeholder="e.g. Longhorn Distributors" autocomplete="off">
+                <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" value="<?php echo htmlspecialchars($textVal('supplier', 'supplier_name')); ?>" placeholder="e.g. Nairobi Distributors" autocomplete="off">
                 <div class="ta-menu"></div>
               </div>
             </div>
@@ -287,14 +277,19 @@ $actionBadge = function (string $a): string {
 
           <div class="mb-3">
             <label class="form-label">Description <span class="text-muted">(optional)</span></label>
-            <textarea name="description" class="form-control" rows="2" placeholder="Short note about the book"><?php echo htmlspecialchars($val('description')); ?></textarea>
+            <textarea name="description" class="form-control" rows="2" placeholder="Short note about the product"><?php echo htmlspecialchars($val('description')); ?></textarea>
           </div>
 
           <div class="row g-2">
             <div class="col-6 mb-3">
-              <label class="form-label">Balance (current stock)</label>
+              <label class="form-label">Good qty (sellable stock)</label>
               <input name="quantity" id="qtyP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars($val('quantity')); ?>" placeholder="0">
               <?php if (!empty($errors['quantity'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['quantity']); ?></small><?php endif; ?>
+            </div>
+            <div class="col-6 mb-3">
+              <label class="form-label">Faulty / broken qty</label>
+              <input name="faulty_quantity" type="number" step="0.01" min="0" class="form-control" placeholder="0" value="<?php echo htmlspecialchars((string)$val('faulty_quantity', $editRow['faulty_quantity'] ?? 0)); ?>">
+              <?php if (!empty($errors['faulty_quantity'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['faulty_quantity']); ?></small><?php endif; ?>
             </div>
             <div class="col-6 mb-3">
               <label class="form-label">Unit</label>
@@ -307,21 +302,17 @@ $actionBadge = function (string $a): string {
           </div>
 
           <div class="row g-2">
-            <div class="col-4 mb-3">
-              <label class="form-label">Unit price — cost (KES)</label>
+            <div class="col-6 mb-3">
+              <label class="form-label">Buying price of item inside (KES)</label>
               <input name="buying_price" id="buyP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars($val('buying_price')); ?>" placeholder="0">
               <?php if (!empty($errors['buying_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['buying_price']); ?></small><?php endif; ?>
             </div>
-            <div class="col-4 mb-3">
-              <label class="form-label">Wholesale (KES)</label>
-              <input name="wholesale_price" id="wholeP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars($val('wholesale_price', $val('selling_price'))); ?>" placeholder="0">
-              <?php if (!empty($errors['wholesale_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['wholesale_price']); ?></small><?php endif; ?>
-            </div>
-            <div class="col-4 mb-3">
-              <label class="form-label">Selling price (KES)</label>
+            <div class="col-6 mb-3">
+              <label class="form-label">Selling price of items inside (retail price)</label>
               <input name="retail_price" id="retailP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars($val('retail_price', $val('selling_price'))); ?>" placeholder="0">
               <?php if (!empty($errors['retail_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['retail_price']); ?></small><?php endif; ?>
             </div>
+            <input name="wholesale_price" id="wholeP" type="hidden" value="<?php echo htmlspecialchars($val('wholesale_price', $val('selling_price'))); ?>">
           </div>
 
           <div class="border rounded p-3 mb-3" style="border-color:#e2e8f0!important;">
@@ -366,7 +357,52 @@ $actionBadge = function (string $a): string {
             <small class="text-muted">JPG, PNG, WEBP or GIF, under 3 MB.<?php echo $curImage ? ' Leave empty to keep the current image.' : ''; ?></small>
           </div>
 
-          <button class="btn btn-primary" name="action" value="save">Save book</button>
+          
+          <hr class="my-3">
+          <h3 class="h6 fw-bold">Bulk units &amp; credit limit</h3>
+          <div class="row g-2 mb-3">
+            <div class="col-md-4">
+              <label class="form-label small">Units per pack</label>
+              <input name="units_per_pack" id="unitsPerPackP" type="number" step="0.01" min="0.01" class="form-control" value="<?php echo htmlspecialchars((string) $val('units_per_pack', $editRow['units_per_pack'] ?? 1)); ?>">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Pack unit label</label>
+              <input name="pack_unit" id="packUnitP" type="text" class="form-control" placeholder="e.g. carton" value="<?php echo htmlspecialchars((string) $val('pack_unit', $editRow['pack_unit'] ?? '')); ?>">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Selling price of the package (wholesale price)</label>
+              <input name="pack_price" id="packPriceP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars((string) $val('pack_price', $editRow['pack_price'] ?? '')); ?>">
+              <?php if (!empty($errors['pack_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['pack_price']); ?></small><?php endif; ?>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Buying price of the package</label>
+              <input name="package_buying_price" id="packageBuyP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars((string) $val('package_buying_price', $editRow['package_buying_price'] ?? '')); ?>">
+              <?php if (!empty($errors['package_buying_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['package_buying_price']); ?></small><?php endif; ?>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Product credit limit (KES)</label>
+              <input name="credit_limit" type="number" step="0.01" min="0" class="form-control" placeholder="Leave blank for no limit" value="<?php echo htmlspecialchars((string) $val('credit_limit', $editRow['credit_limit'] ?? '')); ?>">
+              <div class="form-text">Admin ceiling for a single credit line on this product.</div>
+            </div>
+          </div>
+          <h3 class="h6 fw-bold">Tiered pricing</h3>
+          <p class="text-muted small">Quantity breaks — larger buys get a lower unit price.</p>
+          <?php
+            $tierRows = (new Models\PriceTierModel($pdo))->forProduct($editId);
+            if (!$tierRows) { $tierRows = [['min_qty'=>'', 'max_qty'=>'', 'unit_price'=>'', 'label'=>'']]; }
+          ?>
+          <div id="tierRows">
+            <?php foreach ($tierRows as $i => $tr): ?>
+            <div class="row g-2 mb-2">
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][min_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Min qty" value="<?php echo htmlspecialchars((string)($tr['min_qty'] ?? '')); ?>"></div>
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][max_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Max (opt)" value="<?php echo htmlspecialchars((string)($tr['max_qty'] ?? '')); ?>"></div>
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][unit_price]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Unit price" value="<?php echo htmlspecialchars((string)($tr['unit_price'] ?? '')); ?>"></div>
+              <div class="col-3"><input name="tiers[<?php echo $i; ?>][label]" type="text" class="form-control form-control-sm" placeholder="Label" value="<?php echo htmlspecialchars((string)($tr['label'] ?? '')); ?>"></div>
+            </div>
+            <?php endforeach; ?>
+          </div>
+
+          <button class="btn btn-primary" name="action" value="save">Save product</button>
           <button class="btn btn-outline-secondary" name="action" value="draft">Save as draft</button>
           <a class="btn btn-link" href="<?php echo $inventoryUrl; ?>">Cancel</a>
         </form>
@@ -433,9 +469,7 @@ $actionBadge = function (string $a): string {
   .ta-menu button:hover, .ta-menu button.active { background: #f1f5f9; }
 </style>
 <script>
-  // Free-text type-ahead for Subject/Grade/Publisher/Author/Edition/Supplier —
-  // suggests existing values as you type; an exact match on save reuses it,
-  // anything new is created automatically (no dropdown pickers).
+  // Type-ahead for Category / Brand / Supplier.
   (function () {
     var API = <?php echo json_encode($apiBase); ?>;
     document.querySelectorAll('.ta-input').forEach(function (input) {
@@ -477,35 +511,47 @@ $actionBadge = function (string $a): string {
   // Live stock value + profit readout
   var buyP = document.getElementById('buyP'), wholeP = document.getElementById('wholeP'),
       retailP = document.getElementById('retailP'), qtyP = document.getElementById('qtyP'),
+      unitsPerPackP = document.getElementById('unitsPerPackP'), packUnitP = document.getElementById('packUnitP'),
+      packPriceP = document.getElementById('packPriceP'), packageBuyP = document.getElementById('packageBuyP'),
       box = document.getElementById('profitBox'), stockBox = document.getElementById('stockValueBox');
   function calcProfit() {
-    var b = parseFloat(buyP.value), w = parseFloat(wholeP.value), r = parseFloat(retailP.value), q = parseFloat(qtyP.value) || 0;
-    if (isNaN(b)) { box.style.display = 'none'; stockBox.style.display = 'none'; return; }
+    var b = parseFloat(buyP.value), w = parseFloat(wholeP.value), r = parseFloat(retailP.value), q = parseFloat(qtyP.value) || 0,
+        unitsPerPack = parseFloat(unitsPerPackP.value) || 1,
+        packUnit = (packUnitP.value || '').trim(),
+        packSell = parseFloat(packPriceP.value),
+        packBuy = parseFloat(packageBuyP.value),
+        hasPack = packUnit !== '' && unitsPerPack > 1;
+    if (isNaN(b) && isNaN(packBuy)) { box.style.display = 'none'; stockBox.style.display = 'none'; return; }
+    if (hasPack && !isNaN(packBuy)) {
+      b = Math.round((packBuy / unitsPerPack) * 100) / 100;
+    }
     if (!isNaN(q) && q >= 0) {
       stockBox.style.display = 'block';
-      stockBox.innerHTML = 'Stock value at cost: <strong>KES ' + (b * q).toFixed(0) + '</strong> (buying &times; quantity)';
+      stockBox.innerHTML = 'Stock value at cost: <strong>KES ' + (b * q).toFixed(0) + '</strong> (content buying &times; quantity)';
     } else { stockBox.style.display = 'none'; }
-    if (isNaN(w) && isNaN(r)) { box.style.display = 'none'; return; }
-    var wProfit = isNaN(w) ? null : w - b;
-    var rProfit = isNaN(r) ? null : r - b;
+    if ((hasPack && (isNaN(packSell) || isNaN(packBuy))) && isNaN(r)) { box.style.display = 'none'; return; }
+    var packageCount = hasPack ? Math.floor((q / unitsPerPack) * 100) / 100 : q;
+    var wProfit = hasPack && !isNaN(packSell) && !isNaN(packBuy) ? packSell - packBuy : (!isNaN(w) && !isNaN(b) ? w - b : null);
+    var rProfit = !isNaN(r) && !isNaN(b) ? r - b : null;
     box.style.display = 'block';
     var html = '';
     if (wProfit !== null) {
-      var wMargin = w > 0 ? (wProfit / w * 100) : 0;
-      html += '<div><strong>Wholesale</strong> profit/unit: KES ' + wProfit.toFixed(0) + ' &middot; margin ' + wMargin.toFixed(1) + '%';
-      if (q > 0) html += ' &middot; total profit if all sold: KES ' + (wProfit * q).toFixed(0);
+      var wSell = hasPack ? packSell : w;
+      var wMargin = wSell > 0 ? (wProfit / wSell * 100) : 0;
+      html += '<div><strong>Wholesale package</strong> profit/' + (hasPack ? packUnit : 'unit') + ': KES ' + wProfit.toFixed(0) + ' &middot; margin ' + wMargin.toFixed(1) + '%';
+      if (q > 0) html += ' &middot; total if all sold wholesale: KES ' + (wProfit * packageCount).toFixed(0);
       html += '</div>';
     }
     if (rProfit !== null) {
       var rMargin = r > 0 ? (rProfit / r * 100) : 0;
-      html += '<div class="mt-1"><strong>Retail</strong> profit/unit: KES ' + rProfit.toFixed(0) + ' &middot; margin ' + rMargin.toFixed(1) + '%';
-      if (q > 0) html += ' &middot; total profit if all sold: KES ' + (rProfit * q).toFixed(0);
+      html += '<div class="mt-1"><strong>Retail content</strong> profit/' + (hasPack ? 'content unit' : 'unit') + ': KES ' + rProfit.toFixed(0) + ' &middot; margin ' + rMargin.toFixed(1) + '%';
+      if (q > 0) html += ' &middot; total if all sold retail: KES ' + (rProfit * q).toFixed(0);
       html += '</div>';
     }
     box.className = 'alert py-2 small mb-3 ' + ((wProfit !== null && wProfit < 0) || (rProfit !== null && rProfit < 0) ? 'alert-danger' : 'alert-success');
     box.innerHTML = html;
   }
-  [buyP, wholeP, retailP, qtyP].forEach(function(el){ if(el) el.addEventListener('input', calcProfit); });
+  [buyP, wholeP, retailP, qtyP, unitsPerPackP, packUnitP, packPriceP, packageBuyP].forEach(function(el){ if(el) el.addEventListener('input', calcProfit); });
   calcProfit();
 
   var offerToggle = document.getElementById('offerToggle'), offerFields = document.getElementById('offerFields');
