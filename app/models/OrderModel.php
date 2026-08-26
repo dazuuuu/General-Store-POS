@@ -1422,7 +1422,13 @@ class OrderModel extends Model
     public function items(int $orderId): array
     {
         $tid = \TenantContext::tenantId();
-        $stmt = $this->db->prepare('SELECT * FROM order_items WHERE order_id = ? AND tenant_id = ? ORDER BY id ASC');
+        $stmt = $this->db->prepare(
+            'SELECT oi.*, p.unit AS product_unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
+               FROM order_items oi
+          LEFT JOIN products p ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id
+              WHERE oi.order_id = ? AND oi.tenant_id = ?
+           ORDER BY oi.id ASC'
+        );
         $stmt->execute([$orderId, $tid]);
         return $stmt->fetchAll();
     }
@@ -1455,7 +1461,9 @@ class OrderModel extends Model
         $in = implode(',', array_fill(0, count($orderIds), '?'));
         $stmt = $this->db->prepare(
             "SELECT oi.id, oi.order_id, oi.product_name, oi.quantity, oi.line_total,
-                    oi.product_id, p.quantity AS stock_left
+                    oi.product_id, oi.price_type, oi.unit_price,
+                    p.quantity AS stock_left, p.unit AS product_unit,
+                    p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
                FROM order_items oi
           LEFT JOIN products p ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id
               WHERE oi.tenant_id = ? AND oi.order_id IN ($in) ORDER BY oi.id ASC"
@@ -1473,6 +1481,13 @@ class OrderModel extends Model
                 'returned' => (float) $ret['returned'],
                 'used' => (float) $ret['used'],
                 'stock_left' => $r['stock_left'] !== null ? (float) $r['stock_left'] : null,
+                'price_type' => $r['price_type'] ?? 'retail',
+                'unit_price' => (float) ($r['unit_price'] ?? 0),
+                'unit' => $r['product_unit'] ?? '',
+                'units_per_pack' => $r['units_per_pack'] ?? null,
+                'pack_unit' => $r['pack_unit'] ?? '',
+                'pack_price' => $r['pack_price'] ?? null,
+                'retail_pack_price' => $r['retail_pack_price'] ?? null,
             ];
         }
         return $out;

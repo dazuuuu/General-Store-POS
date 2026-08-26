@@ -69,13 +69,16 @@ function receipt_inner(array $sale, array $items, string $shop, string $staff, a
     // Item table: ITEM | QTY | PRICE | AMT
     $rows = '';
     foreach ($items as $idx => $it) {
-        $qty = rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.');
+        $shown = QtyFormat::saleLine($it);
+        $nameExtra = $shown['price_note'] === 'retail' || $shown['price_note'] === 'wholesale'
+            ? ($shown['unit_label'] !== '' ? $shown['unit_label'] : '')
+            : $shown['price_note'];
         $rows .= '<tr>'
             . '<td style="padding:4px 4px 4px 0;vertical-align:top;white-space:nowrap;">' . ((int) $idx + 1) . '</td>'
             . '<td style="padding:4px 4px 4px 0;vertical-align:top;">' . $h($it['product_name'])
-            . (!empty($it['unit']) ? ' <span style="color:#000;">(' . $h($it['unit']) . ')</span>' : '') . '</td>'
-            . '<td style="padding:4px;text-align:center;vertical-align:top;white-space:nowrap;">' . $h($qty) . '</td>'
-            . '<td style="padding:4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($it['unit_price']) . '</td>'
+            . ($nameExtra !== '' ? ' <span style="color:#000;">(' . $h($nameExtra) . ')</span>' : '') . '</td>'
+            . '<td style="padding:4px;text-align:center;vertical-align:top;white-space:nowrap;">' . $h($shown['qty_label']) . '</td>'
+            . '<td style="padding:4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($shown['unit_price']) . '</td>'
             . '<td style="padding:4px 0 4px 4px;text-align:right;vertical-align:top;white-space:nowrap;">' . amt($it['line_total']) . '</td>'
             . '</tr>';
     }

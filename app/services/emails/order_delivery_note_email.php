@@ -15,10 +15,10 @@ function build_order_delivery_note_email(array $order, array $items, array $shop
 
     $rows = '';
     foreach ($items as $it) {
-        $qty = rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.');
+        $shown = QtyFormat::saleLine($it);
         $rows .= '<tr>'
             . '<td style="padding:8px 4px;border-bottom:1px solid #f1f5f9;">' . $h($it['product_name']) . '</td>'
-            . '<td style="padding:8px 4px;border-bottom:1px solid #f1f5f9;text-align:right;">' . $h($qty) . '</td>'
+            . '<td style="padding:8px 4px;border-bottom:1px solid #f1f5f9;text-align:right;">' . $h($shown['summary_qty']) . '</td>'
             . '</tr>';
     }
 
@@ -52,7 +52,7 @@ HTML;
 
     $textLines = ["Delivery note {$order['receipt_number']} from {$shopName}", ''];
     foreach ($items as $it) {
-        $textLines[] = $it['product_name'] . ' — qty ' . rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.');
+        $textLines[] = $it['product_name'] . ' — qty ' . QtyFormat::saleLine($it)['summary_qty'];
     }
     $text = implode("\n", $textLines);
 

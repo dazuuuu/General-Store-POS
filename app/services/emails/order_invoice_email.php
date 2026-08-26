@@ -41,12 +41,14 @@ function build_order_invoice_email(array $order, array $items, array $shop): arr
 
     $rows = '';
     foreach ($items as $idx => $it) {
-        $qty = rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.');
+        $shown = QtyFormat::saleLine($it);
+        $qty = $shown['qty_label'] . ($shown['unit_label'] !== '' ? ' ' . $shown['unit_label'] : '');
+        $name = $it['product_name'] . ($shown['price_note'] === 'retail box' || $shown['price_note'] === 'wholesale box' ? ' (' . $shown['price_note'] . ')' : '');
         $rows .= '<tr>'
             . '<td style="padding:4px 4px 4px 0;color:#000;font-size:15px;font-weight:900;vertical-align:top;">' . ((int) $idx + 1) . '</td>'
-            . '<td style="padding:4px 4px 4px 0;color:#000;font-size:15px;font-weight:900;vertical-align:top;">' . $h($it['product_name']) . '</td>'
+            . '<td style="padding:4px 4px 4px 0;color:#000;font-size:15px;font-weight:900;vertical-align:top;">' . $h($name) . '</td>'
             . '<td style="padding:4px;color:#000;font-size:15px;font-weight:900;text-align:center;vertical-align:top;">' . $h($qty) . '</td>'
-            . '<td style="padding:4px;color:#000;font-size:15px;font-weight:900;text-align:right;vertical-align:top;">' . $money($it['unit_price']) . '</td>'
+            . '<td style="padding:4px;color:#000;font-size:15px;font-weight:900;text-align:right;vertical-align:top;">' . $money($shown['unit_price']) . '</td>'
             . '<td style="padding:4px 0 4px 4px;color:#000;font-size:15px;font-weight:900;text-align:right;vertical-align:top;">' . $money($it['line_total']) . '</td>'
             . '</tr>';
     }
@@ -117,7 +119,8 @@ HTML;
         $textLines[] = '';
     }
     foreach ($items as $idx => $it) {
-        $textLines[] = ((int) $idx + 1) . '. ' . $it['product_name'] . ' x' . rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.') . ' — ' . $money($it['line_total']);
+        $shown = QtyFormat::saleLine($it);
+        $textLines[] = ((int) $idx + 1) . '. ' . $it['product_name'] . ' x' . $shown['summary_qty'] . ' — ' . $money($it['line_total']);
     }
     if ($discount > 0) {
         $textLines[] = '';

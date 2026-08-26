@@ -112,7 +112,7 @@ ob_start();
       <div class="col-md-4"><label class="form-label small">Customer name</label><input name="customer_name" class="form-control" required value="<?php echo htmlspecialchars($invoice['table_name'] ?? ''); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
       <div class="col-md-4"><label class="form-label small">Phone</label><input name="customer_phone" class="form-control" value="<?php echo htmlspecialchars($invoice['customer_phone'] ?? ''); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
       <div class="col-md-4"><label class="form-label small">Email</label><input type="email" name="customer_email" class="form-control" value="<?php echo htmlspecialchars($invoice['customer_email'] ?? ''); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($invoice['sale_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail</option><option value="wholesale" <?php echo ($invoice['sale_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
+      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($invoice['sale_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail item</option><option value="retail_pack">Retail box</option><option value="wholesale" <?php echo ($invoice['sale_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale box</option></select></div>
       <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>" <?php echo (int) ($invoice['credit_duration_days'] ?? 0) === $days ? 'selected' : ''; ?>><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
       <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['discount_amount'] ?? 0)); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
       <div class="col-md-4"><label class="form-label small">Extra charge</label><input type="number" min="0" step="0.01" name="additional_charges" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges'] ?? 0)); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
@@ -129,11 +129,11 @@ ob_start();
         <div class="invoice-edit-row" data-row>
           <div>
             <div class="fw-semibold"><?php echo htmlspecialchars($it['product_name']); ?></div>
-            <div class="text-muted small">Current line: KES <?php echo number_format((float) $it['line_total'], 2); ?></div>
+            <div class="text-muted small"><?php $shown = QtyFormat::saleLine($it); echo htmlspecialchars($shown['summary_qty'] . ($shown['price_note'] !== '' ? ' · ' . $shown['price_note'] : '')); ?> · KES <?php echo number_format((float) $it['line_total'], 2); ?></div>
           </div>
           <div><label class="form-label small mb-1">Qty</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][quantity]" class="form-control qty-input" value="<?php echo htmlspecialchars(rtrim(rtrim(number_format((float) $it['quantity'], 2, '.', ''), '0'), '.')); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
           <div><label class="form-label small mb-1">Price</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][unit_price]" class="form-control price-input" value="<?php echo htmlspecialchars((string) $it['unit_price']); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-          <div><label class="form-label small mb-1">Type</label><select name="existing_items[<?php echo (int) $it['id']; ?>][price_type]" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($it['price_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail</option><option value="wholesale" <?php echo ($it['price_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
+          <div><label class="form-label small mb-1">Type</label><select name="existing_items[<?php echo (int) $it['id']; ?>][price_type]" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($it['price_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail item</option><option value="wholesale" <?php echo ($it['price_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
           <div class="fw-bold text-end line-output">KES 0</div>
           <?php if (($invoice['status'] ?? '') === 'open'): ?>
             <div><button type="button" class="btn btn-outline-danger w-100 remove-existing">Remove</button><input type="hidden" name="existing_items[<?php echo (int) $it['id']; ?>][remove]" value=""></div>
@@ -162,8 +162,8 @@ ob_start();
       </div>
       <div class="selected-product small text-muted mt-1">No product selected</div>
     </div>
-    <div><label class="form-label small mb-1">Qty</label><input type="number" step="0.01" min="0" name="new_items[__I__][quantity]" class="form-control qty-input" placeholder="0"></div>
-    <div><label class="form-label small mb-1">Type</label><select name="new_items[__I__][price_type]" class="form-select new-price-type"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
+    <div><label class="form-label small mb-1 qty-label">Qty</label><input type="hidden" name="new_items[__I__][quantity]" class="stock-qty" value=""><input type="number" step="0.01" min="0" class="form-control qty-input" placeholder="0"></div>
+    <div><label class="form-label small mb-1">Type</label><select name="new_items[__I__][price_type]" class="form-select new-price-type"><option value="retail">Retail item</option><option value="retail_pack">Retail box</option><option value="wholesale">Wholesale box</option></select></div>
     <div><label class="form-label small mb-1">Price</label><div class="form-control bg-light new-price">KES 0</div></div>
     <div class="fw-bold text-end line-output">KES 0</div>
     <div><button type="button" class="btn btn-outline-danger w-100 remove-new">Remove</button></div>
@@ -197,16 +197,34 @@ ob_start();
   var productSearchUrl = <?php echo json_encode($productSearchUrl); ?>;
   function money(n){ return 'KES ' + (Math.round(n * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits:2}); }
   function rowSaleType(row){
-    var select = row.querySelector('.new-price-type');
-    return select ? (select.value === 'wholesale' ? 'wholesale' : 'retail') : (saleType && saleType.value === 'wholesale' ? 'wholesale' : 'retail');
+    var select = row.querySelector('.new-price-type') || row.querySelector('[name$="[price_type]"]');
+    return select ? select.value : (saleType ? saleType.value : 'retail');
+  }
+  function sellsByPack(row, type){
+    var units = parseFloat(row.dataset.unitsPerPack) || 1;
+    var packUnit = row.dataset.packUnit || '';
+    if (!packUnit || !(units > 1)) return false;
+    if (type === 'wholesale') return (parseFloat(row.dataset.packPrice) || 0) > 0;
+    if (type === 'retail_pack') return (parseFloat(row.dataset.retailPackPrice) || 0) > 0;
+    return false;
   }
   function priceForRow(row){
-    return parseFloat(rowSaleType(row) === 'wholesale' ? row.dataset.wholesalePrice : row.dataset.retailPrice) || 0;
+    var type = rowSaleType(row);
+    if (type === 'retail_pack' && sellsByPack(row, type)) return parseFloat(row.dataset.retailPackPrice) || 0;
+    if (type === 'wholesale' && sellsByPack(row, type)) return parseFloat(row.dataset.packPrice) || 0;
+    return parseFloat(type === 'wholesale' ? row.dataset.wholesalePrice : row.dataset.retailPrice) || 0;
   }
   function recalc(){
     var total = 0;
     document.querySelectorAll('[data-row]').forEach(function(row){
       var qty = parseFloat((row.querySelector('.qty-input') || {}).value) || 0;
+      var type = rowSaleType(row);
+      var byPack = row.classList.contains('new-row') && sellsByPack(row, type);
+      var units = parseFloat(row.dataset.unitsPerPack) || 1;
+      var stockQty = row.querySelector('.stock-qty');
+      var qtyLabel = row.querySelector('.qty-label');
+      if (qtyLabel) qtyLabel.textContent = byPack ? ('Qty (' + (row.dataset.packUnit || 'box') + ')') : 'Qty';
+      if (stockQty) stockQty.value = qty > 0 ? (qty * (byPack ? units : 1)).toFixed(2) : '';
       var priceInput = row.querySelector('.price-input');
       var price = priceInput ? (parseFloat(priceInput.value) || 0) : priceForRow(row);
       var line = Math.max(0, qty * price);
@@ -224,7 +242,7 @@ ob_start();
     row.querySelectorAll('input,select').forEach(function(el){ el.addEventListener('input', recalc); el.addEventListener('change', recalc); });
     var newType = row.querySelector('.new-price-type');
     if (newType && saleType) {
-      newType.value = saleType.value === 'wholesale' ? 'wholesale' : 'retail';
+      newType.value = saleType.value || 'retail';
     }
     attachProductSearch(row);
     var removeExisting = row.querySelector('.remove-existing');
@@ -270,8 +288,13 @@ ob_start();
           input.value = p.name || '';
           row.dataset.retailPrice = p.retail_price || 0;
           row.dataset.wholesalePrice = p.wholesale_price || p.retail_price || 0;
+          row.dataset.unitsPerPack = p.units_per_pack || 1;
+          row.dataset.packUnit = p.pack_unit || '';
+          row.dataset.packPrice = p.pack_price || 0;
+          row.dataset.retailPackPrice = p.retail_pack_price || 0;
           if (selected) {
-            selected.textContent = 'Selected: ' + (p.name || '') + ' · stock ' + formatQty(p.stock) + ' ' + (p.unit || '') + ' · retail ' + money(p.retail_price || 0);
+            selected.textContent = 'Selected: ' + (p.name || '') + ' · stock ' + formatQty(p.stock) + ' ' + (p.unit || '') + ' · retail ' + money(p.retail_price || 0)
+              + (p.retail_pack_price > 0 && p.pack_unit ? ' · retail box ' + money(p.retail_pack_price) + '/' + p.pack_unit : '');
           }
           hide();
           recalc();
@@ -284,6 +307,10 @@ ob_start();
       hidden.value = '';
       row.dataset.retailPrice = '0';
       row.dataset.wholesalePrice = '0';
+      row.dataset.unitsPerPack = '1';
+      row.dataset.packUnit = '';
+      row.dataset.packPrice = '0';
+      row.dataset.retailPackPrice = '0';
       if (selected) selected.textContent = 'No product selected';
       recalc();
       clearTimeout(timer);
@@ -300,8 +327,8 @@ ob_start();
   }
   document.querySelectorAll('[data-row]').forEach(wire);
   if (saleType) saleType.addEventListener('change', function(){
-    var type = saleType.value === 'wholesale' ? 'wholesale' : 'retail';
-    document.querySelectorAll('[name$="[price_type]"]').forEach(function(select){ select.value = type; });
+    var type = saleType.value || 'retail';
+    document.querySelectorAll('.new-price-type').forEach(function(select){ select.value = type; });
     recalc();
   });
   if (discount) discount.addEventListener('input', recalc);
@@ -315,6 +342,8 @@ ob_start();
     });
   }
   recalc();
+  var editForm = document.getElementById('editInvoiceForm');
+  if (editForm) editForm.addEventListener('submit', recalc);
 })();
 </script>
 <?php

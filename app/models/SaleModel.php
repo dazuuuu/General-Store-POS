@@ -315,7 +315,13 @@ class SaleModel extends Model
     public function items(int $saleId): array
     {
         $tid = \TenantContext::tenantId();
-        $stmt = $this->db->prepare("SELECT * FROM sale_items WHERE sale_id = ? AND tenant_id = ? ORDER BY id ASC");
+        $stmt = $this->db->prepare(
+            "SELECT si.*, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
+               FROM sale_items si
+          LEFT JOIN products p ON p.id = si.product_id AND p.tenant_id = si.tenant_id
+              WHERE si.sale_id = ? AND si.tenant_id = ?
+           ORDER BY si.id ASC"
+        );
         $stmt->execute([$saleId, $tid]);
         return $stmt->fetchAll();
     }
@@ -330,7 +336,8 @@ class SaleModel extends Model
         $in = implode(',', array_fill(0, count($saleIds), '?'));
         $stmt = $this->db->prepare(
             "SELECT si.id, si.sale_id, si.product_name, si.quantity, si.line_total,
-                    si.product_id, p.quantity AS stock_left
+                    si.product_id, si.price_type, si.unit_price, si.unit,
+                    p.quantity AS stock_left, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
                FROM sale_items si
           LEFT JOIN products p ON p.id = si.product_id AND p.tenant_id = si.tenant_id
               WHERE si.tenant_id = ? AND si.sale_id IN ($in) ORDER BY si.id ASC"
@@ -348,6 +355,13 @@ class SaleModel extends Model
                 'returned' => (float) $ret['returned'],
                 'used' => (float) $ret['used'],
                 'stock_left' => $r['stock_left'] !== null ? (float) $r['stock_left'] : null,
+                'price_type' => $r['price_type'] ?? 'retail',
+                'unit_price' => (float) ($r['unit_price'] ?? 0),
+                'unit' => $r['unit'] ?? '',
+                'units_per_pack' => $r['units_per_pack'] ?? null,
+                'pack_unit' => $r['pack_unit'] ?? '',
+                'pack_price' => $r['pack_price'] ?? null,
+                'retail_pack_price' => $r['retail_pack_price'] ?? null,
             ];
         }
         return $out;
@@ -437,7 +451,8 @@ class SaleModel extends Model
         if (!$items) { return '<span class="text-muted">—</span>'; }
         $fmtQty = fn($q) => rtrim(rtrim(number_format((float) $q, 2), '0'), '.');
         $parts = array_map(function ($i) use ($fmtQty) {
-            $label = $fmtQty($i['qty']) . '× ' . $i['name'];
+            $shown = \QtyFormat::saleLine($i);
+            $label = $shown['summary_qty'] . ' × ' . ($i['name'] ?? $i['product_name'] ?? '');
             if ((float) ($i['returned'] ?? 0) > 0) {
                 $label .= ' (returned ' . $fmtQty($i['returned']);
                 if ((float) ($i['used'] ?? 0) > 0) {
