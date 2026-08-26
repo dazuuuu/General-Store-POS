@@ -20,6 +20,7 @@ if (mb_strlen($q) < 2) {
 }
 
 $pdo = Database::pdo();
+(new Models\ProductModel($pdo));
 $tid = (int) TenantContext::tenantId();
 $like = '%' . $q . '%';
 $prefix = $q . '%';
@@ -28,7 +29,7 @@ $stmt = $pdo->prepare(
     "SELECT p.id, p.name, p.selling_price, p.wholesale_price, p.retail_price,
             p.offer_price, p.offer_starts_at, p.offer_ends_at,
             p.quantity, p.unit, p.barcode, p.status,
-            p.units_per_pack, p.pack_unit, p.pack_price,
+            p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
             c.name AS category_name,
             br.name AS brand_name
        FROM products p
@@ -67,6 +68,7 @@ foreach ($stmt->fetchAll() as $row) {
         'units_per_pack' => max(1, (float) ($row['units_per_pack'] ?? 1)),
         'pack_unit' => (string) ($row['pack_unit'] ?? ''),
         'pack_price' => ($row['pack_price'] ?? '') !== '' && $row['pack_price'] !== null ? (float) $row['pack_price'] : 0.0,
+        'retail_pack_price' => ($row['retail_pack_price'] ?? '') !== '' && $row['retail_pack_price'] !== null ? (float) $row['retail_pack_price'] : 0.0,
     ];
 }
 

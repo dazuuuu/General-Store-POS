@@ -49,6 +49,7 @@ function single_product_package_fields(array $row, array $units): array
     $inside = max(0, (float) ($row['units_per_package'] ?? 0));
     $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
     $packageWholesale = max(0, (float) ($row['wholesale_price'] ?? 0));
+    $packageRetail = max(0, (float) ($row['retail_pack_price'] ?? 0));
     $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
     if ($packageQty <= 0 || $inside <= 0) {
         return [
@@ -62,6 +63,7 @@ function single_product_package_fields(array $row, array $units): array
             'package_quantity' => $packageQty > 0 ? $packageQty : null,
             'units_per_package' => $inside > 0 ? $inside : 1,
             'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
+            'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
         ];
     }
 
@@ -76,6 +78,7 @@ function single_product_package_fields(array $row, array $units): array
         'package_quantity' => $packageQty,
         'units_per_package' => $inside,
         'package_price' => $packageWholesale,
+        'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
     ];
 }
 
@@ -98,6 +101,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Enter the buying price of each package (carton/bale).';
     } elseif (($pkg['package_price'] ?? 0) <= 0 && (float) ($_POST['wholesale_price'] ?? 0) <= 0) {
         $error = 'Enter the wholesale selling price of each package.';
+    } elseif (($pkg['retail_pack_price'] ?? 0) <= 0 && (float) ($_POST['retail_pack_price'] ?? 0) <= 0) {
+        $error = 'Enter the retail selling price of each package.';
     } elseif ((float) ($_POST['selling_price'] ?? 0) <= 0) {
         $error = 'Enter the retail price of a single item inside the package.';
     } elseif ($qty <= 0) {
@@ -128,6 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
+                    'retail_pack_price' => ($pkg['retail_pack_price'] ?? 0) > 0 ? $pkg['retail_pack_price'] : ($existing['retail_pack_price'] ?? null),
                     'package_buying_price' => $pkg['package_buying_price'],
                     'colors' => '',
                     'quantity' => $qty,
@@ -154,6 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
+                    'retail_pack_price' => $pkg['retail_pack_price'],
                     'package_buying_price' => $pkg['package_buying_price'],
                     'colors' => '',
                     'quantity' => $qty,
@@ -286,6 +293,11 @@ ob_start();
         <div class="form-text" id="wholesaleHint">Selling price when selling a whole package (wholesale).</div>
       </div>
       <div class="col-md-4">
+        <label class="form-label fw-semibold" id="retailPackLabel">Retail price per package <span class="text-danger">*</span></label>
+        <input type="number" step="0.01" min="0.01" name="retail_pack_price" id="retailPackPrice" class="form-control" required value="<?php echo htmlspecialchars($_POST['retail_pack_price'] ?? ''); ?>">
+        <div class="form-text" id="retailPackHint">Selling price when selling a whole package at retail.</div>
+      </div>
+      <div class="col-md-4">
         <label class="form-label fw-semibold" id="retailLabel">Retail price (single item) <span class="text-danger">*</span></label>
         <input type="number" step="0.01" min="0.01" name="selling_price" id="retailPrice" class="form-control" required value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>">
         <div class="form-text">Price when selling one item from inside the package.</div>
@@ -369,6 +381,8 @@ ob_start();
     var buy = parseFloat(document.getElementById('buyingPrice').value) || 0;
     var retail = parseFloat(document.getElementById('retailPrice').value) || 0;
     var wholesale = parseFloat(document.getElementById('wholesalePrice').value) || 0;
+    var retailPackEl = document.getElementById('retailPackPrice');
+    var retailPack = parseFloat(retailPackEl ? retailPackEl.value : 0) || 0;
     if (packageFields) packageFields.style.display = 'block';
     var packageQtyLabel = document.getElementById('packageQtyLabel');
     var unitsPerPackageLabel = document.getElementById('unitsPerPackageLabel');
@@ -382,16 +396,20 @@ ob_start();
     document.getElementById('buyingHint').textContent = 'Cost of one ' + unit + '. Total cost = this × number of ' + unit + 's.';
     document.getElementById('retailLabel').innerHTML = 'Retail price (single item inside) <span class="text-danger">*</span>';
     document.getElementById('wholesaleLabel').innerHTML = 'Wholesale price per ' + unit + ' <span class="text-danger">*</span>';
-    document.getElementById('wholesaleHint').textContent = 'Selling price when the customer buys a whole ' + unit + '.';
+    document.getElementById('wholesaleHint').textContent = 'Selling price when the customer buys a whole ' + unit + ' wholesale.';
+    var retailPackLabel = document.getElementById('retailPackLabel');
+    var retailPackHint = document.getElementById('retailPackHint');
+    if (retailPackLabel) retailPackLabel.innerHTML = 'Retail price per ' + unit + ' <span class="text-danger">*</span>';
+    if (retailPackHint) retailPackHint.textContent = 'Selling price when the customer buys a whole ' + unit + ' at retail.';
     var summary = document.getElementById('profitSummary');
     if (!summary) return;
-    if (total <= 0 || buy <= 0 || wholesale <= 0 || retail <= 0) {
+    if (total <= 0 || buy <= 0 || wholesale <= 0 || retail <= 0 || retailPack <= 0) {
       summary.style.display = 'none';
       return;
     }
     var cost = pkgQty * buy;
     var wholesaleReturn = pkgQty * wholesale;
-    var retailReturn = total * retail;
+    var retailReturn = pkgQty * retailPack;
     var wholesaleProfit = wholesaleReturn - cost;
     var retailProfit = retailReturn - cost;
     var wholesaleMargin = wholesaleReturn > 0 ? (wholesaleProfit / wholesaleReturn * 100) : 0;
@@ -402,13 +420,15 @@ ob_start();
       + ' <span class="text-muted">(' + pkgQty + ' × ' + money(buy) + ')</span>'
       + '<br>Wholesale profit (sell by ' + unit + '): <strong class="' + (wholesaleProfit < 0 ? 'text-danger' : 'text-success') + '">' + money(wholesaleProfit) + '</strong>'
       + ' · ' + wholesaleMargin.toFixed(1) + '%'
-      + '<br>Retail profit (sell single items): <strong class="' + (retailProfit < 0 ? 'text-danger' : 'text-success') + '">' + money(retailProfit) + '</strong>'
-      + ' · ' + retailMargin.toFixed(1) + '%';
+      + '<br>Retail profit (sell by ' + unit + '): <strong class="' + (retailProfit < 0 ? 'text-danger' : 'text-success') + '">' + money(retailProfit) + '</strong>'
+      + ' · ' + retailMargin.toFixed(1) + '%'
+      + '<br><span class="text-muted">Single-item retail still recorded: ' + money(retail) + ' each.</span>';
   }
   [unitSelect, packageQty, unitsPerPackage, quantityInput,
     document.getElementById('buyingPrice'),
     document.getElementById('retailPrice'),
-    document.getElementById('wholesalePrice')
+    document.getElementById('wholesalePrice'),
+    document.getElementById('retailPackPrice')
   ].forEach(function (el) {
     if (el) {
       el.addEventListener('input', recalcPackage);
@@ -471,6 +491,8 @@ ob_start();
     nameInput.value = item.name;
     if (item.barcode) barcode.value = item.barcode;
     if (item.buying_price) document.getElementById('buyingPrice').value = item.buying_price;
+    if (item.pack_price && document.getElementById('wholesalePrice')) document.getElementById('wholesalePrice').value = item.pack_price;
+    if (item.retail_pack_price && document.getElementById('retailPackPrice')) document.getElementById('retailPackPrice').value = item.retail_pack_price;
     var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
     note.style.display = 'block';
     note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +

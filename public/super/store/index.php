@@ -64,6 +64,7 @@ function store_package_fields(array $row, array $units): array
     $inside = max(0, (float) ($row['units_per_package'] ?? 0));
     $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
     $packageWholesale = max(0, (float) ($row['wholesale_price'] ?? 0));
+    $packageRetail = max(0, (float) ($row['retail_pack_price'] ?? 0));
     $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
     if ($packageQty <= 0 || $inside <= 0) {
         return [
@@ -77,6 +78,7 @@ function store_package_fields(array $row, array $units): array
             'package_quantity' => $packageQty > 0 ? $packageQty : null,
             'units_per_package' => $inside > 0 ? $inside : 1,
             'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
+            'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
         ];
     }
 
@@ -91,6 +93,7 @@ function store_package_fields(array $row, array $units): array
         'package_quantity' => $packageQty,
         'units_per_package' => $inside,
         'package_price' => $packageWholesale,
+        'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
     ];
 }
 
@@ -125,6 +128,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($productChoiceProbe <= 0 && ($pkg['package_price'] ?? 0) <= 0) {
                 $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package wholesale price.';
+                break;
+            }
+            if ($productChoiceProbe <= 0 && ($pkg['retail_pack_price'] ?? 0) <= 0) {
+                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package retail price.';
                 break;
             }
             if ($productChoiceProbe <= 0 && (float) ($row['selling_price'] ?? 0) <= 0) {
@@ -174,6 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'package_quantity' => $pkg['package_quantity'],
                 'units_per_package' => $pkg['units_per_package'],
                 'package_price' => $pkg['package_price'],
+                'retail_pack_price' => ($pkg['retail_pack_price'] ?? 0) > 0 ? $pkg['retail_pack_price'] : ($existing['retail_pack_price'] ?? null),
                 'colors' => '',
                 'quantity' => $qty,
                 'faulty_quantity' => $pkg['faulty_quantity'],
@@ -227,6 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'package_quantity' => $_POST['package_quantity'] ?? '',
             'units_per_package' => $_POST['units_per_package'] ?? '',
             'package_price' => $_POST['package_price'] ?? '',
+            'retail_pack_price' => $_POST['retail_pack_price'] ?? '',
             'notes' => $_POST['notes'] ?? '',
         ]);
         if ($res['ok']) {
@@ -380,6 +389,7 @@ ob_start();
                 data-package-quantity="<?php echo htmlspecialchars((string) ($p['package_quantity'] ?? '')); ?>"
                 data-units-per-package="<?php echo htmlspecialchars((string) ($p['units_per_package'] ?? '')); ?>"
                 data-package-price="<?php echo htmlspecialchars((string) ($p['package_price'] ?? '')); ?>"
+                data-retail-pack-price="<?php echo htmlspecialchars((string) ($p['retail_pack_price'] ?? '')); ?>"
                 data-quantity="<?php echo htmlspecialchars((string) $p['quantity']); ?>"
                 data-faulty="<?php echo htmlspecialchars((string) ($p['faulty_quantity'] ?? 0)); ?>"
                 data-buying="<?php echo htmlspecialchars((string) $p['buying_price']); ?>"
@@ -471,7 +481,8 @@ ob_start();
             <div class="col-md-3"><label class="form-label small">Package unit</label><input name="package_unit" id="editPackageUnit" class="form-control" placeholder="carton / bale / pack"></div>
             <div class="col-md-3"><label class="form-label small">Packages</label><input type="number" step="0.01" min="0" name="package_quantity" id="editPackageQuantity" class="form-control"></div>
             <div class="col-md-3"><label class="form-label small">Items inside each package</label><input type="number" step="0.01" min="0.01" name="units_per_package" id="editUnitsPerPackage" class="form-control"></div>
-            <div class="col-md-3"><label class="form-label small">Package price</label><input type="number" step="0.01" min="0" name="package_price" id="editPackagePrice" class="form-control"></div>
+            <div class="col-md-3"><label class="form-label small">Wholesale per package</label><input type="number" step="0.01" min="0" name="package_price" id="editPackagePrice" class="form-control"></div>
+            <div class="col-md-3"><label class="form-label small">Retail per package</label><input type="number" step="0.01" min="0" name="retail_pack_price" id="editRetailPackPrice" class="form-control"></div>
             <div class="col-md-4"><label class="form-label small">Buying price</label><input type="number" step="0.01" min="0" name="buying_price" id="editBuying" class="form-control"></div>
             <div class="col-md-4"><label class="form-label small">Selling price</label><input type="number" step="0.01" min="0" name="retail_price" id="editRetail" class="form-control"></div>
             <div class="col-md-4"><label class="form-label small">Wholesale</label><input type="number" step="0.01" min="0" name="wholesale_price" id="editWholesale" class="form-control"></div>
@@ -586,6 +597,10 @@ ob_start();
       <div class="col-6 col-sm-3 mt-2 newProductFields">
         <label class="form-label small mb-1 wholesaleLabel">Selling price of the package (wholesale price)</label>
         <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" placeholder="0">
+      </div>
+      <div class="col-6 col-sm-3 mt-2 newProductFields">
+        <label class="form-label small mb-1 retailPackLabel">Selling price of the package (retail price)</label>
+        <input type="number" step="0.01" min="0" name="items[__I__][retail_pack_price]" class="form-control form-control-sm retailPackPrice" placeholder="0">
       </div>
       <div class="col-12 mt-2 newProductFields">
         <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
@@ -722,6 +737,7 @@ ob_start();
       if (item.buying_price) { row.querySelector('.buyingPrice').value = item.buying_price; }
       if (item.retail_price) { row.querySelector('.retailPrice').value = item.retail_price; }
       if (item.wholesale_price) { row.querySelector('.wholesalePrice').value = item.pack_price && item.pack_price > 0 ? item.pack_price : item.wholesale_price; }
+      if (item.retail_pack_price && row.querySelector('.retailPackPrice')) { row.querySelector('.retailPackPrice').value = item.retail_pack_price; }
       row.querySelector('.qtyLabel').textContent = 'Qty to store';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';
@@ -836,7 +852,7 @@ ob_start();
       if (el) attachTypeahead(el, field);
     });
 
-    row.querySelectorAll('.qty, .buyingPrice, .retailPrice, .wholesalePrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
+    row.querySelectorAll('.qty, .buyingPrice, .retailPrice, .wholesalePrice, .retailPackPrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
       el.addEventListener('input', recalc);
       el.addEventListener('change', recalc);
     });
@@ -883,6 +899,7 @@ ob_start();
       var buy = parseFloat(row.querySelector('.buyingPrice').value) || 0;
       var retail = parseFloat(row.querySelector('.retailPrice').value) || 0;
       var wholesale = parseFloat(row.querySelector('.wholesalePrice').value) || 0;
+      var retailPack = parseFloat((row.querySelector('.retailPackPrice') || {}).value) || 0;
       if (pkgFields) pkgFields.style.display = isPackageUnit ? 'block' : 'none';
       var packageQtyLabel = row.querySelector('.packageQtyLabel');
       var unitsPerPackageLabel = row.querySelector('.unitsPerPackageLabel');
@@ -894,6 +911,8 @@ ob_start();
         row.querySelector('.qtyLabel').textContent = 'Total items received';
         row.querySelector('.buyingLabel').textContent = 'Buying price of the package';
         row.querySelector('.wholesaleLabel').textContent = 'Selling price of the package (wholesale price)';
+        var retailPackLabel = row.querySelector('.retailPackLabel');
+        if (retailPackLabel) retailPackLabel.textContent = 'Selling price of the package (retail price)';
         row.querySelector('.retailLabel').textContent = 'Selling price of items inside (retail price)';
         var totalItems = row.querySelector('.totalItems');
         if (totalItems) totalItems.textContent = Math.round(qty * 100) / 100;
@@ -906,7 +925,8 @@ ob_start();
       }
       var total = hasPackage ? (pkgQty * buy) : (qty * buy);
       var wholesaleReturn = hasPackage ? (pkgQty * wholesale) : (qty * wholesale);
-      var retailReturn = qty * retail;
+      var retailPackReturn = hasPackage ? (pkgQty * retailPack) : 0;
+      var retailReturn = retailPackReturn > 0 ? retailPackReturn : (qty * retail);
       var wholesaleProfit = wholesaleReturn - total;
       var retailProfit = retailReturn - total;
       var wholesaleMargin = wholesaleReturn > 0 ? (wholesaleProfit / wholesaleReturn * 100) : 0;
@@ -1005,6 +1025,7 @@ ob_start();
       document.getElementById('editPackageQuantity').value = btn.dataset.packageQuantity || '';
       document.getElementById('editUnitsPerPackage').value = btn.dataset.unitsPerPackage || '';
       document.getElementById('editPackagePrice').value = btn.dataset.packagePrice || '';
+      document.getElementById('editRetailPackPrice').value = btn.dataset.retailPackPrice || '';
       document.getElementById('editQuantity').value = btn.dataset.quantity || '0';
       document.getElementById('editFaulty').value = btn.dataset.faulty || '0';
       document.getElementById('editBuying').value = btn.dataset.buying || '0';

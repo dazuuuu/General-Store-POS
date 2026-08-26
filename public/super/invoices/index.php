@@ -346,6 +346,7 @@ ob_start();
           row.dataset.unitsPerPack = p.units_per_pack || 1;
           row.dataset.packUnit = p.pack_unit || '';
           row.dataset.packPrice = p.pack_price || 0;
+          row.dataset.retailPackPrice = p.retail_pack_price || 0;
           if (selected) {
             selected.textContent = 'Selected: ' + (p.name || '') + ' · stock ' + formatQty(p.stock) + ' ' + (p.unit || '') + ' · ' + money(p.retail_price || 0);
           }

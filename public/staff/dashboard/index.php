@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($items as $it) {
             $prod = $byId[$it['product_id']] ?? null;
             $lineSaleType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
-            if ($prod) { $subtotal += Pricing::unitPriceForQty($prod, (float) $it['quantity'], $lineSaleType) * $it['quantity']; }
+            if ($prod) { $subtotal += Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType); }
         }
         $subtotal = round($subtotal, 2);
         // Negotiated discount — clamp so a typo can't produce a negative total.
@@ -306,6 +306,7 @@ ob_start();
           $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
           $packUnit = (string) ($p['pack_unit'] ?? '');
           $packPrice = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float) $p['pack_price'] : 0;
+          $retailPackPrice = ($p['retail_pack_price'] ?? '') !== '' && $p['retail_pack_price'] !== null ? (float) $p['retail_pack_price'] : 0;
           $colorBits = !empty($p['colors']) ? (is_array($p['colors']) ? $p['colors'] : []) : [];
           $faulty = (float) ($p['faulty_quantity'] ?? 0);
           $sub = implode(' · ', array_filter([
@@ -322,6 +323,7 @@ ob_start();
              data-units-per-pack="<?php echo $unitsPerPack; ?>"
              data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
              data-pack-price="<?php echo $packPrice; ?>"
+             data-retail-pack-price="<?php echo $retailPackPrice; ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -346,6 +348,9 @@ ob_start();
               <div class="small text-muted">Wholesale KES <?php echo number_format($packPrice, 0); ?> / <?php echo htmlspecialchars($packUnit); ?> (<?php echo rtrim(rtrim(number_format($unitsPerPack, 2), '0'), '.'); ?> pcs)</div>
             <?php elseif ($wholesale > 0 && abs($wholesale - $price) > 0.001): ?>
               <div class="small text-muted">Wholesale KES <?php echo number_format($wholesale, 0); ?></div>
+            <?php endif; ?>
+            <?php if ($packUnit !== '' && $unitsPerPack > 1 && $retailPackPrice > 0): ?>
+              <div class="small text-muted">Retail carton KES <?php echo number_format($retailPackPrice, 0); ?> / <?php echo htmlspecialchars($packUnit); ?></div>
             <?php endif; ?>
           </div>
           <div class="pos-add-row">
@@ -632,6 +637,7 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         unitsPerPack: parseFloat(el.dataset.unitsPerPack) || 1,
         packUnit: el.dataset.packUnit || '',
         packPrice: parseFloat(el.dataset.packPrice) || 0,
+        retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
@@ -668,6 +674,16 @@ function saleStockQty(p, saleQty, type) { return sellsByPack(p, type) ? saleQty 
 function productPrice(p, type) {
     if (sellsByPack(p, type)) return p.packPrice;
     return type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price;
+}
+function retailLineTotal(p, qty) {
+    qty = parseFloat(qty) || 0;
+    if (qty <= 0) return 0;
+    if (p.retailPackPrice > 0 && p.unitsPerPack > 1) {
+        var packs = Math.floor((qty + 0.0001) / p.unitsPerPack);
+        var rem = Math.round((qty - packs * p.unitsPerPack) * 100) / 100;
+        return packs * p.retailPackPrice + rem * p.price;
+    }
+    return qty * productPrice(p, 'retail');
 }
 function wholesaleUnitLabel(p) { return isPackProduct(p) ? p.packUnit : 'item'; }
 function stockUsed(id) {
@@ -752,7 +768,7 @@ function subtotal() {
     Object.keys(cart).forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
         if (!p || !c) return;
-        if (c.retail > 0) t += productPrice(p, 'retail') * c.retail;
+        if (c.retail > 0) t += retailLineTotal(p, c.retail);
         if (c.wholesale > 0) t += productPrice(p, 'wholesale') * c.wholesale;
     });
     return t;
@@ -843,7 +859,7 @@ function render() {
         var retailMax = Math.max(c.retail || 0, maxRetail(id));
         var wholesaleMax = Math.max(c.wholesale || 0, maxWholesale(id));
         var wLabel = wholesaleUnitLabel(p);
-        var lineTotal = (c.retail || 0) * productPrice(p, 'retail') + (c.wholesale || 0) * productPrice(p, 'wholesale');
+        var lineTotal = retailLineTotal(p, c.retail || 0) + (c.wholesale || 0) * productPrice(p, 'wholesale');
         var line = document.createElement('div');
         line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML = (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')

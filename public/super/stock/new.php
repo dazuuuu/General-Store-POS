@@ -66,6 +66,7 @@ function stock_package_fields(array $row, array $units): array
     $inside = max(0, (float) ($row['units_per_package'] ?? 0));
     $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
     $packageWholesale = max(0, (float) ($row['wholesale_price'] ?? 0));
+    $packageRetail = max(0, (float) ($row['retail_pack_price'] ?? 0));
     $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
     if ($packageQty <= 0 || $inside <= 0) {
         return [
@@ -79,6 +80,7 @@ function stock_package_fields(array $row, array $units): array
             'package_quantity' => $packageQty > 0 ? $packageQty : null,
             'units_per_package' => $inside > 0 ? $inside : 1,
             'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
+            'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
         ];
     }
 
@@ -93,6 +95,7 @@ function stock_package_fields(array $row, array $units): array
         'package_quantity' => $packageQty,
         'units_per_package' => $inside,
         'package_price' => $packageWholesale,
+        'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
     ];
 }
 
@@ -138,6 +141,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = ($title !== '' ? $title . ': ' : '') . 'Enter the wholesale selling price of each package.';
                 break;
             }
+            if ($productChoice === '' && ($pkg['retail_pack_price'] ?? 0) <= 0) {
+                $error = ($title !== '' ? $title . ': ' : '') . 'Enter the retail selling price of each package.';
+                break;
+            }
             $qty = (float) $pkg['quantity'];
             $faulty = (float) $pkg['faulty_quantity'];
             if ($qty <= 0) {
@@ -168,6 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'package_quantity' => $pkg['package_quantity'],
                     'units_per_package' => $pkg['units_per_package'],
                     'package_price' => $pkg['package_price'],
+                    'retail_pack_price' => ($pkg['retail_pack_price'] ?? 0) > 0 ? $pkg['retail_pack_price'] : ($existing['retail_pack_price'] ?? null),
                     'package_buying_price' => $pkg['package_buying_price'],
                     'colors' => '',
                     'quantity' => $qty,
@@ -202,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'package_quantity' => $pkg['package_quantity'],
                 'units_per_package' => $pkg['units_per_package'],
                 'package_price' => $pkg['package_price'],
+                'retail_pack_price' => $pkg['retail_pack_price'],
                 'package_buying_price' => $pkg['package_buying_price'],
                 'colors' => '',
                 'quantity' => $qty,
@@ -379,6 +388,10 @@ ob_start();
         <input type="number" step="0.01" min="0.01" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" required placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
+        <label class="form-label small mb-1 retailPackLabel">Selling price of the package (retail) <span class="text-danger">*</span></label>
+        <input type="number" step="0.01" min="0.01" name="items[__I__][retail_pack_price]" class="form-control form-control-sm retailPackPrice" required placeholder="0">
+      </div>
+      <div class="col-6 col-sm-3 mt-2 newProductFields">
         <label class="form-label small mb-1 retailLabel">Selling price of items inside (retail) <span class="text-danger">*</span></label>
         <input type="number" step="0.01" min="0.01" name="items[__I__][selling_price]" class="form-control form-control-sm retailPrice" required placeholder="0">
       </div>
@@ -508,6 +521,7 @@ ob_start();
       if (item.buying_price) { row.querySelector('.buyingPrice').value = item.buying_price; }
       if (item.retail_price) { row.querySelector('.retailPrice').value = item.retail_price; }
       if (item.wholesale_price) { row.querySelector('.wholesalePrice').value = item.pack_price && item.pack_price > 0 ? item.pack_price : item.wholesale_price; }
+      if (item.retail_pack_price) { row.querySelector('.retailPackPrice').value = item.retail_pack_price; }
       row.querySelector('.qtyLabel').textContent = 'Qty to add';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';
@@ -621,7 +635,7 @@ ob_start();
       if (el) attachTypeahead(el, field);
     });
 
-    row.querySelectorAll('.qty, .buyingPrice, .retailPrice, .wholesalePrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
+    row.querySelectorAll('.qty, .buyingPrice, .retailPrice, .wholesalePrice, .retailPackPrice, .unitSelect, .packageQty, .unitsPerPackage').forEach(function (el) {
       el.addEventListener('input', recalc);
       el.addEventListener('change', recalc);
     });
@@ -666,6 +680,7 @@ ob_start();
       var buy = parseFloat(row.querySelector('.buyingPrice').value) || 0;
       var retail = parseFloat(row.querySelector('.retailPrice').value) || 0;
       var wholesale = parseFloat(row.querySelector('.wholesalePrice').value) || 0;
+      var retailPack = parseFloat((row.querySelector('.retailPackPrice') || {}).value) || 0;
       if (pkgFields) pkgFields.style.display = 'block';
       var packageQtyLabel = row.querySelector('.packageQtyLabel');
       var unitsPerPackageLabel = row.querySelector('.unitsPerPackageLabel');
@@ -676,12 +691,15 @@ ob_start();
       row.querySelector('.qtyLabel').textContent = 'Total sellable items';
       row.querySelector('.buyingLabel').innerHTML = 'Buying price of the package <span class="text-danger">*</span>';
       row.querySelector('.wholesaleLabel').innerHTML = 'Selling price of the package (wholesale) <span class="text-danger">*</span>';
+      var retailPackLabel = row.querySelector('.retailPackLabel');
+      if (retailPackLabel) retailPackLabel.innerHTML = 'Selling price of the package (retail) <span class="text-danger">*</span>';
       row.querySelector('.retailLabel').innerHTML = 'Selling price of items inside (retail) <span class="text-danger">*</span>';
       var totalItems = row.querySelector('.totalItems');
       if (totalItems) totalItems.textContent = Math.round(qty * 100) / 100;
       var total = pkgQty * buy;
       var wholesaleReturn = pkgQty * wholesale;
-      var retailReturn = qty * retail;
+      var retailPackReturn = pkgQty * (retailPack > 0 ? retailPack : 0);
+      var retailReturn = retailPackReturn > 0 ? retailPackReturn : (qty * retail);
       var wholesaleProfit = wholesaleReturn - total;
       var retailProfit = retailReturn - total;
       var wholesaleMargin = wholesaleReturn > 0 ? (wholesaleProfit / wholesaleReturn * 100) : 0;

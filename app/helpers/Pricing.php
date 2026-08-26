@@ -72,7 +72,7 @@ class Pricing
             $packPrice = $product['pack_price'] ?? null;
             if ($packPrice !== null && $packPrice !== '' && $unitsPerPack > 1
                 && abs(fmod($qty, $unitsPerPack)) < 0.0001) {
-                return ((float) $packPrice) / $unitsPerPack;
+                return round(((float) $packPrice) / $unitsPerPack, 2);
             }
 
             $w = (float) ($product['wholesale_price'] ?? 0);
@@ -81,7 +81,37 @@ class Pricing
             }
         }
 
+        $unitsPerPack = (float) ($product['units_per_pack'] ?? 1);
+        $retailPack = $product['retail_pack_price'] ?? null;
+        if ($saleType !== 'wholesale' && $retailPack !== null && $retailPack !== ''
+            && (float) $retailPack > 0 && $unitsPerPack > 1
+            && abs(fmod($qty, $unitsPerPack)) < 0.0001) {
+            return round(((float) $retailPack) / $unitsPerPack, 2);
+        }
+
         return Models\ProductModel::effectivePrice($product)['price'];
+    }
+
+    /**
+     * Line total that applies carton retail when selling whole packages at retail
+     * plus leftover inner items at the single-item retail/offer price.
+     */
+    public static function lineTotal(array $product, float $qty, string $saleType = 'retail'): float
+    {
+        $qty = max(0, $qty);
+        if ($qty <= 0) {
+            return 0.0;
+        }
+        $unitsPerPack = (float) ($product['units_per_pack'] ?? 1);
+        $retailPack = $product['retail_pack_price'] ?? null;
+        if ($saleType !== 'wholesale' && $retailPack !== null && $retailPack !== ''
+            && (float) $retailPack > 0 && $unitsPerPack > 1) {
+            $packs = (int) floor(($qty + 0.0001) / $unitsPerPack);
+            $remainder = round($qty - ($packs * $unitsPerPack), 2);
+            $itemPrice = Models\ProductModel::effectivePrice($product)['price'];
+            return round(($packs * (float) $retailPack) + ($remainder * $itemPrice), 2);
+        }
+        return round(self::unitPriceForQty($product, $qty, $saleType) * $qty, 2);
     }
 
     /** Whether selling $qty of this product would exceed its credit limit. */

@@ -88,11 +88,21 @@ if (!$order && ($customerId > 0 || $customerQuery !== '')) {
             $searchMatches = $O->searchInvoices($customerQuery, ['open_only' => true, 'limit' => 20]);
         }
         if (!$searchMatches) {
-            // Still show wallet if they have payment history but no open balance.
+            // Still show wallet if they have payment history but no open balance,
+            // or a saved customer record (admin can add extra charges onto credit).
             if ($customerPayments) {
                 $customerLabel = $customerLabel ?: (string) ($customerPayments[0]['table_name'] ?? 'Customer');
+            } elseif ($customerId > 0) {
+                // Named customer with a clear wallet — extra charges can open credit.
             } else {
-                $error = 'No open credit invoices for this customer.';
+                $byName = $CM->findByName($customerQuery);
+                if ($byName) {
+                    $customerId = (int) $byName['id'];
+                    $customerLabel = (string) ($byName['name'] ?? $customerLabel);
+                    $customerCompany = (string) ($byName['company_name'] ?? '');
+                } else {
+                    $error = 'No open credit invoices for this customer.';
+                }
             }
         }
     } elseif ($customerInvoices && !$customerLabel) {
@@ -107,7 +117,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
     $ids = array_map(fn($inv) => (int) $inv['id'], $openRows);
     $amount = round((float) ($_POST['amount_received'] ?? 0), 2);
     $mode = $_POST['payment_method'] ?? 'cash';
-    $payMode = ($_POST['pay_mode'] ?? 'deposit') === 'full' ? 'full' : 'deposit';
+    $postedMode = $_POST['pay_mode'] ?? 'deposit';
+    $payMode = $postedMode === 'full' ? 'full' : ($postedMode === 'charge' ? 'charge' : 'deposit');
     $extraCharge = round(max(0, (float) ($_POST['additional_charges'] ?? 0)), 2);
     $extraNote = trim((string) ($_POST['additional_charges_note'] ?? ''));
     $totalDue = 0.0;
@@ -122,8 +133,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
 
     if ($extraCharge > 0 && $extraNote === '') {
         $error = 'Enter a reason for the extra charge (e.g. delivery, packing).';
+    } elseif ($payMode === 'charge' && $extraCharge <= 0) {
+        $error = 'Enter the extra charge amount.';
     } elseif ($extraCharge > 0 && !$ids) {
-        $error = 'No open invoice to attach the extra charge to.';
+        $chargeRes = $O->createWalletCharge($customerLabel !== '' ? $customerLabel : $customerQuery, $customerId, $extraCharge, $extraNote, TenantContext::userId());
+        if (!$chargeRes['ok']) {
+            $error = $chargeRes['error'] ?? 'Could not save the extra charge.';
+        } else {
+            $ids = [(int) $chargeRes['order_id']];
+            $totalDue = round($totalDue + $extraCharge, 2);
+            if ($customerId <= 0 && $customerQuery !== '') {
+                $freshCust = $CM->findByName($customerQuery) ?: $CM->findByName($customerLabel);
+                if ($freshCust) {
+                    $customerId = (int) $freshCust['id'];
+                }
+            }
+        }
     } elseif ($extraCharge > 0) {
         $chargeRes = $O->addAdditionalCharge((int) $ids[0], $extraCharge, $extraNote);
         if (!$chargeRes['ok']) {
@@ -134,6 +159,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
     }
 
     if (!$error) {
+    $chargeOnly = $payMode === 'charge' || ($extraCharge > 0 && $amount <= 0 && $payMode !== 'full');
+    if ($chargeOnly) {
+        if ($customerId > 0) {
+            try { $CM->refreshCreditBalance($customerId); } catch (\Throwable $ignored) {}
+        }
+        $newBalance = $totalDue;
+        if ($customerId > 0) {
+            $fresh = $CM->find($customerId);
+            $newBalance = (float) ($fresh['credit_balance'] ?? $newBalance);
+        }
+        $_SESSION['flash']['success'] = 'Extra charge of KES ' . number_format($extraCharge, 0)
+            . ($extraNote !== '' ? ' (' . $extraNote . ')' : '')
+            . ' added. Credit balance is now KES ' . number_format($newBalance, 0) . '.';
+        $returnQs = '?customer=' . urlencode($customerQuery !== '' ? $customerQuery : $customerLabel);
+        if ($customerId > 0) { $returnQs .= '&customer_id=' . $customerId; }
+        $returnQs .= '&open=1';
+        $firstId = (int) ($ids[0] ?? 0);
+        if ($firstId > 0) {
+            $_SESSION['flash']['receipt_url'] = $receiptBase . '?id=' . $firstId . '&print=1&deposit=1';
+        }
+        header('Location: ' . $paymentsBase . $returnQs);
+        exit;
+    }
     if ($payMode === 'full') {
         $amount = $totalDue;
     }
@@ -342,7 +390,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 </div>
 <?php endif; ?>
 
-<?php if ($customerInvoices || ($customerPayments && ($customerId > 0 || $customerQuery !== ''))): ?>
+<?php if ($customerInvoices || $customerId > 0 || ($customerPayments && ($customerQuery !== ''))): ?>
 <?php
   $statementUrl = $statementBase . '?name=' . urlencode($customerLabel) . ($customerId > 0 ? '&customer_id=' . $customerId : '');
   $invoiceTotal = 0.0;
@@ -383,7 +431,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
         </div>
       </div>
     </a>
-    <div class="form-text mt-3 mb-0">Click the customer to see invoices and record a deposit or full payment.</div>
+    <div class="form-text mt-3 mb-0">Click the customer to see invoices, add extra charges to credit, or record a deposit.</div>
   </div>
 </div>
 <?php else: ?>
@@ -438,7 +486,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
       </table>
     </div>
 
-    <?php if ($customerInvoices): ?>
+    <?php if ($customerInvoices || $customerId > 0 || $customerLabel !== ''): ?>
     <form method="post" id="customerPayForm" class="border rounded-3 p-3 mb-4" style="background:#f8fafc;">
       <input type="hidden" name="action" value="settle_customer">
       <input type="hidden" name="customer_id" value="<?php echo (int) $customerId; ?>">
@@ -451,14 +499,15 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
       <?php endforeach; ?>
 
       <div class="fw-semibold mb-2">Pay against wallet total</div>
-      <div class="text-muted small mb-3">Deposits reduce the customer’s overall balance (applied oldest invoice first). You do not pick one invoice.</div>
+      <div class="text-muted small mb-3">Deposits reduce the customer’s overall balance (applied oldest invoice first). Extra charges increase credit without a deposit.</div>
 
       <div class="row g-3 mb-3">
         <div class="col-md-4">
           <label class="form-label small">Payment type</label>
           <select name="pay_mode" id="custPayMode" class="form-select">
             <option value="deposit" <?php echo $preferDeposit ? 'selected' : ''; ?>>Deposit / part pay</option>
-            <option value="full">Pay full wallet balance</option>
+            <option value="full" <?php echo $customerInvoices ? '' : 'disabled'; ?>>Pay full wallet balance</option>
+            <option value="charge">Extra charge only (add to credit)</option>
           </select>
         </div>
         <div class="col-md-4" id="custAmountWrap">
@@ -477,7 +526,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 
       <div class="row g-3 mb-3">
         <div class="col-md-4">
-          <label class="form-label small">Extra charge <span class="text-muted">(optional profit)</span></label>
+          <label class="form-label small">Extra charge <span class="text-muted">(adds to credit, no deposit needed)</span></label>
           <input type="number" step="0.01" min="0" name="additional_charges" id="custExtraCharge" class="form-control" value="" placeholder="0">
         </div>
         <div class="col-md-8">
@@ -512,7 +561,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
 
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
         <div class="small text-muted">After payment, balance becomes: <strong id="balanceAfterOut">KES <?php echo number_format($customerBalance, 0); ?></strong></div>
-        <button type="submit" class="btn btn-success btn-lg" id="custPayBtn"><i class="fas fa-check me-1"></i>Record payment</button>
+        <button type="submit" class="btn btn-success btn-lg" id="custPayBtn"><i class="fas fa-check me-1"></i>Save</button>
       </div>
     </form>
     <?php endif; ?>
@@ -551,7 +600,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     </div>
   </div>
 </div>
-<?php if ($customerInvoices): ?>
+<?php if ($customerInvoices || $customerId > 0 || $customerLabel !== ''): ?>
 <script>
 (function(){
   var WALLET_DUE = <?php echo json_encode((float) $customerBalance); ?>;
@@ -572,6 +621,7 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   function money(n){ return 'KES ' + (Math.round(n*100)/100).toLocaleString('en-KE', {maximumFractionDigits:0}); }
   function chargeAmt(){ return Math.max(0, Math.round((parseFloat(chargeInput && chargeInput.value)||0) * 100) / 100); }
   function dueWithCharge(){ return Math.round((WALLET_DUE + chargeAmt()) * 100) / 100; }
+  function isChargeOnly(){ return modeSel && modeSel.value === 'charge'; }
   function fillList(items){
     detailList.innerHTML = '';
     (items||[]).forEach(function(v){
@@ -582,10 +632,15 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   }
   function syncDetails(){
     var m = methodSel.value;
-    cashBox.style.display = m === 'cash' ? 'flex' : 'none';
-    document.getElementById('custAmountWrap').style.display = modeSel.value === 'deposit' ? '' : 'none';
+    var chargeOnly = isChargeOnly();
+    cashBox.style.display = (!chargeOnly && m === 'cash') ? 'flex' : 'none';
+    document.getElementById('custAmountWrap').style.display = (modeSel.value === 'deposit' && !chargeOnly) ? '' : 'none';
+    if (methodSel.closest) {
+      var methodCol = methodSel.closest('.col-md-4');
+      if (methodCol) methodCol.style.display = chargeOnly ? 'none' : '';
+    }
     if (modeSel.value === 'full') amountInput.value = dueWithCharge().toFixed(2);
-    if (m === 'cash') { detailBox.style.display = 'none'; syncHidden(); return; }
+    if (chargeOnly || m === 'cash') { detailBox.style.display = 'none'; syncHidden(); return; }
     detailBox.style.display = 'flex';
     if (m === 'mpesa' || m === 'paybill') {
       detailLabel.textContent = m === 'paybill' ? 'Paybill / Till' : 'Name on M-Pesa';
@@ -621,11 +676,16 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
     var due = dueWithCharge();
     var ch = chargeAmt();
     if (modeSel.value === 'full') amountInput.value = due.toFixed(2);
-    var amt = modeSel.value === 'full' ? due : (parseFloat(amountInput.value)||0);
-    if (amt > due) amt = due;
-    var after = Math.max(0, Math.round((due - amt) * 100) / 100);
+    var amt = isChargeOnly() ? 0 : (modeSel.value === 'full' ? due : (parseFloat(amountInput.value)||0));
+    if (!isChargeOnly() && amt > due) amt = due;
+    var after = isChargeOnly() ? due : Math.max(0, Math.round((due - amt) * 100) / 100);
     document.getElementById('balanceAfterOut').textContent = money(after);
-    document.getElementById('custPayBtn').innerHTML = '<i class="fas fa-check me-1"></i>Record ' + money(amt);
+    var btn = document.getElementById('custPayBtn');
+    if (isChargeOnly() || (ch > 0 && amt <= 0)) {
+      btn.innerHTML = '<i class="fas fa-plus me-1"></i>Add extra charge ' + money(ch);
+    } else {
+      btn.innerHTML = '<i class="fas fa-check me-1"></i>Record ' + money(amt);
+    }
     var collectOut = document.getElementById('custCollectOut');
     if (collectOut) {
       if (ch > 0) {
@@ -646,15 +706,21 @@ $firstDeposit = array_key_first($depositMethods) ?: 'cash';
   document.getElementById('customerPayForm').addEventListener('submit', function(e){
     syncHidden();
     var ch = chargeAmt();
-    if (ch > 0 && !(chargeNote.value || '').trim()) {
+    if ((isChargeOnly() || ch > 0) && !(chargeNote.value || '').trim()) {
       e.preventDefault();
       alert('Enter a reason for the extra charge.');
       chargeNote.focus();
       return;
     }
-    if (modeSel.value === 'deposit' && (parseFloat(amountInput.value)||0) <= 0) {
+    if (isChargeOnly() && ch <= 0) {
       e.preventDefault();
-      alert('Enter the deposit amount.');
+      alert('Enter the extra charge amount.');
+      chargeInput.focus();
+      return;
+    }
+    if (modeSel.value === 'deposit' && (parseFloat(amountInput.value)||0) <= 0 && ch <= 0) {
+      e.preventDefault();
+      alert('Enter the deposit amount, or add an extra charge.');
     }
   });
   syncDetails();

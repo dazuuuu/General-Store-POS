@@ -47,7 +47,7 @@ class SaleModel extends Model
             $db->beginTransaction();
 
             $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                              quantity, unit, units_per_pack, pack_unit, pack_price
+                              quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
                          FROM products WHERE id = ? AND tenant_id = ? AND status = 'active' FOR UPDATE";
             $sel = $db->prepare($selSql);
             $subtotal = 0.0;
@@ -65,11 +65,12 @@ class SaleModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float)$p['quantity'], 2), '0'), '.') . " left."]];
                 }
-                $unitPrice = \Pricing::unitPriceForQty($p, $qty, $saleType);
+                $lineTotal = \Pricing::lineTotal($p, $qty, $saleType);
+                $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
                 if ($unitPrice <= 0) {
                     $unitPrice = (float) ($p['selling_price'] ?? 0);
+                    $lineTotal = round($unitPrice * $qty, 2);
                 }
-                $lineTotal = round($unitPrice * $qty, 2);
                 $subtotal += $lineTotal;
                 $lines[] = [
                     'product_id'   => $pid,
@@ -529,6 +530,7 @@ class SaleModel extends Model
         $this->ensureColumn('sales', 'cash_amount', "ALTER TABLE sales ADD COLUMN cash_amount DECIMAL(12,2) NULL AFTER change_given");
         $this->ensureColumn('sales', 'mpesa_amount', "ALTER TABLE sales ADD COLUMN mpesa_amount DECIMAL(12,2) NULL AFTER cash_amount");
         $this->ensureColumn('sale_items', 'price_type', "ALTER TABLE sale_items ADD COLUMN price_type VARCHAR(20) NULL AFTER unit_price");
+        $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
     }
 
     private function ensureTable(string $table, string $sql): void

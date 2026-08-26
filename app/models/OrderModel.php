@@ -242,7 +242,7 @@ class OrderModel extends Model
             $returns = (new ReturnModel($db))->returnsForItems('order', array_keys($existingRows));
             $productSel = $db->prepare(
                 "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                        quantity, unit, units_per_pack, pack_unit, pack_price
+                        quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
                    FROM products
                   WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE"
             );
@@ -325,11 +325,13 @@ class OrderModel extends Model
                     return ['ok' => false, 'errors' => ['_' => 'Not enough stock for ' . $p['name'] . '.']];
                 }
                 $lineSaleType = (($row['price_type'] ?? $saleType) === 'wholesale') ? 'wholesale' : 'retail';
-                $unitPrice = \Pricing::unitPriceForQty($p, $qty, $lineSaleType);
+                $lineTotal = \Pricing::lineTotal($p, $qty, $lineSaleType);
+                $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
                 if ($unitPrice <= 0) {
                     $unitPrice = (float) (($p['retail_price'] ?? 0) ?: ($p['selling_price'] ?? 0));
+                    $lineTotal = round($qty * $unitPrice, 2);
                 }
-                $insertItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $lineSaleType, $qty, round($qty * $unitPrice, 2), $staffId]);
+                $insertItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $lineSaleType, $qty, $lineTotal, $staffId]);
             }
 
             $sum = $db->prepare('SELECT COALESCE(SUM(line_total),0) FROM order_items WHERE order_id = ? AND tenant_id = ?');
@@ -387,7 +389,7 @@ class OrderModel extends Model
     private function insertItems(\PDO $db, int $tid, int $orderId, array $items, int $staffId, string $saleType = 'retail', bool $enforceCreditLimit = false, float $creditOverride = 0.0): array
     {
         $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price
+                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
                      FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE";
         try {
             $sel = $db->prepare($selSql);
@@ -420,9 +422,9 @@ class OrderModel extends Model
                 $offerRow['offer_ends_at'] = null;
             }
             $lineSaleType = (($it['price_type'] ?? $saleType) === 'wholesale') ? 'wholesale' : 'retail';
-            $unitPrice = \Pricing::unitPriceForQty($offerRow + $p, $qty, $lineSaleType);
-            if ($unitPrice <= 0) { $unitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); }
-            $lineTotal = round($unitPrice * $qty, 2);
+            $lineTotal = \Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
+            $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
+            if ($unitPrice <= 0) { $unitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($unitPrice * $qty, 2); }
             if ($enforceCreditLimit && isset($p['credit_limit']) && $p['credit_limit'] !== null && $p['credit_limit'] !== '') {
                 $limit = max((float) $p['credit_limit'], $creditOverride);
                 if ($limit > 0 && $lineTotal > $limit + 0.0001) {
@@ -900,6 +902,117 @@ class OrderModel extends Model
         ];
     }
 
+    /**
+     * Open a charge-only credit invoice (no stock, no deposit) so extra charges
+     * can increase a customer's wallet balance even when they have no open tab.
+     */
+    public function createWalletCharge(string $customerName, int $customerId, float $amount, string $note, int $staffId): array
+    {
+        $amount = round(max(0, $amount), 2);
+        $customerName = trim($customerName);
+        $note = trim($note);
+        if ($amount <= 0) {
+            return ['ok' => false, 'order_id' => null, 'error' => 'Enter the extra charge amount.'];
+        }
+        if ($note === '') {
+            return ['ok' => false, 'order_id' => null, 'error' => 'Enter a reason for the extra charge (e.g. delivery, packing).'];
+        }
+        if ($customerName === '' && $customerId <= 0) {
+            return ['ok' => false, 'order_id' => null, 'error' => 'Choose a customer first.'];
+        }
+
+        $this->ensurePaymentSchema();
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) {
+            return ['ok' => false, 'order_id' => null, 'error' => 'No shop in context.'];
+        }
+        if ($staffId <= 0) {
+            return ['ok' => false, 'order_id' => null, 'error' => 'No staff in context.'];
+        }
+
+        $cm = new CustomerModel($this->db);
+        if ($customerId <= 0) {
+            $byName = $cm->findByName($customerName);
+            if ($byName) {
+                $customerId = (int) $byName['id'];
+                $customerName = (string) ($byName['name'] ?? $customerName);
+            } else {
+                $created = $cm->create(['name' => $customerName]);
+                if (!empty($created['ok'])) {
+                    $customerId = (int) $created['id'];
+                }
+            }
+        } else {
+            $cust = $cm->find($customerId);
+            if ($cust) {
+                $customerName = $customerName !== '' ? $customerName : (string) ($cust['name'] ?? '');
+            }
+        }
+        if ($customerName === '') {
+            return ['ok' => false, 'order_id' => null, 'error' => 'Choose a customer first.'];
+        }
+        if (strlen($note) > 255) {
+            $note = substr($note, 0, 255);
+        }
+
+        $db = $this->db;
+        try {
+            $db->beginTransaction();
+            $ins = $db->prepare(
+                "INSERT INTO orders (tenant_id, table_name, channel, opened_by, receipt_number, status, subtotal, total)
+                 VALUES (?,?,'tab',?,'PENDING','open',0,0)"
+            );
+            $ins->execute([$tid, $customerName, $staffId]);
+            $orderId = (int) $db->lastInsertId();
+            $receipt = 'ORD-' . str_pad((string) $orderId, 6, '0', STR_PAD_LEFT);
+            $priced = \Pricing::totals(0, 0, 0, true, $amount);
+            $sets = [
+                'receipt_number = ?',
+                'discount_amount = ?',
+                'additional_charges = ?',
+                'additional_charges_note = ?',
+                'total = ?',
+                'amount_paid = ?',
+                'amount_due = ?',
+                'payment_method = ?',
+                'payment_status = ?',
+            ];
+            $vals = [
+                $receipt,
+                0,
+                $priced['additional_charges'],
+                $note,
+                $priced['total'],
+                0,
+                $priced['total'],
+                'credit',
+                'credit',
+            ];
+            if ($customerId > 0) {
+                $sets[] = 'customer_id = ?';
+                $vals[] = $customerId;
+            }
+            $vals[] = $orderId;
+            $db->prepare('UPDATE orders SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($vals);
+            $db->commit();
+            if ($customerId > 0) {
+                try { $cm->refreshCreditBalance($customerId); } catch (\Throwable $ignored) {}
+            }
+            return [
+                'ok' => true,
+                'order_id' => $orderId,
+                'receipt_number' => $receipt,
+                'added' => $amount,
+                'amount_due' => $priced['total'],
+                'error' => null,
+            ];
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) { $db->rollBack(); }
+            error_log('OrderModel::createWalletCharge failed: ' . $e->getMessage());
+            return ['ok' => false, 'order_id' => null, 'error' => 'Could not add the extra charge.'];
+        }
+    }
+
     public function applyCustomerPayment(array $orderIds, float $amount, array $payment, int $staffId): array
     {
         $amount = max(0, round($amount, 2));
@@ -1017,6 +1130,7 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'loyalty_points_redeemed', "ALTER TABLE orders ADD COLUMN loyalty_points_redeemed DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER loyalty_points_earned");
         $this->ensureColumn('orders', 'credit_duration_days', "ALTER TABLE orders ADD COLUMN credit_duration_days INT NULL AFTER amount_due");
         $this->ensureColumn('orders', 'credit_due_at', "ALTER TABLE orders ADD COLUMN credit_due_at DATETIME NULL AFTER credit_duration_days");
+        $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $this->ensureColumn('orders', 'thank_you_sent_at', "ALTER TABLE orders ADD COLUMN thank_you_sent_at DATETIME NULL AFTER delivery_note_sent_at");
         $this->ensureColumn('orders', 'remembrance_sent_at', "ALTER TABLE orders ADD COLUMN remembrance_sent_at DATETIME NULL AFTER thank_you_sent_at");
         // Widen payment_method so deposits (incl. paybill) never fail on a
