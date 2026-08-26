@@ -133,9 +133,15 @@ if ($isDepositReceipt && $latestPayment) {
         <td style="padding:4px 4px 4px 0;vertical-align:top;"><?php echo (int) $idx + 1; ?></td>
         <td style="padding:4px 4px 4px 0;"><?php echo htmlspecialchars($it['product_name']); ?></td>
         <td style="padding:4px;text-align:center;"><?php
-          $qty = (float) $it['quantity'];
-          echo htmlspecialchars(QtyFormat::display($qty));
-          $halfNote = QtyFormat::halfNote($qty);
+          $shown = QtyFormat::saleLine($it);
+          echo htmlspecialchars($shown['qty_label']);
+          if ($shown['unit_label'] !== '') {
+              echo ' <span style="font-size:12px;">' . htmlspecialchars($shown['unit_label']) . '</span>';
+          }
+          if ($shown['price_note'] === 'retail box' || $shown['price_note'] === 'wholesale box' || $shown['price_note'] === 'retail box + items') {
+              echo '<div style="font-size:12px;color:#64748b;">' . htmlspecialchars($shown['price_note']) . '</div>';
+          }
+          $halfNote = QtyFormat::halfNote((float) $it['quantity']);
           if ($halfNote !== '') {
               echo '<div style="font-size:12px;color:#64748b;">' . htmlspecialchars($halfNote) . '</div>';
           }

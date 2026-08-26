@@ -28,6 +28,7 @@ echo json_encode(['items' => array_map(function (array $r) {
         'units_per_pack' => isset($r['units_per_pack']) ? (float) $r['units_per_pack'] : 1,
         'pack_unit'      => $r['pack_unit'] ?? null,
         'pack_price'     => isset($r['pack_price']) ? (float) $r['pack_price'] : 0,
+        'retail_pack_price' => isset($r['retail_pack_price']) ? (float) $r['retail_pack_price'] : 0,
         'package_buying_price' => isset($r['package_buying_price']) ? (float) $r['package_buying_price'] : 0,
         'image_path'     => $r['image_path'],
         'barcode'        => $r['barcode'] ?? null,

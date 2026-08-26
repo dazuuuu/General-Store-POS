@@ -213,7 +213,7 @@ class ProductModel extends Model
         $tid = \TenantContext::tenantId();
         $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at,
-                       p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price,
+                       p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
                        p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,
                        p.category_id, c.name AS category_name,
@@ -278,7 +278,7 @@ class ProductModel extends Model
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $stmt = $this->db->prepare(
             "SELECT p.id, p.name, p.quantity, p.faulty_quantity, p.unit, p.colors, p.buying_price,
-                    p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price,
+                    p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
                     p.package_buying_price, p.image_path, p.barcode,
                     c.name AS category_name, c.name AS subject_name,
                     pu.name AS publisher_name, br.name AS brand_name
@@ -321,7 +321,9 @@ class ProductModel extends Model
         }
         try {
             $stmt = $this->db->prepare(
-                'SELECT p.id, p.name, p.product_type, p.quantity, p.faulty_quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                'SELECT p.id, p.name, p.product_type, p.quantity, p.faulty_quantity, p.unit, p.buying_price,
+                        p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
+                        p.package_buying_price, p.image_path, p.barcode,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
@@ -457,7 +459,8 @@ class ProductModel extends Model
             'units_per_pack' => "ALTER TABLE `products` ADD COLUMN `units_per_pack` DECIMAL(12,2) NOT NULL DEFAULT 1.00 AFTER `unit`",
             'pack_unit' => "ALTER TABLE `products` ADD COLUMN `pack_unit` VARCHAR(20) NULL AFTER `units_per_pack`",
             'pack_price' => "ALTER TABLE `products` ADD COLUMN `pack_price` DECIMAL(12,2) NULL AFTER `pack_unit`",
-            'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `pack_price`",
+            'retail_pack_price' => "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`",
+            'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `retail_pack_price`",
             'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
         ];
 
@@ -626,11 +629,15 @@ class ProductModel extends Model
         $unitsPerPack = max(0.01, (float) ($in['units_per_pack'] ?? 1));
         $packUnit = trim((string) ($in['pack_unit'] ?? '')) ?: null;
         $packPrice = ($in['pack_price'] ?? '') !== '' ? (float) $in['pack_price'] : null;
+        $retailPackPrice = ($in['retail_pack_price'] ?? '') !== '' ? (float) $in['retail_pack_price'] : null;
         // For packaged products the wholesale selling price is the package
         // price; this per-content value is derived for legacy line-item math.
         $wholesale = ($packUnit !== null && $packPrice !== null && $unitsPerPack > 1)
             ? round($packPrice / $unitsPerPack, 2)
             : (($in['wholesale_price'] ?? '') !== '' ? (float) $in['wholesale_price'] : $retail);
+        if ($retailPackPrice === null && $packUnit !== null && $unitsPerPack > 1 && $retail > 0) {
+            $retailPackPrice = round($retail * $unitsPerPack, 2);
+        }
         $packageBuying = ($in['package_buying_price'] ?? '') !== '' ? (float) $in['package_buying_price'] : null;
         $buyingPrice = (float) ($in['buying_price'] ?? 0);
         if ($packageBuying !== null && $packUnit !== null && $unitsPerPack > 0) {
@@ -655,6 +662,7 @@ class ProductModel extends Model
             'units_per_pack'      => $unitsPerPack,
             'pack_unit'           => $packUnit,
             'pack_price'          => $packPrice,
+            'retail_pack_price'   => $retailPackPrice,
             'size_value'          => $sizeValue,
             'size_unit'           => $sizeUnit,
             'buying_price'        => $buyingPrice,

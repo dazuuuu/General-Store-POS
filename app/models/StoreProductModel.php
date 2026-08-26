@@ -32,6 +32,7 @@ class StoreProductModel extends Model
                 'package_quantity' => ($item['package_quantity'] ?? '') !== '' ? max(0, (float) $item['package_quantity']) : null,
                 'units_per_package' => ($item['units_per_package'] ?? '') !== '' ? max(0.01, (float) $item['units_per_package']) : null,
                 'package_price' => ($item['package_price'] ?? '') !== '' ? max(0, (float) $item['package_price']) : null,
+                'retail_pack_price' => ($item['retail_pack_price'] ?? '') !== '' ? max(0, (float) $item['retail_pack_price']) : null,
                 'colors' => trim((string) ($item['colors'] ?? '')) ?: null,
                 'quantity' => $qty,
                 'faulty_quantity' => max(0, (float) ($item['faulty_quantity'] ?? 0)),
@@ -213,7 +214,7 @@ class StoreProductModel extends Model
             'UPDATE store_products
                 SET name = ?, category_id = ?, brand_id = ?, supplier_id = ?, barcode = ?, unit = ?, colors = ?,
                     quantity = ?, faulty_quantity = ?, buying_price = ?, package_buying_price = ?, retail_price = ?, wholesale_price = ?,
-                    package_unit = ?, package_quantity = ?, units_per_package = ?, package_price = ?, notes = ?
+                    package_unit = ?, package_quantity = ?, units_per_package = ?, package_price = ?, retail_pack_price = ?, notes = ?
               WHERE id = ? AND tenant_id = ? AND status = \'stored\''
         )->execute([
             $name,
@@ -233,6 +234,7 @@ class StoreProductModel extends Model
             ($item['package_quantity'] ?? '') !== '' ? max(0, (float) $item['package_quantity']) : null,
             ($item['units_per_package'] ?? '') !== '' ? max(0.01, (float) $item['units_per_package']) : null,
             ($item['package_price'] ?? '') !== '' ? max(0, (float) $item['package_price']) : null,
+            ($item['retail_pack_price'] ?? '') !== '' ? max(0, (float) $item['retail_pack_price']) : null,
             trim((string) ($item['notes'] ?? '')) ?: null,
             $id,
             $tid,
@@ -491,6 +493,7 @@ class StoreProductModel extends Model
             'units_per_pack' => max(0.01, (float) ($it['units_per_package'] ?? 1)),
             'pack_unit' => $it['package_unit'] ?? null,
             'pack_price' => ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
+            'retail_pack_price' => ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
             'colors' => $it['colors'] ? array_map('trim', explode(',', $it['colors'])) : [],
             'quantity' => (float) $it['quantity'],
             'faulty_quantity' => (float) ($it['faulty_quantity'] ?? 0),
@@ -525,6 +528,7 @@ class StoreProductModel extends Model
             'units_per_pack = ?',
             'pack_unit = ?',
             'pack_price = ?',
+            'retail_pack_price = ?',
         ];
         $params = [
             (float) $it['quantity'],
@@ -538,6 +542,7 @@ class StoreProductModel extends Model
             max(0.01, (float) ($it['units_per_package'] ?? 1)),
             $it['package_unit'] ?? null,
             ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
+            ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
         ];
         foreach (['category_id', 'brand_id', 'supplier_id'] as $column) {
             if ((int) ($it[$column] ?? 0) > 0) {
@@ -617,6 +622,7 @@ class StoreProductModel extends Model
                 package_quantity DECIMAL(12,2) NULL,
                 units_per_package DECIMAL(12,2) NULL,
                 package_price DECIMAL(12,2) NULL,
+                retail_pack_price DECIMAL(12,2) NULL,
                 colors VARCHAR(255) NULL,
                 quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
                 faulty_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -642,6 +648,8 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_products', 'package_quantity', "ALTER TABLE `store_products` ADD COLUMN `package_quantity` DECIMAL(12,2) NULL AFTER `package_unit`");
         $this->ensureColumn('store_products', 'units_per_package', "ALTER TABLE `store_products` ADD COLUMN `units_per_package` DECIMAL(12,2) NULL AFTER `package_quantity`");
         $this->ensureColumn('store_products', 'package_price', "ALTER TABLE `store_products` ADD COLUMN `package_price` DECIMAL(12,2) NULL AFTER `units_per_package`");
+        $this->ensureColumn('store_products', 'retail_pack_price', "ALTER TABLE `store_products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `package_price`");
+        $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $this->ensureColumn('store_products', 'package_buying_price', "ALTER TABLE `store_products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `buying_price`");
         $this->ensureColumn('store_products', 'offer_price', "ALTER TABLE `store_products` ADD COLUMN `offer_price` DECIMAL(12,2) NULL AFTER `wholesale_price`");
         $this->ensureColumn('store_products', 'offer_starts_at', "ALTER TABLE `store_products` ADD COLUMN `offer_starts_at` DATETIME NULL AFTER `offer_price`");

@@ -30,6 +30,7 @@ echo json_encode(['item' => [
     'units_per_pack'  => isset($row['units_per_pack']) ? (float) $row['units_per_pack'] : 1,
     'pack_unit'       => $row['pack_unit'] ?? null,
     'pack_price'      => isset($row['pack_price']) ? (float) $row['pack_price'] : 0,
+    'retail_pack_price' => isset($row['retail_pack_price']) ? (float) $row['retail_pack_price'] : 0,
     'package_buying_price' => isset($row['package_buying_price']) ? (float) $row['package_buying_price'] : 0,
     'image_path'      => $row['image_path'],
     'barcode'         => $row['barcode'],

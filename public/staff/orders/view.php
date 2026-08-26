@@ -174,7 +174,8 @@ ob_start();
             <div class="d-flex justify-content-between border-bottom py-2">
               <div>
                 <div class="fw-semibold" style="font-size:.9rem;"><?php echo htmlspecialchars($it['product_name']); ?></div>
-                <small class="text-muted">KES <?php echo number_format((float) $it['unit_price'], 0); ?> × <?php echo rtrim(rtrim(number_format((float) $it['quantity'], 2), '0'), '.'); ?></small>
+                <?php $shown = QtyFormat::saleLine($it); ?>
+                <small class="text-muted">KES <?php echo number_format($shown['unit_price'], 0); ?> × <?php echo htmlspecialchars($shown['summary_qty']); ?><?php echo ($shown['price_note'] === 'retail box' || $shown['price_note'] === 'wholesale box') ? ' · ' . htmlspecialchars($shown['price_note']) : ''; ?></small>
               </div>
               <div class="fw-bold">KES <?php echo number_format((float) $it['line_total'], 0); ?></div>
             </div>

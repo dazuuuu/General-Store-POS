@@ -35,6 +35,10 @@ $customerPhone = '';
 $creditDurationDays = 14;
 $heldOrderId = 0;
 
+$normalizePriceType = static function ($type): string {
+    return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
+};
+
 // Resuming a held order? Prefill the cart + customer name.
 $resumeId = (int) ($_GET['resume'] ?? 0);
 if ($resumeId > 0) {
@@ -51,19 +55,14 @@ if ($resumeId > 0) {
         foreach ($HO->items($resumeId) as $it) {
             if ($it['product_id'] && in_array((int) $it['product_id'], $validIds, true)) {
                 $product = $productsById[(int) $it['product_id']];
-                $priceType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
-                $quantity = (float) $it['quantity'];
-                $unitsPerPack = max(1, (float) ($product['units_per_pack'] ?? 1));
-                $packUnit = trim((string) ($product['pack_unit'] ?? ''));
-                $packPrice = ($product['pack_price'] ?? '') !== '' && $product['pack_price'] !== null ? (float) $product['pack_price'] : 0.0;
-                if ($priceType === 'wholesale' && $packUnit !== '' && $unitsPerPack > 1 && $packPrice > 0) {
-                    $quantity = round($quantity / $unitsPerPack, 2);
+                $priceType = $normalizePriceType($it['price_type'] ?? 'retail');
+                foreach (QtyFormat::splitCartBuckets($product, (float) $it['quantity'], $priceType) as $bucket) {
+                    $cart[] = [
+                        'product_id' => (int) $it['product_id'],
+                        'quantity' => $bucket['quantity'],
+                        'price_type' => $bucket['price_type'],
+                    ];
                 }
-                $cart[] = [
-                    'product_id' => (int) $it['product_id'],
-                    'quantity' => $quantity,
-                    'price_type' => $priceType,
-                ];
             }
         }
         $cartJson = json_encode($cart);
@@ -86,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $items[] = [
             'product_id' => (int) ($c['product_id'] ?? 0),
             'quantity' => (float) ($c['quantity'] ?? 0),
-            'price_type' => (($c['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+            'price_type' => $normalizePriceType($c['price_type'] ?? 'retail'),
         ];
     }
 
@@ -110,8 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($items as $it) {
             $prod = null;
             foreach ($products as $p) { if ((int) $p['id'] === $it['product_id']) { $prod = $p; break; } }
-            $lineSaleType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
-            if ($prod) { $subtotal += \Pricing::unitPriceForQty($prod, (float) $it['quantity'], $lineSaleType) * $it['quantity']; }
+            $lineSaleType = $normalizePriceType($it['price_type'] ?? 'retail');
+            if ($prod) { $subtotal += \Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType); }
         }
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), round($subtotal, 2));
         $additionalCharges = max(0, round((float) ($_POST['additional_charges'] ?? 0), 2));
@@ -236,6 +235,12 @@ ob_start();
       <?php endforeach; ?>
     </div>
 
+    <div class="pos-mode-tabs" id="saleModeTabs" aria-label="Sale mode">
+      <button type="button" class="pos-mode active" data-sale-mode="retail"><i class="fas fa-cube me-1"></i>Retail item</button>
+      <button type="button" class="pos-mode" data-sale-mode="retail_pack"><i class="fas fa-box me-1"></i>Retail carton</button>
+      <button type="button" class="pos-mode" data-sale-mode="wholesale"><i class="fas fa-boxes-stacked me-1"></i>Wholesale carton</button>
+    </div>
+
     <div class="pos-prod-grid" id="productList">
       <?php foreach ($products as $p):
           $price = (float) ($p['retail_price'] ?: $p['selling_price']);
@@ -243,6 +248,7 @@ ob_start();
           $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
           $packUnit = (string) ($p['pack_unit'] ?? '');
           $packPrice = ($p['pack_price'] ?? '') !== '' && $p['pack_price'] !== null ? (float) $p['pack_price'] : 0;
+          $retailPackPrice = ($p['retail_pack_price'] ?? '') !== '' && $p['retail_pack_price'] !== null ? (float) $p['retail_pack_price'] : 0;
           $colorBits = !empty($p['colors']) ? (is_array($p['colors']) ? $p['colors'] : []) : [];
           $faulty = (float) ($p['faulty_quantity'] ?? 0);
           $sub = implode(' · ', array_filter([
@@ -258,6 +264,7 @@ ob_start();
              data-units-per-pack="<?php echo $unitsPerPack; ?>"
              data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
              data-pack-price="<?php echo $packPrice; ?>"
+             data-retail-pack-price="<?php echo $retailPackPrice; ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -274,7 +281,7 @@ ob_start();
             <?php endif; ?>
           </div>
           <div class="pos-card-name"><?php echo htmlspecialchars($p['name']); ?><?php echo $sub ? '<br><small>' . htmlspecialchars($sub) . '</small>' : ''; ?></div>
-          <div class="pos-card-price">
+          <div class="pos-card-price" data-card-price>
             <?php if (!empty($p['on_offer'])): ?>
               <span class="pos-card-regprice">KES <?php echo number_format((float) $p['regular_price'], 0); ?></span>
               Retail KES <?php echo number_format($price, 0); ?>
@@ -285,6 +292,9 @@ ob_start();
               <div class="small text-muted">Wholesale KES <?php echo number_format($packPrice, 0); ?> / <?php echo htmlspecialchars($packUnit); ?> (<?php echo rtrim(rtrim(number_format($unitsPerPack, 2), '0'), '.'); ?> pcs)</div>
             <?php elseif ($wholesale > 0 && abs($wholesale - $price) > 0.001): ?>
               <div class="small text-muted">Wholesale KES <?php echo number_format($wholesale, 0); ?></div>
+            <?php endif; ?>
+            <?php if ($packUnit !== '' && $unitsPerPack > 1 && $retailPackPrice > 0): ?>
+              <div class="small text-muted">Retail carton KES <?php echo number_format($retailPackPrice, 0); ?> / <?php echo htmlspecialchars($packUnit); ?></div>
             <?php endif; ?>
           </div>
           <div class="pos-add-row">
@@ -347,17 +357,11 @@ ob_start();
     </div>
 
     <div class="pos-cart" id="cartRows">
-      <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items and/or wholesale packs.</div>
+      <div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>
     </div>
 
     <div class="pos-totals">
-      <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Tap Add adds to</span>
-        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:150px;">
-          <option value="retail">Retail (items)</option>
-          <option value="wholesale">Wholesale (packs)</option>
-        </select>
-      </div>
+      <input type="hidden" name="sale_type" id="saleType" value="retail">
       <div class="d-flex justify-content-between"><span>Sub Total</span><span id="subtotalOut">KES 0</span></div>
       <div class="d-flex justify-content-between align-items-center py-1">
         <span>Discount</span>
@@ -400,6 +404,10 @@ ob_start();
 .pos-dim{border:1px solid #eef0f4;background:#fff;color:#5b6070;border-radius:999px;padding:6px 14px;font-size:.8rem;font-weight:600;}
 .pos-dim.active{border-color:var(--pos-green);color:var(--pos-green);background:var(--pos-green-light);}
 .pos-cats{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;}
+.pos-mode-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px;}
+.pos-mode{border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:10px;padding:9px 10px;font-size:.82rem;font-weight:700;white-space:nowrap;}
+.pos-mode.active{border-color:var(--pos-green);background:var(--pos-green-light);color:var(--pos-green);}
+.pos-card.is-mode-unavailable .pos-add,.pos-card.is-mode-unavailable .pos-add-half{opacity:.45;pointer-events:none;}
 .pos-cat{flex:0 0 auto;width:88px;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #eef0f4;background:#fff;border-radius:14px;padding:12px 8px;font-size:.78rem;font-weight:600;color:#5b6070;white-space:nowrap;}
 .pos-cat-img{width:44px;height:44px;border-radius:12px;background:#f7f7fb;display:flex;align-items:center;justify-content:center;overflow:hidden;color:#b7bac3;font-size:1.1rem;}
 .pos-cat-img img{width:100%;height:100%;object-fit:cover;}
@@ -467,7 +475,9 @@ ob_start();
 }
 </style>
 
+<script src="<?php echo htmlspecialchars(public_url('assets/js/pos-pack-cart.js')); ?>"></script>
 <script>
+var PC = window.PosPackCart;
 var PRODUCTS = {};
 var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
@@ -480,21 +490,51 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         unitsPerPack: parseFloat(el.dataset.unitsPerPack) || 1,
         packUnit: el.dataset.packUnit || '',
         packPrice: parseFloat(el.dataset.packPrice) || 0,
+        retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
 });
 var cart = {};
 try {
-    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) {
-        var id = String(c.product_id);
-        if (!cart[id]) cart[id] = { retail: 0, wholesale: 0 };
-        var qty = parseFloat(c.quantity) || 0;
-        if (c.price_type === 'wholesale') cart[id].wholesale += qty;
-        else cart[id].retail += qty;
-    });
+    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) { PC.applyLine(cart, c, PRODUCTS[String(c.product_id)]); });
 } catch (e) {}
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
+function activeModeLabel(type) {
+    if (type === 'retail_pack') return 'Retail carton';
+    if (type === 'wholesale') return 'Wholesale carton';
+    return 'Retail item';
+}
+function modeUnitLabel(p, type) {
+    if ((type === 'retail_pack' || type === 'wholesale') && p.packUnit && p.unitsPerPack > 1) return p.packUnit;
+    return 'item';
+}
+function modeAvailable(p, type) {
+    if (type === 'retail_pack') return PC.hasRetailPack(p);
+    if (type === 'wholesale') return PC.hasWholesalePack(p) || p.wholesale > 0;
+    return true;
+}
+function updateProductModeDisplay() {
+    var type = defaultSaleType();
+    document.querySelectorAll('.pos-card').forEach(function (el) {
+        var p = PRODUCTS[el.dataset.id];
+        var priceEl = el.querySelector('[data-card-price]');
+        if (!p || !priceEl) return;
+        var available = modeAvailable(p, type);
+        el.classList.toggle('is-mode-unavailable', !available);
+        if (!available) {
+            priceEl.innerHTML = '<span class="text-muted">' + activeModeLabel(type) + ' not set</span>';
+            return;
+        }
+        var price = PC.productPrice(p, type);
+        var unit = modeUnitLabel(p, type);
+        var stock = type === 'retail_pack' ? PC.maxRetailPack(p, { retail: 0, retailPack: 0, wholesale: 0 })
+            : (type === 'wholesale' ? PC.maxWholesale(p, { retail: 0, retailPack: 0, wholesale: 0 }) : p.stock);
+        var stockText = (Math.round(stock * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits: 2});
+        priceEl.innerHTML = activeModeLabel(type) + ' ' + money(price)
+            + '<div class="small text-muted">per ' + unit + ' · stock ' + stockText + ' ' + unit + '</div>';
+    });
+}
 function formatHalfQty(n) {
     n = Math.round((parseFloat(n) || 0) * 100) / 100;
     var whole = Math.floor(n + 0.0001);
@@ -503,95 +543,43 @@ function formatHalfQty(n) {
     if (Math.abs(frac) < 0.001) return String(whole);
     return String(n);
 }
-function defaultSaleType() { return document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail'; }
+function defaultSaleType() { return document.getElementById('saleType').value; }
 function ensureCart(id) {
-    if (!cart[id]) cart[id] = { retail: 0, wholesale: 0 };
+    if (!cart[id]) cart[id] = PC.buckets();
     return cart[id];
 }
-function isPackProduct(p) { return !!(p && p.packUnit && p.unitsPerPack > 1 && p.packPrice > 0); }
-function sellsByPack(p, type) { return type === 'wholesale' && isPackProduct(p); }
-function saleStockQty(p, saleQty, type) { return sellsByPack(p, type) ? saleQty * p.unitsPerPack : saleQty; }
-function productPrice(p, type) {
-    if (sellsByPack(p, type)) return p.packPrice;
-    return type === 'wholesale' && p.wholesale > 0 ? p.wholesale : p.price;
-}
-function wholesaleUnitLabel(p) { return isPackProduct(p) ? p.packUnit : 'item'; }
-function stockUsed(id) {
-    var p = PRODUCTS[id], c = cart[id];
-    if (!p || !c) return 0;
-    return (c.retail || 0) + saleStockQty(p, c.wholesale || 0, 'wholesale');
-}
-function maxRetail(id) {
-    var p = PRODUCTS[id], c = ensureCart(id);
-    return Math.max(0, Math.round((p.stock - saleStockQty(p, c.wholesale || 0, 'wholesale')) * 100) / 100);
-}
-function maxWholesale(id) {
-    var p = PRODUCTS[id], c = ensureCart(id);
-    var left = Math.max(0, p.stock - (c.retail || 0));
-    if (isPackProduct(p)) return Math.floor((left / p.unitsPerPack) * 100) / 100;
-    return Math.round(left * 100) / 100;
-}
 function cartHasItems() {
-    return Object.keys(cart).some(function (id) {
-        return (cart[id].retail || 0) > 0 || (cart[id].wholesale || 0) > 0;
-    });
+    return Object.keys(cart).some(function (id) { return !PC.isEmpty(cart[id]); });
 }
-function serializeCart() {
-    var out = [];
-    Object.keys(cart).forEach(function (id) {
-        var p = PRODUCTS[id], c = cart[id];
-        if (!p || !c) return;
-        if ((c.retail || 0) > 0) {
-            out.push({ product_id: parseInt(id, 10), quantity: c.retail, price_type: 'retail' });
-        }
-        if ((c.wholesale || 0) > 0) {
-            out.push({
-                product_id: parseInt(id, 10),
-                quantity: saleStockQty(p, c.wholesale, 'wholesale'),
-                price_type: 'wholesale'
-            });
-        }
-    });
-    return out;
-}
+function serializeCart() { return PC.serialize(cart, PRODUCTS); }
 function pruneCart(id) {
     if (!cart[id]) return;
-    if ((cart[id].retail || 0) <= 0 && (cart[id].wholesale || 0) <= 0) delete cart[id];
+    if (PC.isEmpty(cart[id])) delete cart[id];
 }
-function setRetailQty(id, val) {
+function setFieldQty(id, field, val) {
     var p = PRODUCTS[id]; if (!p) return;
     var c = ensureCart(id);
-    val = Math.round((parseFloat(val) || 0) * 100) / 100;
-    var max = Math.max(0, Math.round((p.stock - saleStockQty(p, c.wholesale || 0, 'wholesale')) * 100) / 100);
-    if (val > max) val = max;
-    c.retail = val > 0 ? val : 0;
+    c[field] = PC.clampField(p, c, field, val);
     pruneCart(id);
     render();
 }
-function setWholesaleQty(id, val) {
-    var p = PRODUCTS[id]; if (!p) return;
+function bump(id, field, delta) {
     var c = ensureCart(id);
-    val = Math.round((parseFloat(val) || 0) * 100) / 100;
-    var left = Math.max(0, p.stock - (c.retail || 0));
-    var max = isPackProduct(p) ? Math.floor((left / p.unitsPerPack) * 100) / 100 : Math.round(left * 100) / 100;
-    if (val > max) val = max;
-    c.wholesale = val > 0 ? val : 0;
-    pruneCart(id);
-    render();
+    setFieldQty(id, field, (c[field] || 0) + delta);
 }
 function add(id) {
-    var p = PRODUCTS[id]; if (!p) return;
     var type = defaultSaleType();
-    var c = ensureCart(id);
-    if (type === 'wholesale') setWholesaleQty(id, (c.wholesale || 0) + 1);
-    else setRetailQty(id, (c.retail || 0) + 1);
+    if (!modeAvailable(PRODUCTS[id], type)) return;
+    if (type === 'wholesale') bump(id, 'wholesale', 1);
+    else if (type === 'retail_pack') bump(id, 'retailPack', 1);
+    else bump(id, 'retail', 1);
 }
 function addHalf(id) {
-    var p = PRODUCTS[id]; if (!p) return;
     var type = defaultSaleType();
-    var c = ensureCart(id);
-    if (type === 'wholesale') setWholesaleQty(id, (c.wholesale || 0) + 0.5);
-    else setRetailQty(id, (c.retail || 0) + 0.5);
+    if (!modeAvailable(PRODUCTS[id], type)) return;
+    if (type === 'wholesale') bump(id, 'wholesale', 0.5);
+    else if (type === 'retail_pack') bump(id, 'retailPack', 0.5);
+    else bump(id, 'retail', 0.5);
 }
 var CUSTOMER_SEARCH_URL = <?php echo json_encode($customerSearchUrl); ?>;
 var loyalSelect = document.getElementById('loyalCustomerSelect');
@@ -668,9 +656,7 @@ function updateTotals() {
     var sub = 0;
     Object.keys(cart).forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
-        if (!p || !c) return;
-        if (c.retail > 0) sub += productPrice(p, 'retail') * c.retail;
-        if (c.wholesale > 0) sub += productPrice(p, 'wholesale') * c.wholesale;
+        if (p && c) sub += PC.lineTotal(p, c);
     });
     var d = parseFloat(document.getElementById('discountInput').value) || 0;
     if (d < 0) d = 0;
@@ -683,36 +669,37 @@ function updateTotals() {
 
 function render() {
     var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
-    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items and/or wholesale packs.</div>';
+    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4" id="cartEmpty">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>';
     ids.forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
         if (!p || !c) return;
-        var retailMax = Math.max(c.retail || 0, maxRetail(id));
-        var wholesaleMax = Math.max(c.wholesale || 0, maxWholesale(id));
-        var wLabel = wholesaleUnitLabel(p);
-        var lineTotal = (c.retail || 0) * productPrice(p, 'retail') + (c.wholesale || 0) * productPrice(p, 'wholesale');
+        var retailMax = Math.max(c.retail || 0, PC.maxRetail(p, c));
+        var retailPackMax = Math.max(c.retailPack || 0, PC.maxRetailPack(p, c));
+        var wholesaleMax = Math.max(c.wholesale || 0, PC.maxWholesale(p, c));
+        var wLabel = PC.hasWholesalePack(p) ? PC.packLabel(p) : 'item';
+        var lineTotal = PC.lineTotal(p, c);
+        var rows = '';
+        if ((c.retail || 0) > 0) {
+            rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
+        }
+        if ((c.retailPack || 0) > 0 && PC.hasRetailPack(p)) {
+            rows += PC.qtyRow(id, 'Retail box', money(PC.productPrice(p, 'retail_pack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
+        }
+        if ((c.wholesale || 0) > 0) {
+            rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
+        }
         var line = document.createElement('div');
         line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML =
             (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
           + '<div class="flex-grow-1">'
           +   '<div class="pos-cart-name">' + p.name + '</div>'
-          +   '<div class="pos-dual-qty">'
-          +     '<label class="pos-dual-row"><span class="pos-dual-label">Retail <span class="text-muted">(' + money(productPrice(p, 'retail')) + '/item)</span></span>'
-          +       '<span class="pos-qty"><button type="button" data-dec-retail="' + id + '">−</button>'
-          +       '<button type="button" class="pos-half-btn" data-half-retail="' + id + '" title="Add half">½</button>'
-          +       '<input type="number" step="0.5" min="0" max="' + retailMax + '" class="pos-qty-input" data-retail-qty="' + id + '" value="' + (c.retail || 0) + '" inputmode="decimal">'
-          +       '<button type="button" data-inc-retail="' + id + '">+</button></span></label>'
-          +     '<label class="pos-dual-row"><span class="pos-dual-label">Wholesale <span class="text-muted">(' + money(productPrice(p, 'wholesale')) + '/' + wLabel + ')</span></span>'
-          +       '<span class="pos-qty"><button type="button" data-dec-wholesale="' + id + '">−</button>'
-          +       '<button type="button" class="pos-half-btn" data-half-wholesale="' + id + '" title="Add half">½</button>'
-          +       '<input type="number" step="0.5" min="0" max="' + wholesaleMax + '" class="pos-qty-input" data-wholesale-qty="' + id + '" value="' + (c.wholesale || 0) + '" inputmode="decimal">'
-          +       '<button type="button" data-inc-wholesale="' + id + '">+</button></span></label>'
-          +   '</div>'
+          +   '<div class="pos-dual-qty">' + rows + '</div>'
           +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal)
           +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
+          +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · retail box ' + formatHalfQty(c.retailPack) : '')
           +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
-          +     (isPackProduct(p) ? ' <span class="text-muted small">· stock used ' + stockUsed(id) + ' items</span>' : '') + '</div>'
+          +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + ' items</span>' : '') + '</div>'
           + '</div>'
           + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
         wrap.appendChild(line);
@@ -723,20 +710,26 @@ function render() {
     document.getElementById('cartInput').value = JSON.stringify(serializeCart());
     updateTotals();
 }
+function qtyInputField(input) {
+    if (input.dataset.retailPackQty) return { id: input.dataset.retailPackQty, field: 'retailPack' };
+    if (input.dataset.retailQty) return { id: input.dataset.retailQty, field: 'retail' };
+    if (input.dataset.wholesaleQty) return { id: input.dataset.wholesaleQty, field: 'wholesale' };
+    return null;
+}
 function syncTypedQty(input) {
-    if (input.dataset.retailQty) {
-        setRetailQty(input.dataset.retailQty, input.value);
-        return;
-    }
-    if (input.dataset.wholesaleQty) {
-        setWholesaleQty(input.dataset.wholesaleQty, input.value);
-    }
+    var info = qtyInputField(input);
+    if (info) setFieldQty(info.id, info.field, input.value);
 }
 document.getElementById('discountInput').addEventListener('input', updateTotals);
 var extraChargeInput = document.getElementById('extraChargeInput');
 if (extraChargeInput) extraChargeInput.addEventListener('input', updateTotals);
-document.getElementById('saleType').addEventListener('change', function () {
-    // Only controls what Tap Add increments; existing dual quantities stay as typed.
+document.getElementById('saleModeTabs').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-sale-mode]');
+    if (!btn) return;
+    document.querySelectorAll('[data-sale-mode]').forEach(function (x) { x.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('saleType').value = btn.dataset.saleMode || 'retail';
+    updateProductModeDisplay();
 });
 document.getElementById('creditToggle').addEventListener('click', function () {
     var box = document.getElementById('creditFields');
@@ -751,38 +744,32 @@ document.querySelectorAll('.pos-card .pos-add-half').forEach(function (b) {
 });
 document.getElementById('cartRows').addEventListener('click', function (e) {
     var t = e.target.closest('button'); if (!t) return;
-    if (t.dataset.incRetail) setRetailQty(t.dataset.incRetail, (cart[t.dataset.incRetail] ? cart[t.dataset.incRetail].retail : 0) + 0.5);
-    else if (t.dataset.decRetail) setRetailQty(t.dataset.decRetail, (cart[t.dataset.decRetail] ? cart[t.dataset.decRetail].retail : 0) - 0.5);
-    else if (t.dataset.halfRetail) setRetailQty(t.dataset.halfRetail, (cart[t.dataset.halfRetail] ? cart[t.dataset.halfRetail].retail : 0) + 0.5);
-    else if (t.dataset.incWholesale) setWholesaleQty(t.dataset.incWholesale, (cart[t.dataset.incWholesale] ? cart[t.dataset.incWholesale].wholesale : 0) + 0.5);
-    else if (t.dataset.decWholesale) setWholesaleQty(t.dataset.decWholesale, (cart[t.dataset.decWholesale] ? cart[t.dataset.decWholesale].wholesale : 0) - 0.5);
-    else if (t.dataset.halfWholesale) setWholesaleQty(t.dataset.halfWholesale, (cart[t.dataset.halfWholesale] ? cart[t.dataset.halfWholesale].wholesale : 0) + 0.5);
+    if (t.dataset.incRetailPack) bump(t.dataset.incRetailPack, 'retailPack', 0.5);
+    else if (t.dataset.decRetailPack) bump(t.dataset.decRetailPack, 'retailPack', -0.5);
+    else if (t.dataset.halfRetailPack) bump(t.dataset.halfRetailPack, 'retailPack', 0.5);
+    else if (t.dataset.incRetail) bump(t.dataset.incRetail, 'retail', 0.5);
+    else if (t.dataset.decRetail) bump(t.dataset.decRetail, 'retail', -0.5);
+    else if (t.dataset.halfRetail) bump(t.dataset.halfRetail, 'retail', 0.5);
+    else if (t.dataset.incWholesale) bump(t.dataset.incWholesale, 'wholesale', 0.5);
+    else if (t.dataset.decWholesale) bump(t.dataset.decWholesale, 'wholesale', -0.5);
+    else if (t.dataset.halfWholesale) bump(t.dataset.halfWholesale, 'wholesale', 0.5);
     else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
 });
 document.getElementById('cartRows').addEventListener('change', function (e) {
-    var retail = e.target.closest('[data-retail-qty]');
-    if (retail) { setRetailQty(retail.dataset.retailQty, retail.value); return; }
-    var wholesale = e.target.closest('[data-wholesale-qty]');
-    if (wholesale) setWholesaleQty(wholesale.dataset.wholesaleQty, wholesale.value);
+    var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
+    if (input) syncTypedQty(input);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
-    var input = e.target.closest('[data-retail-qty], [data-wholesale-qty]');
+    var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
     if (!input) return;
-    var id = input.dataset.retailQty || input.dataset.wholesaleQty;
-    var p = PRODUCTS[id]; if (!p) return;
-    var c = ensureCart(id);
-    var val = Math.round((parseFloat(input.value) || 0) * 100) / 100;
-    if (input.dataset.retailQty) {
-        var maxR = Math.max(0, Math.round((p.stock - saleStockQty(p, c.wholesale || 0, 'wholesale')) * 100) / 100);
-        if (val > maxR) { val = maxR; input.value = val; }
-        c.retail = val > 0 ? val : 0;
-    } else {
-        var left = Math.max(0, p.stock - (c.retail || 0));
-        var maxW = isPackProduct(p) ? Math.floor((left / p.unitsPerPack) * 100) / 100 : Math.round(left * 100) / 100;
-        if (val > maxW) { val = maxW; input.value = val; }
-        c.wholesale = val > 0 ? val : 0;
-    }
-    pruneCart(id);
+    var info = qtyInputField(input);
+    if (!info) return;
+    var p = PRODUCTS[info.id]; if (!p) return;
+    var c = ensureCart(info.id);
+    var val = PC.clampField(p, c, info.field, input.value);
+    if (val !== (parseFloat(input.value) || 0)) input.value = val;
+    c[info.field] = val;
+    pruneCart(info.id);
     var empty = !cartHasItems();
     document.getElementById('holdBtn').disabled = empty;
     document.getElementById('checkoutBtn').disabled = empty;
@@ -790,7 +777,7 @@ document.getElementById('cartRows').addEventListener('input', function (e) {
     updateTotals();
 });
 document.getElementById('cartRows').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && e.target.closest('[data-retail-qty], [data-wholesale-qty]')) {
+    if (e.key === 'Enter' && e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]')) {
         e.preventDefault();
         e.target.blur();
     }
@@ -887,6 +874,7 @@ if (barcodeScan) {
 }
 
 render();
+updateProductModeDisplay();
 </script>
 <?php endif; ?>
 <?php

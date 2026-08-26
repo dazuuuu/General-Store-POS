@@ -40,7 +40,7 @@ class TenantDataExportService
         $rows = [[
             'Product ID', 'Name', 'Category', 'Brand', 'Supplier', 'Barcode', 'Unit',
             'Stock Qty', 'Faulty Qty', 'Buying Price', 'Wholesale Price', 'Retail Price',
-            'Pack Unit', 'Units Per Pack', 'Pack Price', 'Status', 'Stock Value', 'Retail Margin %',
+            'Pack Unit', 'Units Per Pack', 'Wholesale Pack Price', 'Retail Pack Price', 'Status', 'Stock Value', 'Retail Margin %',
         ]];
 
         foreach ((new ProductModel($this->db))->listWithMeta(true) as $p) {
@@ -64,6 +64,7 @@ class TenantDataExportService
                 $p['pack_unit'] ?? '',
                 (float) ($p['units_per_pack'] ?? 1),
                 (float) ($p['pack_price'] ?? 0),
+                (float) ($p['retail_pack_price'] ?? 0),
                 $p['status'] ?? '',
                 ProductModel::stockValue($buying, $qty),
                 $profit['margin_pct'] ?? '',

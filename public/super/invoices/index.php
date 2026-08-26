@@ -7,6 +7,9 @@ $O = new Models\OrderModel($pdo);
 $customerSearchUrl = public_url('api/customers/search.php');
 $productSearchUrl = public_url('api/inventory/sellable_search.php');
 $error = '';
+$normalizePriceType = static function ($type): string {
+    return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -19,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $items[] = [
                     'product_id' => $pid,
                     'quantity' => $qty,
-                    'price_type' => (($row['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                    'price_type' => $normalizePriceType($row['price_type'] ?? 'retail'),
                 ];
             }
         }
@@ -106,7 +109,7 @@ ob_start();
       <div class="col-md-4 customer-lookup-wrap"><label class="form-label small">Customer name</label><input name="customer_name" id="customerName" class="form-control" required placeholder="Customer / company" autocomplete="off"><div class="customer-suggest-menu" id="customerSuggestMenu"></div></div>
       <div class="col-md-4"><label class="form-label small">Phone</label><input name="customer_phone" id="customerPhone" class="form-control" placeholder="Optional"></div>
       <div class="col-md-4"><label class="form-label small">Email</label><input type="email" name="customer_email" id="customerEmail" class="form-control" placeholder="Optional"></div>
-      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" id="saleType" class="form-select"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
+      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" id="saleType" class="form-select"><option value="retail">Retail item</option><option value="retail_pack">Retail box</option><option value="wholesale">Wholesale box</option></select></div>
       <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select"><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>"><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
       <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" id="discountAmount" class="form-control" value="0"></div>
       <div class="col-md-4"><label class="form-label small">Extra charge</label><input type="number" min="0" step="0.01" name="additional_charges" id="extraChargeAmount" class="form-control" value="0"></div>
@@ -147,7 +150,10 @@ ob_start();
             <?php if ($company !== ''): ?><div class="text-muted small"><?php echo htmlspecialchars($company); ?></div><?php endif; ?>
           </td>
           <td class="small">
-            <?php echo htmlspecialchars(implode(', ', array_map(fn($it) => $it['name'] . ' x' . rtrim(rtrim(number_format((float) $it['qty'], 2), '0'), '.'), array_slice($orderItems, 0, 3)))); ?>
+            <?php echo htmlspecialchars(implode(', ', array_map(function ($it) {
+                $line = QtyFormat::saleLine($it);
+                return $it['name'] . ' x' . $line['summary_qty'];
+            }, array_slice($orderItems, 0, 3)))); ?>
             <?php if (count($orderItems) > 3): ?> ...<?php endif; ?>
           </td>
           <td><?php echo $inv['status'] === 'paid' ? '<span class="badge bg-success">Paid</span>' : '<span class="badge bg-warning text-dark">Unpaid</span>'; ?></td>
@@ -184,7 +190,7 @@ ob_start();
       <div class="selected-product small text-muted mt-1">No product selected</div>
     </div>
     <div class="col-md-2"><label class="form-label small mb-1 qty-label">Qty</label><input type="hidden" name="items[__I__][quantity]" class="stock-qty" value=""><input type="number" step="0.01" min="0" class="form-control invoice-qty" placeholder="0"></div>
-    <div class="col-md-2"><label class="form-label small mb-1">Price type</label><select name="items[__I__][price_type]" class="form-select invoice-price-type"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
+    <div class="col-md-2"><label class="form-label small mb-1">Price type</label><select name="items[__I__][price_type]" class="form-select invoice-price-type"><option value="retail">Retail item</option><option value="retail_pack">Retail box</option><option value="wholesale">Wholesale box</option></select></div>
     <div class="col-md-2"><label class="form-label small mb-1">Line</label><div class="form-control bg-light line-total">KES 0</div></div>
     <div class="col-md-1"><button type="button" class="btn btn-outline-danger w-100 remove-invoice-row"><i class="fas fa-trash"></i></button></div>
   </div>
@@ -265,13 +271,13 @@ ob_start();
   function addRow(){
     rows.insertAdjacentHTML('beforeend', tpl.replaceAll('__I__', idx++));
     var row = rows.lastElementChild;
-    row.querySelector('.invoice-price-type').value = document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail';
+    row.querySelector('.invoice-price-type').value = document.getElementById('saleType').value || 'retail';
     wire(row);
     recalc();
   }
   function rowSaleType(row) {
     var el = row.querySelector('.invoice-price-type');
-    return el && el.value === 'wholesale' ? 'wholesale' : 'retail';
+    return el ? el.value : 'retail';
   }
   function rowMeta(row){
     return {
@@ -280,13 +286,21 @@ ob_start();
       stock: parseFloat(row.dataset.stock) || 0,
       unitsPerPack: parseFloat(row.dataset.unitsPerPack) || 1,
       packUnit: row.dataset.packUnit || '',
-      packPrice: parseFloat(row.dataset.packPrice) || 0
+      packPrice: parseFloat(row.dataset.packPrice) || 0,
+      retailPackPrice: parseFloat(row.dataset.retailPackPrice) || 0
     };
+  }
+  function sellsByPack(m, type){
+    if (!m.packUnit || !(m.unitsPerPack > 1)) return false;
+    if (type === 'wholesale') return m.packPrice > 0;
+    if (type === 'retail_pack') return m.retailPackPrice > 0;
+    return false;
   }
   function rowPrice(row){
     var m = rowMeta(row);
     var type = rowSaleType(row);
-    if (type === 'wholesale' && m.packUnit && m.unitsPerPack > 1 && m.packPrice > 0) return m.packPrice;
+    if (type === 'retail_pack' && sellsByPack(m, type)) return m.retailPackPrice;
+    if (type === 'wholesale' && sellsByPack(m, type)) return m.packPrice;
     return type === 'wholesale' ? m.wholesale : m.retail;
   }
   function recalc(){
@@ -294,7 +308,7 @@ ob_start();
     rows.querySelectorAll('.invoice-row').forEach(function(row){
       var m = rowMeta(row);
       var qty = parseFloat(row.querySelector('.invoice-qty').value) || 0;
-      var byPack = rowSaleType(row) === 'wholesale' && m.packUnit && m.unitsPerPack > 1 && m.packPrice > 0;
+      var byPack = sellsByPack(m, rowSaleType(row));
       var max = byPack ? Math.floor((m.stock / m.unitsPerPack) * 100) / 100 : m.stock;
       if (qty > max) { qty = max; row.querySelector('.invoice-qty').value = max || ''; }
       row.querySelector('.qty-label').textContent = byPack ? ('Qty (' + m.packUnit + ')') : 'Qty';
@@ -324,6 +338,7 @@ ob_start();
       row.dataset.unitsPerPack = '1';
       row.dataset.packUnit = '';
       row.dataset.packPrice = '0';
+      row.dataset.retailPackPrice = '0';
       if (selected) selected.textContent = 'No product selected';
     }
     function render(items){
@@ -346,8 +361,12 @@ ob_start();
           row.dataset.unitsPerPack = p.units_per_pack || 1;
           row.dataset.packUnit = p.pack_unit || '';
           row.dataset.packPrice = p.pack_price || 0;
+          row.dataset.retailPackPrice = p.retail_pack_price || 0;
           if (selected) {
-            selected.textContent = 'Selected: ' + (p.name || '') + ' · stock ' + formatQty(p.stock) + ' ' + (p.unit || '') + ' · ' + money(p.retail_price || 0);
+            var extra = [];
+            if (p.retail_pack_price > 0 && p.pack_unit) extra.push('retail box ' + money(p.retail_pack_price) + '/' + p.pack_unit);
+            if (p.pack_price > 0 && p.pack_unit) extra.push('wholesale ' + money(p.pack_price) + '/' + p.pack_unit);
+            selected.textContent = 'Selected: ' + (p.name || '') + ' · stock ' + formatQty(p.stock) + ' ' + (p.unit || '') + ' · ' + money(p.retail_price || 0) + (extra.length ? ' · ' + extra.join(' · ') : '');
           }
           hide();
           recalc();
@@ -379,7 +398,7 @@ ob_start();
   }
   document.getElementById('addInvoiceRow').addEventListener('click', addRow);
   document.getElementById('saleType').addEventListener('change', function(){
-    var type = document.getElementById('saleType').value === 'wholesale' ? 'wholesale' : 'retail';
+    var type = document.getElementById('saleType').value || 'retail';
     rows.querySelectorAll('.invoice-price-type').forEach(function(select){ select.value = type; });
     recalc();
   });

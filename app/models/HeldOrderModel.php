@@ -39,7 +39,7 @@ class HeldOrderModel extends Model
             $ins->execute([$tid, $customerName, $staffId]);
             $heldId = (int) $db->lastInsertId();
 
-            $sel = $db->prepare('SELECT id, name, selling_price, wholesale_price, retail_price FROM products WHERE id = ? AND tenant_id = ?');
+            $sel = $db->prepare('SELECT id, name, selling_price, wholesale_price, retail_price, units_per_pack, pack_price, retail_pack_price FROM products WHERE id = ? AND tenant_id = ?');
             $insItem = $db->prepare(
                 'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, price_type, quantity) VALUES (?,?,?,?,?,?,?)'
             );
@@ -48,10 +48,18 @@ class HeldOrderModel extends Model
                 $sel->execute([$pid, $tid]);
                 $p = $sel->fetch();
                 if (!$p) { continue; } // product removed since — skip it, don't fail the whole hold
-                $priceType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
-                $price = $priceType === 'wholesale'
-                    ? (float) (($p['wholesale_price'] ?? 0) ?: ($p['retail_price'] ?: $p['selling_price']))
-                    : (float) ($p['retail_price'] ?: $p['selling_price']);
+                $priceType = in_array($it['price_type'] ?? 'retail', ['retail', 'retail_pack', 'wholesale'], true) ? $it['price_type'] : 'retail';
+                $unitsPerPack = max(1, (float) ($p['units_per_pack'] ?? 1));
+                if ($priceType === 'retail_pack' && (float) ($p['retail_pack_price'] ?? 0) > 0 && $unitsPerPack > 1) {
+                    $price = round((float) $p['retail_pack_price'] / $unitsPerPack, 2);
+                } elseif ($priceType === 'wholesale') {
+                    $price = (float) (($p['wholesale_price'] ?? 0) ?: ($p['retail_price'] ?: $p['selling_price']));
+                    if ((float) ($p['pack_price'] ?? 0) > 0 && $unitsPerPack > 1) {
+                        $price = round((float) $p['pack_price'] / $unitsPerPack, 2);
+                    }
+                } else {
+                    $price = (float) ($p['retail_price'] ?: $p['selling_price']);
+                }
                 $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, $priceType, (float) $it['quantity']]);
             }
 
@@ -116,6 +124,18 @@ class HeldOrderModel extends Model
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $this->ensureColumn('held_order_items', 'price_type', "ALTER TABLE held_order_items ADD COLUMN price_type VARCHAR(20) NOT NULL DEFAULT 'retail' AFTER unit_price");
+        $this->widenPriceTypeColumn('held_order_items');
+    }
+
+    private function widenPriceTypeColumn(string $table): void
+    {
+        try {
+            $this->db->exec("ALTER TABLE `{$table}` MODIFY `price_type` ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail'");
+        } catch (\PDOException $ignored) {
+            try {
+                $this->db->exec("ALTER TABLE `{$table}` MODIFY `price_type` VARCHAR(20) NOT NULL DEFAULT 'retail'");
+            } catch (\PDOException $ignoredAgain) {}
+        }
     }
 
     private function ensureTable(string $table, string $sql): void

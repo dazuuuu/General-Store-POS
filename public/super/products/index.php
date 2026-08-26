@@ -120,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'units_per_pack'      => $_POST['units_per_pack'] ?? 1,
         'pack_unit'           => $_POST['pack_unit'] ?? '',
         'pack_price'          => $_POST['pack_price'] ?? '',
+        'retail_pack_price'   => $_POST['retail_pack_price'] ?? '',
         'status'              => ($_POST['action'] ?? '') === 'draft' ? 'draft' : ($editRow['status'] === 'archived' ? 'archived' : 'active'),
     ];
     $old = $in;
@@ -375,6 +376,11 @@ $actionBadge = function (string $a): string {
               <?php if (!empty($errors['pack_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['pack_price']); ?></small><?php endif; ?>
             </div>
             <div class="col-md-4">
+              <label class="form-label small">Selling price of the package (retail price)</label>
+              <input name="retail_pack_price" id="retailPackP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars((string) $val('retail_pack_price', $editRow['retail_pack_price'] ?? '')); ?>">
+              <?php if (!empty($errors['retail_pack_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['retail_pack_price']); ?></small><?php endif; ?>
+            </div>
+            <div class="col-md-4">
               <label class="form-label small">Buying price of the package</label>
               <input name="package_buying_price" id="packageBuyP" type="number" step="0.01" min="0" class="form-control" value="<?php echo htmlspecialchars((string) $val('package_buying_price', $editRow['package_buying_price'] ?? '')); ?>">
               <?php if (!empty($errors['package_buying_price'])): ?><small class="text-danger"><?php echo htmlspecialchars($errors['package_buying_price']); ?></small><?php endif; ?>
@@ -512,13 +518,14 @@ $actionBadge = function (string $a): string {
   var buyP = document.getElementById('buyP'), wholeP = document.getElementById('wholeP'),
       retailP = document.getElementById('retailP'), qtyP = document.getElementById('qtyP'),
       unitsPerPackP = document.getElementById('unitsPerPackP'), packUnitP = document.getElementById('packUnitP'),
-      packPriceP = document.getElementById('packPriceP'), packageBuyP = document.getElementById('packageBuyP'),
+      packPriceP = document.getElementById('packPriceP'), retailPackP = document.getElementById('retailPackP'), packageBuyP = document.getElementById('packageBuyP'),
       box = document.getElementById('profitBox'), stockBox = document.getElementById('stockValueBox');
   function calcProfit() {
     var b = parseFloat(buyP.value), w = parseFloat(wholeP.value), r = parseFloat(retailP.value), q = parseFloat(qtyP.value) || 0,
         unitsPerPack = parseFloat(unitsPerPackP.value) || 1,
         packUnit = (packUnitP.value || '').trim(),
         packSell = parseFloat(packPriceP.value),
+        retailPackSell = parseFloat(retailPackP ? retailPackP.value : NaN),
         packBuy = parseFloat(packageBuyP.value),
         hasPack = packUnit !== '' && unitsPerPack > 1;
     if (isNaN(b) && isNaN(packBuy)) { box.style.display = 'none'; stockBox.style.display = 'none'; return; }
@@ -545,13 +552,20 @@ $actionBadge = function (string $a): string {
     if (rProfit !== null) {
       var rMargin = r > 0 ? (rProfit / r * 100) : 0;
       html += '<div class="mt-1"><strong>Retail content</strong> profit/' + (hasPack ? 'content unit' : 'unit') + ': KES ' + rProfit.toFixed(0) + ' &middot; margin ' + rMargin.toFixed(1) + '%';
-      if (q > 0) html += ' &middot; total if all sold retail: KES ' + (rProfit * q).toFixed(0);
+      if (q > 0) html += ' &middot; total if all sold retail items: KES ' + (rProfit * q).toFixed(0);
+      html += '</div>';
+    }
+    if (hasPack && !isNaN(retailPackSell) && !isNaN(packBuy)) {
+      var rpProfit = retailPackSell - packBuy;
+      var rpMargin = retailPackSell > 0 ? (rpProfit / retailPackSell * 100) : 0;
+      html += '<div class="mt-1"><strong>Retail package</strong> profit/' + packUnit + ': KES ' + rpProfit.toFixed(0) + ' &middot; margin ' + rpMargin.toFixed(1) + '%';
+      if (q > 0) html += ' &middot; total if all sold by package retail: KES ' + (rpProfit * packageCount).toFixed(0);
       html += '</div>';
     }
     box.className = 'alert py-2 small mb-3 ' + ((wProfit !== null && wProfit < 0) || (rProfit !== null && rProfit < 0) ? 'alert-danger' : 'alert-success');
     box.innerHTML = html;
   }
-  [buyP, wholeP, retailP, qtyP, unitsPerPackP, packUnitP, packPriceP, packageBuyP].forEach(function(el){ if(el) el.addEventListener('input', calcProfit); });
+  [buyP, wholeP, retailP, qtyP, unitsPerPackP, packUnitP, packPriceP, retailPackP, packageBuyP].forEach(function(el){ if(el) el.addEventListener('input', calcProfit); });
   calcProfit();
 
   var offerToggle = document.getElementById('offerToggle'), offerFields = document.getElementById('offerFields');

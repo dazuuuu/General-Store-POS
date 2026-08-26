@@ -23,7 +23,7 @@ class SaleModel extends Model
             return ['ok' => false, 'errors' => ['_' => 'No shop in context.']];
         }
 
-        $saleType = in_array($in['sale_type'] ?? '', ['retail', 'wholesale'], true) ? $in['sale_type'] : 'retail';
+        $saleType = ($in['sale_type'] ?? '') === 'wholesale' ? 'wholesale' : 'retail';
         $method = in_array($in['payment_method'] ?? '', ['cash', 'mpesa', 'split', 'credit'], true) ? $in['payment_method'] : null;
         if (!$method) {
             return ['ok' => false, 'errors' => ['payment_method' => 'Choose how the customer paid.']];
@@ -47,7 +47,7 @@ class SaleModel extends Model
             $db->beginTransaction();
 
             $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                              quantity, unit, units_per_pack, pack_unit, pack_price
+                              quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
                          FROM products WHERE id = ? AND tenant_id = ? AND status = 'active' FOR UPDATE";
             $sel = $db->prepare($selSql);
             $subtotal = 0.0;
@@ -65,18 +65,20 @@ class SaleModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float)$p['quantity'], 2), '0'), '.') . " left."]];
                 }
-                $unitPrice = \Pricing::unitPriceForQty($p, $qty, $saleType);
+                $lineSaleType = in_array($it['price_type'] ?? $saleType, ['retail', 'retail_pack', 'wholesale'], true) ? ($it['price_type'] ?? $saleType) : 'retail';
+                $lineTotal = \Pricing::lineTotal($p, $qty, $lineSaleType);
+                $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
                 if ($unitPrice <= 0) {
                     $unitPrice = (float) ($p['selling_price'] ?? 0);
+                    $lineTotal = round($unitPrice * $qty, 2);
                 }
-                $lineTotal = round($unitPrice * $qty, 2);
                 $subtotal += $lineTotal;
                 $lines[] = [
                     'product_id'   => $pid,
                     'product_name' => $p['name'],
                     'unit'         => $p['unit'],
                     'unit_price'   => $unitPrice,
-                    'price_type'   => $saleType,
+                    'price_type'   => $lineSaleType,
                     'quantity'     => $qty,
                     'line_total'   => $lineTotal,
                 ];
@@ -314,7 +316,13 @@ class SaleModel extends Model
     public function items(int $saleId): array
     {
         $tid = \TenantContext::tenantId();
-        $stmt = $this->db->prepare("SELECT * FROM sale_items WHERE sale_id = ? AND tenant_id = ? ORDER BY id ASC");
+        $stmt = $this->db->prepare(
+            "SELECT si.*, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
+               FROM sale_items si
+          LEFT JOIN products p ON p.id = si.product_id AND p.tenant_id = si.tenant_id
+              WHERE si.sale_id = ? AND si.tenant_id = ?
+           ORDER BY si.id ASC"
+        );
         $stmt->execute([$saleId, $tid]);
         return $stmt->fetchAll();
     }
@@ -329,7 +337,8 @@ class SaleModel extends Model
         $in = implode(',', array_fill(0, count($saleIds), '?'));
         $stmt = $this->db->prepare(
             "SELECT si.id, si.sale_id, si.product_name, si.quantity, si.line_total,
-                    si.product_id, p.quantity AS stock_left
+                    si.product_id, si.price_type, si.unit_price, si.unit,
+                    p.quantity AS stock_left, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
                FROM sale_items si
           LEFT JOIN products p ON p.id = si.product_id AND p.tenant_id = si.tenant_id
               WHERE si.tenant_id = ? AND si.sale_id IN ($in) ORDER BY si.id ASC"
@@ -347,6 +356,13 @@ class SaleModel extends Model
                 'returned' => (float) $ret['returned'],
                 'used' => (float) $ret['used'],
                 'stock_left' => $r['stock_left'] !== null ? (float) $r['stock_left'] : null,
+                'price_type' => $r['price_type'] ?? 'retail',
+                'unit_price' => (float) ($r['unit_price'] ?? 0),
+                'unit' => $r['unit'] ?? '',
+                'units_per_pack' => $r['units_per_pack'] ?? null,
+                'pack_unit' => $r['pack_unit'] ?? '',
+                'pack_price' => $r['pack_price'] ?? null,
+                'retail_pack_price' => $r['retail_pack_price'] ?? null,
             ];
         }
         return $out;
@@ -436,7 +452,8 @@ class SaleModel extends Model
         if (!$items) { return '<span class="text-muted">—</span>'; }
         $fmtQty = fn($q) => rtrim(rtrim(number_format((float) $q, 2), '0'), '.');
         $parts = array_map(function ($i) use ($fmtQty) {
-            $label = $fmtQty($i['qty']) . '× ' . $i['name'];
+            $shown = \QtyFormat::saleLine($i);
+            $label = $shown['summary_qty'] . ' × ' . ($i['name'] ?? $i['product_name'] ?? '');
             if ((float) ($i['returned'] ?? 0) > 0) {
                 $label .= ' (returned ' . $fmtQty($i['returned']);
                 if ((float) ($i['used'] ?? 0) > 0) {
@@ -529,6 +546,19 @@ class SaleModel extends Model
         $this->ensureColumn('sales', 'cash_amount', "ALTER TABLE sales ADD COLUMN cash_amount DECIMAL(12,2) NULL AFTER change_given");
         $this->ensureColumn('sales', 'mpesa_amount', "ALTER TABLE sales ADD COLUMN mpesa_amount DECIMAL(12,2) NULL AFTER cash_amount");
         $this->ensureColumn('sale_items', 'price_type', "ALTER TABLE sale_items ADD COLUMN price_type VARCHAR(20) NULL AFTER unit_price");
+        $this->widenPriceTypeColumn('sale_items');
+        $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
+    }
+
+    private function widenPriceTypeColumn(string $table): void
+    {
+        try {
+            $this->db->exec("ALTER TABLE `{$table}` MODIFY `price_type` ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail'");
+        } catch (\PDOException $ignored) {
+            try {
+                $this->db->exec("ALTER TABLE `{$table}` MODIFY `price_type` VARCHAR(20) NOT NULL DEFAULT 'retail'");
+            } catch (\PDOException $ignoredAgain) {}
+        }
     }
 
     private function ensureTable(string $table, string $sql): void
