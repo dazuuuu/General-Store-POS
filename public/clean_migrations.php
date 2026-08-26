@@ -28,6 +28,7 @@ function clean_fetch_orders(PDO $pdo, int $tenantId): array
            FROM orders
           WHERE tenant_id = ?
             AND status = 'open'
+            AND invoice_deleted_at IS NULL
           ORDER BY created_at DESC, id DESC
           LIMIT 200"
     );
@@ -122,6 +123,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = $res['error'] ?? 'Could not void that order.';
         }
+    } elseif ($action === 'delete_invoice_document') {
+        $res = $O->deleteInvoiceDocuments($userId, (int) ($_POST['order_id'] ?? 0));
+        if ($res['ok']) {
+            foreach ($res['ids'] as $oid) {
+                $N->clearCreditSaleAlerts((int) $oid);
+            }
+            $message = 'Invoice document deleted. Products, sales, and other records were left unchanged.';
+        } else {
+            $error = $res['error'] ?? 'Could not delete that invoice document.';
+        }
+    } elseif ($action === 'delete_all_invoice_documents') {
+        $res = $O->deleteInvoiceDocuments($userId, null);
+        if ($res['ok']) {
+            foreach ($res['ids'] as $oid) {
+                $N->clearCreditSaleAlerts((int) $oid);
+            }
+            $n = (int) $res['deleted'];
+            $message = 'Deleted ' . $n . ' invoice document' . ($n === 1 ? '' : 's') . ' you generated or sold. Products, sales, payments, and stock were not changed.';
+        } else {
+            $error = $res['error'] ?? 'Could not delete invoice documents.';
+        }
     } elseif ($action === 'clear_credit_alerts') {
         $cleared = $N->clearCreditSaleAlerts();
         $message = "Cleared {$cleared} credit-sale alert(s).";
@@ -130,19 +152,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $orders = clean_fetch_orders($pdo, $tenantId);
 $sales = clean_fetch_sales($pdo, $tenantId);
+$myInvoices = $O->invoicesOpenedBy($userId, 200);
 $creditAlerts = $N->creditSaleAlerts(100);
 $staleOrders = array_values(array_filter($orders, fn($r) => (float) $r['calculated_due'] <= 0.0001));
 $trueOpenOrders = array_values(array_filter($orders, fn($r) => (float) $r['calculated_due'] > 0.0001));
 $staleSales = array_values(array_filter($sales, fn($r) => (float) $r['calculated_due'] <= 0.0001));
 $openSales = array_values(array_filter($sales, fn($r) => (float) $r['calculated_due'] > 0.0001));
 
-$page_title = 'Clean credit records';
+$page_title = 'Clean records';
 ob_start();
 ?>
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
   <div>
-    <h1 class="h5 fw-bold mb-1">Clean credit records</h1>
-    <p class="text-muted small mb-0">Repair paid invoices/orders that are still marked pending, or void unwanted credit orders and return stock.</p>
+    <h1 class="h5 fw-bold mb-1">Clean records</h1>
+    <p class="text-muted small mb-0">Repair paid invoices/orders that are still marked pending, delete invoice documents without touching products or sales, or void unwanted credit orders and return stock.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <form method="post" onsubmit="return confirm('Clear all credit-sale banner alerts? This only hides alerts, not invoices.');">
@@ -155,6 +178,48 @@ ob_start();
 
 <?php if ($message): ?><div class="alert alert-success"><?php echo htmlspecialchars($message); ?></div><?php endif; ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
+
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
+  <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <h2 class="h6 fw-bold mb-0">My invoice documents</h2>
+      <div class="text-muted small">Delete invoices you generated or sold as a single record. Products, sales, payments, and stock stay in the database.</div>
+    </div>
+    <form method="post" onsubmit="return confirm('Delete ALL invoice documents you generated or sold? Products and sales will not be deleted.');">
+      <input type="hidden" name="action" value="delete_all_invoice_documents">
+      <button class="btn btn-sm btn-outline-danger" <?php echo $myInvoices ? '' : 'disabled'; ?>>Delete all my invoices</button>
+    </form>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Invoice</th><th>Customer</th><th>Status</th><th class="text-end">Total</th><th></th></tr></thead>
+      <tbody>
+        <?php if (!$myInvoices): ?><tr><td colspan="5" class="text-center text-muted py-4">You have no generated or sold invoice documents to delete.</td></tr><?php endif; ?>
+        <?php foreach ($myInvoices as $inv):
+            $due = (float) ($inv['balance_due'] ?? $inv['amount_due'] ?? 0);
+            $isPaid = (($inv['status'] ?? '') === 'paid') || $due <= 0.0001;
+        ?>
+          <tr>
+            <td>
+              <div class="fw-semibold"><?php echo htmlspecialchars($inv['receipt_number']); ?></div>
+              <div class="text-muted small"><?php echo date('j M Y, g:i a', strtotime($inv['created_at'])); ?></div>
+            </td>
+            <td><?php echo htmlspecialchars($inv['table_name'] ?: '—'); ?></td>
+            <td><?php echo $isPaid ? '<span class="badge bg-success">Sold / paid</span>' : '<span class="badge bg-warning text-dark">Generated / unpaid</span>'; ?></td>
+            <td class="text-end"><?php echo clean_money((float) $inv['total']); ?></td>
+            <td class="text-end clean-actions">
+              <form method="post" class="d-inline" onsubmit="return confirm('Delete this invoice document only? Products and sales will not be deleted.');">
+                <input type="hidden" name="action" value="delete_invoice_document">
+                <input type="hidden" name="order_id" value="<?php echo (int) $inv['id']; ?>">
+                <button class="btn btn-sm btn-outline-danger">Delete invoice</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">

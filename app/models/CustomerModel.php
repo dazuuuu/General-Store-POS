@@ -158,6 +158,7 @@ class CustomerModel extends Model
                       FROM orders o
                      WHERE o.tenant_id = ?
                        AND o.status = 'open'
+                       AND o.invoice_deleted_at IS NULL
                        AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
                        AND (o.customer_id = ?";
             $params = [$tid, $customerId];
@@ -234,6 +235,17 @@ class CustomerModel extends Model
             }
         } catch (\PDOException $ignored) {
         }
+        try {
+            $st = $this->db->prepare(
+                "SELECT COUNT(*) FROM information_schema.columns
+                  WHERE table_schema = DATABASE() AND table_name = 'orders' AND column_name = 'invoice_deleted_at'"
+            );
+            $st->execute();
+            if ((int) $st->fetchColumn() === 0) {
+                $this->db->exec('ALTER TABLE orders ADD COLUMN invoice_deleted_at DATETIME NULL');
+            }
+        } catch (\PDOException $ignored) {
+        }
     }
 
     /** One-time per request: recompute every customer's credit_balance from open invoices. */
@@ -255,6 +267,7 @@ class CustomerModel extends Model
                           FROM orders o
                          WHERE o.tenant_id = c.tenant_id
                            AND o.status = 'open'
+                           AND o.invoice_deleted_at IS NULL
                            AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
                            AND (
                                 o.customer_id = c.id
