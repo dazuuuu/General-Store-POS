@@ -494,11 +494,15 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, total, amount_paid, amount_due, customer_id, table_name FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, total, amount_paid, amount_due, customer_id, table_name, invoice_deleted_at FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Sale not found.']; }
             if ($order['status'] !== 'open') { $db->rollBack(); return ['ok' => false, 'error' => 'This sale is not open.']; }
+            if (!empty($order['invoice_deleted_at'])) {
+                $db->rollBack();
+                return ['ok' => false, 'error' => 'This invoice document has been deleted.'];
+            }
 
             // Attach customer from the payment form when the invoice was opened by name only.
             $linkCustomerId = (int) ($payment['customer_id'] ?? 0);
@@ -748,6 +752,7 @@ class OrderModel extends Model
              LEFT JOIN users u ON u.id = o.opened_by
              LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
                  WHERE o.tenant_id = ? AND o.status = 'open'
+                   AND o.invoice_deleted_at IS NULL
                    AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001";
         $params = [$tid];
         $parts = [];
@@ -1042,7 +1047,7 @@ class OrderModel extends Model
                 break;
             }
             $order = $this->find($oid);
-            if (!$order || ($order['status'] ?? '') !== 'open') {
+            if (!$order || ($order['status'] ?? '') !== 'open' || !empty($order['invoice_deleted_at'])) {
                 continue;
             }
             // Always derive due from total - paid so deposits never skip invoices
@@ -1139,6 +1144,8 @@ class OrderModel extends Model
         $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $this->ensureColumn('orders', 'thank_you_sent_at', "ALTER TABLE orders ADD COLUMN thank_you_sent_at DATETIME NULL AFTER delivery_note_sent_at");
         $this->ensureColumn('orders', 'remembrance_sent_at', "ALTER TABLE orders ADD COLUMN remembrance_sent_at DATETIME NULL AFTER thank_you_sent_at");
+        $this->ensureColumn('orders', 'invoice_deleted_at', "ALTER TABLE orders ADD COLUMN invoice_deleted_at DATETIME NULL");
+        $this->ensureColumn('orders', 'invoice_deleted_by', "ALTER TABLE orders ADD COLUMN invoice_deleted_by INT NULL");
         // Widen payment_method so deposits (incl. paybill) never fail on a
         // stale ENUM — schema self-heals at runtime, no manual migration.
         try {
@@ -1329,6 +1336,117 @@ class OrderModel extends Model
         }
     }
 
+    /**
+     * Invoice documents this admin generated (opened) that are still visible.
+     * Includes unpaid generated invoices and paid/sold invoices.
+     */
+    public function invoicesOpenedBy(int $staffId, int $limit = 200): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null || $staffId <= 0) {
+            return [];
+        }
+        $stmt = $this->db->prepare(
+            "SELECT o.*, u.username AS opened_by_name,
+                    c.name AS customer_record_name,
+                    c.company_name AS customer_company,
+                    (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+                    GREATEST(COALESCE(o.amount_due, GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0)), 0) AS balance_due
+               FROM orders o
+          LEFT JOIN users u ON u.id = o.opened_by
+          LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
+              WHERE o.tenant_id = ?
+                AND o.opened_by = ?
+                AND o.status <> 'void'
+                AND o.invoice_deleted_at IS NULL
+           ORDER BY o.created_at DESC, o.id DESC
+              LIMIT " . (int) max(1, min(500, $limit))
+        );
+        $stmt->execute([$tid, $staffId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Hide invoice document(s) opened by this admin. Only the orders row is
+     * marked deleted — products, stock quantities, sales rows, payments, and
+     * line items are left untouched.
+     *
+     * @return array{ok:bool,error:?string,deleted:int,ids:int[]}
+     */
+    public function deleteInvoiceDocuments(int $staffId, ?int $orderId = null): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) {
+            return ['ok' => false, 'error' => 'No shop in context.', 'deleted' => 0, 'ids' => []];
+        }
+        if ($staffId <= 0) {
+            return ['ok' => false, 'error' => 'No admin in context.', 'deleted' => 0, 'ids' => []];
+        }
+
+        $this->ensurePaymentSchema();
+        $db = $this->db;
+        try {
+            $db->beginTransaction();
+            $sql = "SELECT id, customer_id, table_name
+                      FROM orders
+                     WHERE tenant_id = ?
+                       AND opened_by = ?
+                       AND status <> 'void'
+                       AND invoice_deleted_at IS NULL";
+            $params = [$tid, $staffId];
+            if ($orderId !== null && $orderId > 0) {
+                $sql .= ' AND id = ?';
+                $params[] = $orderId;
+            }
+            $sql .= ' FOR UPDATE';
+            $sel = $db->prepare($sql);
+            $sel->execute($params);
+            $rows = $sel->fetchAll();
+            if (!$rows) {
+                $db->rollBack();
+                return [
+                    'ok' => false,
+                    'error' => $orderId ? 'Invoice not found, already deleted, or not generated by you.' : 'No invoices generated by you to delete.',
+                    'deleted' => 0,
+                    'ids' => [],
+                ];
+            }
+
+            $ids = array_map(static fn($r) => (int) $r['id'], $rows);
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $upd = $db->prepare(
+                "UPDATE orders
+                    SET invoice_deleted_at = NOW(), invoice_deleted_by = ?
+                  WHERE tenant_id = ? AND opened_by = ? AND id IN ($in)"
+            );
+            $upd->execute(array_merge([$staffId, $tid, $staffId], $ids));
+
+            $db->commit();
+
+            $customerIds = [];
+            foreach ($rows as $r) {
+                $cid = (int) ($r['customer_id'] ?? 0);
+                if ($cid > 0) {
+                    $customerIds[$cid] = $cid;
+                }
+            }
+            if ($customerIds) {
+                $cm = new CustomerModel($this->db);
+                foreach ($customerIds as $cid) {
+                    $cm->refreshCreditBalance($cid);
+                }
+            }
+
+            return ['ok' => true, 'error' => null, 'deleted' => count($ids), 'ids' => $ids];
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            error_log('OrderModel::deleteInvoiceDocuments failed: ' . $e->getMessage());
+            return ['ok' => false, 'error' => 'Could not delete invoice documents.', 'deleted' => 0, 'ids' => []];
+        }
+    }
+
     /** Find an order by its printed invoice/receipt number (e.g. ORD-000123). */
     public function findByReceipt(string $receiptNumber): ?array
     {
@@ -1357,6 +1475,7 @@ class OrderModel extends Model
              LEFT JOIN users u ON u.id = o.opened_by
              LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
                  WHERE o.tenant_id = ? AND o.status = 'open'
+                   AND o.invoice_deleted_at IS NULL
                    AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
               ORDER BY o.created_at ASC, o.id ASC";
         $stmt = $this->db->prepare($sql);
@@ -1388,7 +1507,8 @@ class OrderModel extends Model
                   FROM orders o
              LEFT JOIN users u ON u.id = o.opened_by
              LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
-                 WHERE o.tenant_id = ? AND o.status <> 'void'";
+                 WHERE o.tenant_id = ? AND o.status <> 'void'
+                   AND o.invoice_deleted_at IS NULL";
         $params = [$tid];
 
         if ($openOnly) {
@@ -1429,6 +1549,7 @@ class OrderModel extends Model
           LEFT JOIN users u ON u.id = o.opened_by
           LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
               WHERE o.tenant_id = ? AND o.status <> 'void'
+                AND o.invoice_deleted_at IS NULL
            ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.id DESC
               LIMIT " . (int) $limit
         );

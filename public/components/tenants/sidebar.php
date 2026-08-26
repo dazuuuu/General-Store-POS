@@ -134,7 +134,7 @@ $isOn = function (string $needle) use ($uri): string {
         <a class="t-link <?php echo $isOn('/super/settings'); ?>" href="<?php echo public_url('super/settings/'); ?>"><i class="fas fa-gear"></i><span>Settings</span></a>
         <?php endif; ?>
         <?php if ($isOwner): ?>
-        <a class="t-link <?php echo $isOn('/clean_migrations.php'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>"><i class="fas fa-broom"></i><span>Clean credit records</span></a>
+        <a class="t-link <?php echo $isOn('/clean_migrations.php'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>"><i class="fas fa-broom"></i><span>Clean records</span></a>
         <?php endif; ?>
 
     </nav>
