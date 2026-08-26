@@ -35,6 +35,10 @@ $customerPhone = '';
 $creditDurationDays = 14;
 $heldOrderId = 0;
 
+$normalizePriceType = static function ($type): string {
+    return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
+};
+
 // Resuming a held order? Prefill the cart + customer name.
 $resumeId = (int) ($_GET['resume'] ?? 0);
 if ($resumeId > 0) {
@@ -51,7 +55,7 @@ if ($resumeId > 0) {
         foreach ($HO->items($resumeId) as $it) {
             if ($it['product_id'] && in_array((int) $it['product_id'], $validIds, true)) {
                 $product = $productsById[(int) $it['product_id']];
-                $priceType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+                $priceType = $normalizePriceType($it['price_type'] ?? 'retail');
                 foreach (QtyFormat::splitCartBuckets($product, (float) $it['quantity'], $priceType) as $bucket) {
                     $cart[] = [
                         'product_id' => (int) $it['product_id'],
@@ -81,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $items[] = [
             'product_id' => (int) ($c['product_id'] ?? 0),
             'quantity' => (float) ($c['quantity'] ?? 0),
-            'price_type' => (($c['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+            'price_type' => $normalizePriceType($c['price_type'] ?? 'retail'),
         ];
     }
 
@@ -105,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($items as $it) {
             $prod = null;
             foreach ($products as $p) { if ((int) $p['id'] === $it['product_id']) { $prod = $p; break; } }
-            $lineSaleType = (($it['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
+            $lineSaleType = $normalizePriceType($it['price_type'] ?? 'retail');
             if ($prod) { $subtotal += \Pricing::lineTotal($prod, (float) $it['quantity'], $lineSaleType); }
         }
         $discount = min(max(round((float) ($_POST['discount_amount'] ?? 0), 2), 0), round($subtotal, 2));
@@ -231,6 +235,12 @@ ob_start();
       <?php endforeach; ?>
     </div>
 
+    <div class="pos-mode-tabs" id="saleModeTabs" aria-label="Sale mode">
+      <button type="button" class="pos-mode active" data-sale-mode="retail"><i class="fas fa-cube me-1"></i>Retail item</button>
+      <button type="button" class="pos-mode" data-sale-mode="retail_pack"><i class="fas fa-box me-1"></i>Retail carton</button>
+      <button type="button" class="pos-mode" data-sale-mode="wholesale"><i class="fas fa-boxes-stacked me-1"></i>Wholesale carton</button>
+    </div>
+
     <div class="pos-prod-grid" id="productList">
       <?php foreach ($products as $p):
           $price = (float) ($p['retail_price'] ?: $p['selling_price']);
@@ -271,7 +281,7 @@ ob_start();
             <?php endif; ?>
           </div>
           <div class="pos-card-name"><?php echo htmlspecialchars($p['name']); ?><?php echo $sub ? '<br><small>' . htmlspecialchars($sub) . '</small>' : ''; ?></div>
-          <div class="pos-card-price">
+          <div class="pos-card-price" data-card-price>
             <?php if (!empty($p['on_offer'])): ?>
               <span class="pos-card-regprice">KES <?php echo number_format((float) $p['regular_price'], 0); ?></span>
               Retail KES <?php echo number_format($price, 0); ?>
@@ -351,14 +361,7 @@ ob_start();
     </div>
 
     <div class="pos-totals">
-      <div class="d-flex justify-content-between align-items-center py-1">
-        <span>Tap Add adds to</span>
-        <select name="sale_type" id="saleType" class="form-select form-select-sm" style="width:170px;">
-          <option value="retail">Retail (items)</option>
-          <option value="retail_pack">Retail (box)</option>
-          <option value="wholesale">Wholesale (packs)</option>
-        </select>
-      </div>
+      <input type="hidden" name="sale_type" id="saleType" value="retail">
       <div class="d-flex justify-content-between"><span>Sub Total</span><span id="subtotalOut">KES 0</span></div>
       <div class="d-flex justify-content-between align-items-center py-1">
         <span>Discount</span>
@@ -401,6 +404,10 @@ ob_start();
 .pos-dim{border:1px solid #eef0f4;background:#fff;color:#5b6070;border-radius:999px;padding:6px 14px;font-size:.8rem;font-weight:600;}
 .pos-dim.active{border-color:var(--pos-green);color:var(--pos-green);background:var(--pos-green-light);}
 .pos-cats{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;}
+.pos-mode-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px;}
+.pos-mode{border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:10px;padding:9px 10px;font-size:.82rem;font-weight:700;white-space:nowrap;}
+.pos-mode.active{border-color:var(--pos-green);background:var(--pos-green-light);color:var(--pos-green);}
+.pos-card.is-mode-unavailable .pos-add,.pos-card.is-mode-unavailable .pos-add-half{opacity:.45;pointer-events:none;}
 .pos-cat{flex:0 0 auto;width:88px;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #eef0f4;background:#fff;border-radius:14px;padding:12px 8px;font-size:.78rem;font-weight:600;color:#5b6070;white-space:nowrap;}
 .pos-cat-img{width:44px;height:44px;border-radius:12px;background:#f7f7fb;display:flex;align-items:center;justify-content:center;overflow:hidden;color:#b7bac3;font-size:1.1rem;}
 .pos-cat-img img{width:100%;height:100%;object-fit:cover;}
@@ -490,9 +497,44 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
 });
 var cart = {};
 try {
-    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) { PC.applyLine(cart, c); });
+    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) { PC.applyLine(cart, c, PRODUCTS[String(c.product_id)]); });
 } catch (e) {}
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
+function activeModeLabel(type) {
+    if (type === 'retail_pack') return 'Retail carton';
+    if (type === 'wholesale') return 'Wholesale carton';
+    return 'Retail item';
+}
+function modeUnitLabel(p, type) {
+    if ((type === 'retail_pack' || type === 'wholesale') && p.packUnit && p.unitsPerPack > 1) return p.packUnit;
+    return 'item';
+}
+function modeAvailable(p, type) {
+    if (type === 'retail_pack') return PC.hasRetailPack(p);
+    if (type === 'wholesale') return PC.hasWholesalePack(p) || p.wholesale > 0;
+    return true;
+}
+function updateProductModeDisplay() {
+    var type = defaultSaleType();
+    document.querySelectorAll('.pos-card').forEach(function (el) {
+        var p = PRODUCTS[el.dataset.id];
+        var priceEl = el.querySelector('[data-card-price]');
+        if (!p || !priceEl) return;
+        var available = modeAvailable(p, type);
+        el.classList.toggle('is-mode-unavailable', !available);
+        if (!available) {
+            priceEl.innerHTML = '<span class="text-muted">' + activeModeLabel(type) + ' not set</span>';
+            return;
+        }
+        var price = PC.productPrice(p, type);
+        var unit = modeUnitLabel(p, type);
+        var stock = type === 'retail_pack' ? PC.maxRetailPack(p, { retail: 0, retailPack: 0, wholesale: 0 })
+            : (type === 'wholesale' ? PC.maxWholesale(p, { retail: 0, retailPack: 0, wholesale: 0 }) : p.stock);
+        var stockText = (Math.round(stock * 100) / 100).toLocaleString('en-KE', {maximumFractionDigits: 2});
+        priceEl.innerHTML = activeModeLabel(type) + ' ' + money(price)
+            + '<div class="small text-muted">per ' + unit + ' · stock ' + stockText + ' ' + unit + '</div>';
+    });
+}
 function formatHalfQty(n) {
     n = Math.round((parseFloat(n) || 0) * 100) / 100;
     var whole = Math.floor(n + 0.0001);
@@ -527,12 +569,14 @@ function bump(id, field, delta) {
 }
 function add(id) {
     var type = defaultSaleType();
+    if (!modeAvailable(PRODUCTS[id], type)) return;
     if (type === 'wholesale') bump(id, 'wholesale', 1);
     else if (type === 'retail_pack') bump(id, 'retailPack', 1);
     else bump(id, 'retail', 1);
 }
 function addHalf(id) {
     var type = defaultSaleType();
+    if (!modeAvailable(PRODUCTS[id], type)) return;
     if (type === 'wholesale') bump(id, 'wholesale', 0.5);
     else if (type === 'retail_pack') bump(id, 'retailPack', 0.5);
     else bump(id, 'retail', 0.5);
@@ -634,11 +678,16 @@ function render() {
         var wholesaleMax = Math.max(c.wholesale || 0, PC.maxWholesale(p, c));
         var wLabel = PC.hasWholesalePack(p) ? PC.packLabel(p) : 'item';
         var lineTotal = PC.lineTotal(p, c);
-        var rows = PC.qtyRow(id, 'Retail', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
-        if (PC.hasRetailPack(p)) {
+        var rows = '';
+        if ((c.retail || 0) > 0) {
+            rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
+        }
+        if ((c.retailPack || 0) > 0 && PC.hasRetailPack(p)) {
             rows += PC.qtyRow(id, 'Retail box', money(PC.productPrice(p, 'retail_pack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
         }
-        rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
+        if ((c.wholesale || 0) > 0) {
+            rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
+        }
         var line = document.createElement('div');
         line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML =
@@ -674,8 +723,13 @@ function syncTypedQty(input) {
 document.getElementById('discountInput').addEventListener('input', updateTotals);
 var extraChargeInput = document.getElementById('extraChargeInput');
 if (extraChargeInput) extraChargeInput.addEventListener('input', updateTotals);
-document.getElementById('saleType').addEventListener('change', function () {
-    // Only controls what Tap Add increments; existing dual quantities stay as typed.
+document.getElementById('saleModeTabs').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-sale-mode]');
+    if (!btn) return;
+    document.querySelectorAll('[data-sale-mode]').forEach(function (x) { x.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('saleType').value = btn.dataset.saleMode || 'retail';
+    updateProductModeDisplay();
 });
 document.getElementById('creditToggle').addEventListener('click', function () {
     var box = document.getElementById('creditFields');
@@ -820,6 +874,7 @@ if (barcodeScan) {
 }
 
 render();
+updateProductModeDisplay();
 </script>
 <?php endif; ?>
 <?php

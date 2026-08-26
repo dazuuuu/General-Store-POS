@@ -54,30 +54,35 @@
     function retailLineTotal(p, pieces) {
         pieces = parseFloat(pieces) || 0;
         if (pieces <= 0) return 0;
-        if (p.retailPackPrice > 0 && p.unitsPerPack > 1) {
-            var packs = Math.floor((pieces + 0.0001) / p.unitsPerPack);
-            var rem = Math.round((pieces - packs * p.unitsPerPack) * 100) / 100;
-            return packs * p.retailPackPrice + rem * p.price;
-        }
         return pieces * p.price;
     }
     function lineTotal(p, c) {
-        return retailLineTotal(p, retailPieces(p, c)) + (c.wholesale || 0) * productPrice(p, 'wholesale');
+        return retailLineTotal(p, c.retail || 0)
+            + (c.retailPack || 0) * productPrice(p, 'retail_pack')
+            + (c.wholesale || 0) * productPrice(p, 'wholesale');
     }
     function serialize(cart, products) {
         var out = [];
         Object.keys(cart).forEach(function (id) {
             var p = products[id], c = cart[id];
             if (!p || !c) return;
-            var pieces = retailPieces(p, c);
-            if (pieces > 0) {
-                out.push({ product_id: parseInt(id, 10), quantity: pieces, price_type: 'retail' });
+            if ((c.retail || 0) > 0) {
+                out.push({ product_id: parseInt(id, 10), quantity: c.retail, price_type: 'retail' });
+            }
+            if ((c.retailPack || 0) > 0 && hasRetailPack(p)) {
+                out.push({
+                    product_id: parseInt(id, 10),
+                    quantity: stockFromPacks(p, c.retailPack),
+                    price_type: 'retail_pack',
+                    quantity_mode: 'inner'
+                });
             }
             if ((c.wholesale || 0) > 0) {
                 out.push({
                     product_id: parseInt(id, 10),
                     quantity: hasWholesalePack(p) ? stockFromPacks(p, c.wholesale) : c.wholesale,
-                    price_type: 'wholesale'
+                    price_type: 'wholesale',
+                    quantity_mode: hasWholesalePack(p) ? 'inner' : 'unit'
                 });
             }
         });
@@ -86,12 +91,22 @@
     function isEmpty(c) {
         return !c || ((c.retail || 0) <= 0 && (c.retailPack || 0) <= 0 && (c.wholesale || 0) <= 0);
     }
-    function applyLine(cart, line) {
+    function applyLine(cart, line, product) {
         var id = String(line.product_id);
         if (!cart[id]) cart[id] = buckets();
         var qty = parseFloat(line.quantity) || 0;
-        if (line.price_type === 'wholesale') cart[id].wholesale += qty;
-        else if (line.price_type === 'retail_pack') cart[id].retailPack += qty;
+        if (line.price_type === 'wholesale') {
+            if (line.quantity_mode === 'inner' && product && product.unitsPerPack > 1) {
+                qty = Math.round((qty / product.unitsPerPack) * 100) / 100;
+            }
+            cart[id].wholesale += qty;
+        }
+        else if (line.price_type === 'retail_pack') {
+            if (line.quantity_mode === 'inner' && product && product.unitsPerPack > 1) {
+                qty = Math.round((qty / product.unitsPerPack) * 100) / 100;
+            }
+            cart[id].retailPack += qty;
+        }
         else cart[id].retail += qty;
     }
     function clampField(p, c, field, val) {

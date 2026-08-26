@@ -60,6 +60,10 @@ class QtyFormat
             return [['quantity' => round($quantity / $unitsPerPack, 2), 'price_type' => 'wholesale']];
         }
 
+        if ($priceType === 'retail_pack' && $packUnit !== '' && $unitsPerPack > 1 && $retailPack > 0) {
+            return [['quantity' => round($quantity / $unitsPerPack, 2), 'price_type' => 'retail_pack']];
+        }
+
         if ($priceType !== 'wholesale' && $packUnit !== '' && $unitsPerPack > 1 && $retailPack > 0) {
             $packs = (int) floor(($quantity + 0.0001) / $unitsPerPack);
             $remainder = round($quantity - ($packs * $unitsPerPack), 2);
@@ -108,29 +112,15 @@ class QtyFormat
             ];
         }
 
-        if ($priceType !== 'wholesale' && $hasPack && $retailPack > 0) {
-            $packCount = (int) floor(($qty + 0.0001) / $unitsPerPack);
-            $remainder = round($qty - ($packCount * $unitsPerPack), 2);
-            if ($packCount > 0 && $remainder <= 0.0001) {
-                return [
-                    'qty_label' => self::display((float) $packCount),
-                    'unit_label' => $packUnit,
-                    'price_note' => 'retail box',
-                    'unit_price' => $retailPack,
-                    'summary_qty' => self::display((float) $packCount) . ' ' . $packUnit,
-                ];
-            }
-            if ($packCount > 0 && $remainder > 0) {
-                $itemPart = self::display($remainder) . ($innerUnit !== '' ? ' ' . $innerUnit : ' items');
-                $qtyLabel = self::display((float) $packCount) . ' ' . $packUnit . ' + ' . $itemPart;
-                return [
-                    'qty_label' => $qtyLabel,
-                    'unit_label' => '',
-                    'price_note' => 'retail box + items',
-                    'unit_price' => $unitPrice,
-                    'summary_qty' => $qtyLabel,
-                ];
-            }
+        if ($priceType === 'retail_pack' && $hasPack && $retailPack > 0) {
+            $packs = round($qty / $unitsPerPack, 2);
+            return [
+                'qty_label' => self::display($packs),
+                'unit_label' => $packUnit,
+                'price_note' => 'retail box',
+                'unit_price' => $retailPack,
+                'summary_qty' => self::display($packs) . ' ' . $packUnit,
+            ];
         }
 
         return [

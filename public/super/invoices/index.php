@@ -7,6 +7,9 @@ $O = new Models\OrderModel($pdo);
 $customerSearchUrl = public_url('api/customers/search.php');
 $productSearchUrl = public_url('api/inventory/sellable_search.php');
 $error = '';
+$normalizePriceType = static function ($type): string {
+    return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -19,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $items[] = [
                     'product_id' => $pid,
                     'quantity' => $qty,
-                    'price_type' => (($row['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                    'price_type' => $normalizePriceType($row['price_type'] ?? 'retail'),
                 ];
             }
         }

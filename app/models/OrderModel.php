@@ -284,7 +284,7 @@ class OrderModel extends Model
                 } else {
                     $unitPrice = (float) ($row['unit_price'] ?? $old['unit_price']);
                     if ($unitPrice < 0) { $unitPrice = (float) $old['unit_price']; }
-                    $lineSaleType = (($row['price_type'] ?? $old['price_type'] ?? $saleType) === 'wholesale') ? 'wholesale' : 'retail';
+                    $lineSaleType = $this->normalizePriceType($row['price_type'] ?? $old['price_type'] ?? $saleType);
                     $updateItem->execute([$newQty, $unitPrice, $lineSaleType, round($newQty * $unitPrice, 2), $itemId, $orderId, $tid]);
                 }
                 $seenExisting[$itemId] = true;
@@ -302,7 +302,7 @@ class OrderModel extends Model
                 if ($returned <= 0.0001) {
                     $deleteItem->execute([$itemId, $orderId, $tid]);
                 } else {
-                    $lineSaleType = (($old['price_type'] ?? $saleType) === 'wholesale') ? 'wholesale' : 'retail';
+                    $lineSaleType = $this->normalizePriceType($old['price_type'] ?? $saleType);
                     $updateItem->execute([$returned, (float) $old['unit_price'], $lineSaleType, round($returned * (float) $old['unit_price'], 2), $itemId, $orderId, $tid]);
                 }
             }
@@ -324,7 +324,7 @@ class OrderModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => 'Not enough stock for ' . $p['name'] . '.']];
                 }
-                $lineSaleType = (($row['price_type'] ?? $saleType) === 'wholesale') ? 'wholesale' : 'retail';
+                $lineSaleType = $this->normalizePriceType($row['price_type'] ?? $saleType);
                 $lineTotal = \Pricing::lineTotal($p, $qty, $lineSaleType);
                 $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
                 if ($unitPrice <= 0) {
@@ -421,7 +421,7 @@ class OrderModel extends Model
                 $offerRow['offer_starts_at'] = null;
                 $offerRow['offer_ends_at'] = null;
             }
-            $lineSaleType = (($it['price_type'] ?? $saleType) === 'wholesale') ? 'wholesale' : 'retail';
+            $lineSaleType = $this->normalizePriceType($it['price_type'] ?? $saleType);
             $lineTotal = \Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
             $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
             if ($unitPrice <= 0) { $unitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($unitPrice * $qty, 2); }
@@ -470,6 +470,11 @@ class OrderModel extends Model
             }
         }
         return $hasWholesale && !$hasRetail ? 'wholesale' : 'retail';
+    }
+
+    private function normalizePriceType($type): string
+    {
+        return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
     }
 
     /** Record a payment against a credit sale. Full payment closes it; partial payment keeps it open. */
@@ -1116,6 +1121,7 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'customer_id', "ALTER TABLE orders ADD COLUMN customer_id INT NULL AFTER customer_email");
         $this->ensureColumn('orders', 'sale_type', "ALTER TABLE orders ADD COLUMN sale_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER channel");
         $this->ensureColumn('order_items', 'price_type', "ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price");
+        $this->widenPriceTypeColumn('order_items');
         $this->ensureColumn('orders', 'vat_rate', "ALTER TABLE orders ADD COLUMN vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
         $this->ensureColumn('orders', 'additional_charges', "ALTER TABLE orders ADD COLUMN additional_charges DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
         $this->ensureColumn('orders', 'additional_charges_note', "ALTER TABLE orders ADD COLUMN additional_charges_note VARCHAR(255) NULL AFTER additional_charges");
@@ -1204,6 +1210,17 @@ class OrderModel extends Model
                         AND COALESCE(amount_paid,0) < COALESCE(total,0)"
                 );
             } catch (\PDOException $ignored) {}
+        }
+    }
+
+    private function widenPriceTypeColumn(string $table): void
+    {
+        try {
+            $this->db->exec("ALTER TABLE `{$table}` MODIFY `price_type` ENUM('retail','retail_pack','wholesale') NOT NULL DEFAULT 'retail'");
+        } catch (\PDOException $ignored) {
+            try {
+                $this->db->exec("ALTER TABLE `{$table}` MODIFY `price_type` VARCHAR(20) NOT NULL DEFAULT 'retail'");
+            } catch (\PDOException $ignoredAgain) {}
         }
     }
 

@@ -23,6 +23,9 @@ if (!$invoice || ($invoice['status'] ?? '') === 'void') {
 
 $items = $O->items($id);
 $error = '';
+$normalizePriceType = static function ($type): string {
+    return in_array($type, ['retail', 'retail_pack', 'wholesale'], true) ? $type : 'retail';
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $existing = [];
@@ -30,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $existing[(int) $itemId] = [
             'quantity' => $row['remove'] ?? '' ? 0 : ($row['quantity'] ?? 0),
             'unit_price' => $row['unit_price'] ?? 0,
-            'price_type' => (($row['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+            'price_type' => $normalizePriceType($row['price_type'] ?? 'retail'),
         ];
     }
 
@@ -42,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newItems[] = [
                 'product_id' => $pid,
                 'quantity' => $qty,
-                'price_type' => (($row['price_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail',
+                'price_type' => $normalizePriceType($row['price_type'] ?? 'retail'),
             ];
         }
     }
@@ -133,7 +136,7 @@ ob_start();
           </div>
           <div><label class="form-label small mb-1">Qty</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][quantity]" class="form-control qty-input" value="<?php echo htmlspecialchars(rtrim(rtrim(number_format((float) $it['quantity'], 2, '.', ''), '0'), '.')); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
           <div><label class="form-label small mb-1">Price</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][unit_price]" class="form-control price-input" value="<?php echo htmlspecialchars((string) $it['unit_price']); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-          <div><label class="form-label small mb-1">Type</label><select name="existing_items[<?php echo (int) $it['id']; ?>][price_type]" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($it['price_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail item</option><option value="wholesale" <?php echo ($it['price_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
+      <div><label class="form-label small mb-1">Type</label><select name="existing_items[<?php echo (int) $it['id']; ?>][price_type]" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($it['price_type'] ?? 'retail') === 'retail' ? 'selected' : ''; ?>>Retail item</option><option value="retail_pack" <?php echo ($it['price_type'] ?? '') === 'retail_pack' ? 'selected' : ''; ?>>Retail box</option><option value="wholesale" <?php echo ($it['price_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
           <div class="fw-bold text-end line-output">KES 0</div>
           <?php if (($invoice['status'] ?? '') === 'open'): ?>
             <div><button type="button" class="btn btn-outline-danger w-100 remove-existing">Remove</button><input type="hidden" name="existing_items[<?php echo (int) $it['id']; ?>][remove]" value=""></div>
