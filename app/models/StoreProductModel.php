@@ -887,7 +887,8 @@ class StoreProductModel extends Model
 
     private function ensureSchema(): void
     {
-        $this->db->exec(
+        $this->ensureTable(
+            'store_products',
             "CREATE TABLE IF NOT EXISTS store_products (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 tenant_id INT NOT NULL,
@@ -915,7 +916,7 @@ class StoreProductModel extends Model
                 offer_starts_at DATETIME NULL,
                 offer_ends_at DATETIME NULL,
                 image_path VARCHAR(255) NULL,
-                notes VARCHAR(255) NULL,
+                notes TEXT NULL,
                 status ENUM('stored','transferred') NOT NULL DEFAULT 'stored',
                 created_by INT NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -937,11 +938,20 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_products', 'offer_ends_at', "ALTER TABLE `store_products` ADD COLUMN `offer_ends_at` DATETIME NULL AFTER `offer_starts_at`");
         $this->ensureColumn('store_products', 'image_path', "ALTER TABLE `store_products` ADD COLUMN `image_path` VARCHAR(255) NULL AFTER `offer_ends_at`");
         // Quantity-discount JSON ([QDISC]...) needs room beyond VARCHAR(255).
+        // Only ALTER when needed — MySQL DDL implicitly commits open transactions.
         try {
-            $this->db->exec('ALTER TABLE store_products MODIFY COLUMN notes TEXT NULL');
+            $type = $this->db->query(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'store_products' AND COLUMN_NAME = 'notes'
+                  LIMIT 1"
+            )->fetchColumn();
+            if ($type && strtolower((string) $type) !== 'text' && strtolower((string) $type) !== 'mediumtext' && strtolower((string) $type) !== 'longtext') {
+                $this->db->exec('ALTER TABLE store_products MODIFY COLUMN notes TEXT NULL');
+            }
         } catch (\PDOException $ignored) {
         }
-        $this->db->exec(
+        $this->ensureTable(
+            'store_invoices',
             "CREATE TABLE IF NOT EXISTS store_invoices (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 tenant_id INT NOT NULL,
@@ -955,7 +965,8 @@ class StoreProductModel extends Model
                 KEY idx_store_invoice_tenant (tenant_id, created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
-        $this->db->exec(
+        $this->ensureTable(
+            'store_invoice_items',
             "CREATE TABLE IF NOT EXISTS store_invoice_items (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 tenant_id INT NOT NULL,
@@ -983,6 +994,18 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_invoices', 'destination', "ALTER TABLE `store_invoices` ADD COLUMN `destination` VARCHAR(64) NULL DEFAULT 'Shop Inventory' AFTER `source`");
         $this->ensureColumn('store_invoices', 'profit_impact', "ALTER TABLE `store_invoices` ADD COLUMN `profit_impact` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `total`");
         $this->ensureColumn('store_invoice_items', 'profit_impact', "ALTER TABLE `store_invoice_items` ADD COLUMN `profit_impact` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `line_total`");
+    }
+
+    private function ensureTable(string $table, string $sql): void
+    {
+        try {
+            $this->db->query("SELECT 1 FROM `{$table}` LIMIT 1");
+        } catch (\PDOException $e) {
+            try {
+                $this->db->exec($sql);
+            } catch (\PDOException $ignored) {
+            }
+        }
     }
 
     private function ensureColumn(string $table, string $column, string $sql): void

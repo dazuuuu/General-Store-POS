@@ -75,7 +75,10 @@ class PriceTierModel extends Model
             ];
         }
 
-        $this->db->beginTransaction();
+        $ownsTx = !$this->db->inTransaction();
+        if ($ownsTx) {
+            $this->db->beginTransaction();
+        }
         try {
             $del = $this->db->prepare('DELETE FROM product_price_tiers WHERE tenant_id = ? AND product_id = ?');
             $del->execute([$tid, $productId]);
@@ -88,10 +91,12 @@ class PriceTierModel extends Model
                     $row['discount_amount'], $row['label'],
                 ]);
             }
-            $this->db->commit();
+            if ($ownsTx) {
+                $this->db->commit();
+            }
             return ['ok' => true, 'errors' => []];
         } catch (\Throwable $e) {
-            if ($this->db->inTransaction()) {
+            if ($ownsTx && $this->db->inTransaction()) {
                 $this->db->rollBack();
             }
             return ['ok' => false, 'errors' => ['_' => 'Could not save price tiers.']];

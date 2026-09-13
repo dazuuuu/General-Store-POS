@@ -484,9 +484,18 @@ class ProductModel extends Model
                 }
             }
         }
+        // Avoid unconditional MODIFY (DDL commits open transactions in MySQL).
         try {
-            $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
-        } catch (\PDOException $ignored) {}
+            $colType = (string) $this->db->query(
+                "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'product_type'
+                  LIMIT 1"
+            )->fetchColumn();
+            if ($colType !== '' && stripos($colType, "'product'") === false) {
+                $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
+            }
+        } catch (\PDOException $ignored) {
+        }
     }
 
     public function normalizeInputs(array &$in, bool $isNew = true): void

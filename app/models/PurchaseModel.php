@@ -178,9 +178,9 @@ class PurchaseModel extends Model
                               ELSE pi.buying_price * pi.quantity
                             END
                        ), 0) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS cost_total,
-                       (SELECT GROUP_CONCAT(
+                       (SELECT GROUP_CONCAT(DISTINCT
                             TRIM(CONCAT(COALESCE(pi.name, ''), IF(pi.variant_label IS NULL OR pi.variant_label = '', '', CONCAT(' ', pi.variant_label))))
-                            ORDER BY pi.id ASC SEPARATOR ', '
+                            SEPARATOR ', '
                         ) FROM purchase_items pi WHERE pi.purchase_id = p.id AND COALESCE(pi.name, '') <> '') AS product_names
                   FROM purchases p
              LEFT JOIN suppliers s ON s.id = p.supplier_id
