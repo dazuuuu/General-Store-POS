@@ -1895,9 +1895,14 @@ if (barcodeScan) {
         fetch(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code))
           .then(function(r){return r.json();})
           .then(function(data){
-            var p=data.item;if(!p){flashScan('No in-stock product with that barcode.',false);return;}
+            var p=data.item||(data.items&&data.items[0]);if(!p){flashScan('No in-stock product with that barcode.',false);return;}
+            p.stock=parseFloat(p.stock!=null?p.stock:p.balance)||0;
+            p.unitsPerPack=parseFloat(p.unitsPerPack!=null?p.unitsPerPack:p.unitsInPack)||1;
+            p.packUnit=p.packUnit||p.package||'pack';
+            p.packPrice=parseFloat(p.packPrice!=null?p.packPrice:p.packSize)||0;
+            p.packageBuying=parseFloat(p.packageBuying!=null?p.packageBuying:p.packagingbying)||0;
             var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
-            if(stockUsed(id)>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
+            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
             add(id);flashScan(p.name+' added.',true);
           }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
     });
