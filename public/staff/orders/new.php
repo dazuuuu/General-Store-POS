@@ -864,8 +864,11 @@ document.getElementById('holdBtn').addEventListener('click', function () { docum
 document.getElementById('checkoutBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'checkout'; });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
+    if (this.dataset.submitting === '1') { e.preventDefault(); return; }
     if (!cartHasItems()) { e.preventDefault(); alert('Add at least one item.'); return; }
-    if (!document.getElementById('customerName').value.trim()) { e.preventDefault(); alert('Enter a customer name.'); }
+    if (!document.getElementById('customerName').value.trim()) { e.preventDefault(); alert('Enter a customer name.'); return; }
+    this.dataset.submitting='1';
+    this.querySelectorAll('button[type=submit]').forEach(function(button){button.disabled=true;});
 });
 
 var barcodeScan = document.getElementById('barcodeScan');

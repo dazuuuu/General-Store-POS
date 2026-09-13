@@ -246,6 +246,32 @@ class ReturnModel extends Model
         }
     }
 
+    /** One-click full receipt return. Each remaining sold line is restored. */
+    public function returnAll(string $sourceType, int $sourceId, int $staffId): array
+    {
+        $items = $this->receiptItems($sourceType, $sourceId);
+        $count = 0;
+        foreach ($items as $item) {
+            $remaining = round((float) $item['quantity'] - (float) $item['returned_quantity'], 2);
+            if ($remaining <= 0) continue;
+            $res = $this->record([
+                'source_type' => $sourceType,
+                'source_id' => $sourceId,
+                'source_item_id' => $item['id'],
+                'returned_quantity' => $remaining,
+                'used_quantity' => 0,
+                'reason' => 'Full receipt return',
+            ], $staffId);
+            if (!$res['ok']) {
+                return ['ok' => false, 'error' => $res['error'] ?? 'Could not return the entire receipt.'];
+            }
+            $count++;
+        }
+        return $count
+            ? ['ok' => true, 'count' => $count, 'error' => null]
+            : ['ok' => false, 'error' => 'Every product on this receipt has already been returned.'];
+    }
+
     private function applyFinancialReturn(string $sourceType, int $sourceId, int $itemId, float $returned, float $unitPrice, int $tid): void
     {
         $isOrder = $sourceType === 'order';

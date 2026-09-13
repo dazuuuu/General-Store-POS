@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         ? $OR->deleteSale($id, TenantContext::userId())
         : $SA->deleteSale($id, TenantContext::userId());
     if ($res['ok']) {
-        $_SESSION['flash']['success'] = 'Sale deleted and stock restored.';
+        $_SESSION['flash']['success'] = 'Duplicate sale undone. Stock, sale totals and customer balance were restored.';
         header('Location: ' . public_url('super/sales/?period=' . urlencode($period)));
         exit;
     }
@@ -610,12 +610,13 @@ ob_start();
                 <div class="btn-group btn-group-sm">
                   <a class="btn btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a>
                   <a class="btn btn-outline-primary" href="<?php echo public_url('super/returns/?receipt=' . urlencode($s['receipt_number'])); ?>">Return</a>
+                  <?php if(($s['source']??'')==='order'):?><a class="btn btn-outline-warning" href="<?php echo public_url('super/invoices/edit.php?id='.(int)$s['id']);?>">Edit sale</a><?php endif;?>
                 </div>
-                <form method="post" class="d-inline" onsubmit="return confirm('Delete this sale and return its products to stock?');">
+                <form method="post" class="d-inline" onsubmit="return confirm('Undo this duplicate sale? Products and totals will return to their previous state.');">
                   <input type="hidden" name="action" value="delete_sale">
                   <input type="hidden" name="source" value="<?php echo htmlspecialchars($s['source'] ?? 'sale'); ?>">
                   <input type="hidden" name="id" value="<?php echo (int) $s['id']; ?>">
-                  <button class="btn btn-sm btn-outline-danger mt-1"><i class="fas fa-trash me-1"></i>Delete</button>
+                  <button class="btn btn-sm btn-outline-danger mt-1"><i class="fas fa-rotate-left me-1"></i>Undo duplicate</button>
                 </form>
               </td>
             </tr>

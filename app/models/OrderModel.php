@@ -226,9 +226,9 @@ class OrderModel extends Model
                 $db->rollBack();
                 return ['ok' => false, 'errors' => ['_' => 'Invoice not found.']];
             }
-            if (($order['status'] ?? '') !== 'open') {
+            if (!in_array(($order['status'] ?? ''), ['open','paid'], true)) {
                 $db->rollBack();
-                return ['ok' => false, 'errors' => ['_' => 'Only unpaid/open invoices can be edited.']];
+                return ['ok' => false, 'errors' => ['_' => 'Only active or paid sales can be edited.']];
             }
 
             $saleType = (($in['sale_type'] ?? $order['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
@@ -348,6 +348,8 @@ class OrderModel extends Model
             $paid = max(0, (float) ($order['amount_paid'] ?? 0));
             $paid = min($paid, (float) $priced['total']);
             $due = max(0, round((float) $priced['total'] - $paid, 2));
+            $newStatus = $due <= 0.0001 ? 'paid' : 'open';
+            $newPaymentStatus = $due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit');
             $creditDays = max(0, (int) ($in['credit_duration_days'] ?? 0));
             $creditDueAt = $creditDays > 0 ? date('Y-m-d H:i:s', strtotime('+' . $creditDays . ' days', strtotime($order['created_at'] ?? 'now'))) : null;
 
@@ -356,7 +358,7 @@ class OrderModel extends Model
                     SET table_name = ?, sale_type = ?, subtotal = ?, discount_amount = ?, additional_charges = ?,
                         additional_charges_note = ?, total = ?,
                         amount_paid = ?, amount_due = ?, customer_email = ?, customer_phone = ?,
-                        credit_duration_days = ?, credit_due_at = ?
+                        credit_duration_days = ?, credit_due_at = ?, status = ?, payment_status = ?
                   WHERE id = ? AND tenant_id = ?'
             )->execute([
                 $tableName,
@@ -372,6 +374,8 @@ class OrderModel extends Model
                 trim((string) ($in['customer_phone'] ?? '')) ?: null,
                 $creditDays > 0 ? $creditDays : null,
                 $creditDueAt,
+                $newStatus,
+                $newPaymentStatus,
                 $orderId,
                 $tid,
             ]);
@@ -1273,7 +1277,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Tab not found.']; }
@@ -1290,6 +1294,9 @@ class OrderModel extends Model
 
             $db->prepare("UPDATE orders SET status = 'void', paid_by = ?, paid_at = NOW() WHERE id = ?")->execute([$staffId, $orderId]);
             $db->commit();
+            if (!empty($order['customer_id'])) {
+                try { (new CustomerModel($db))->refreshCreditBalance((int)$order['customer_id']); } catch (\Throwable $ignored) {}
+            }
             return ['ok' => true, 'error' => null];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
@@ -1308,7 +1315,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -1348,6 +1355,9 @@ class OrderModel extends Model
             )->execute([$staffId, $orderId, $tid]);
 
             $db->commit();
+            if (!empty($order['customer_id'])) {
+                try { (new CustomerModel($db))->refreshCreditBalance((int)$order['customer_id']); } catch (\Throwable $ignored) {}
+            }
             return ['ok' => true, 'error' => null];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }

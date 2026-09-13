@@ -1846,6 +1846,7 @@ document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventLis
 });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
+    if (this.dataset.submitting === '1') { e.preventDefault(); return; }
     if (!cartHasItems()) { e.preventDefault(); alert('Add at least one product.'); return; }
     if (document.getElementById('formAction').value === 'pay') {
         var m = payMethod(), t = total().total;
@@ -1855,6 +1856,8 @@ document.getElementById('orderForm').addEventListener('submit', function (e) {
             if (Math.abs(cp + mp - t) > 0.01) { e.preventDefault(); alert('Cash and M-Pesa portions must add up to the total.'); return; }
         }
     }
+    this.dataset.submitting = '1';
+    this.querySelectorAll('button[type=submit]').forEach(function(button){button.disabled=true;});
 });
 
 // Shop VAT settings from the owner Settings page

@@ -73,6 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $invoice = $O->find($id);
 $items = $O->items($id);
+$editable = in_array(($invoice['status'] ?? ''), ['open','paid'], true);
 $paid = max(0, (float) ($invoice['amount_paid'] ?? 0));
 $due = (float) ($invoice['amount_due'] ?? 0);
 if (($invoice['status'] ?? '') === 'open' && $due <= 0.0001) {
@@ -104,27 +105,25 @@ ob_start();
   </div>
 <?php endif; ?>
 
-<?php if (($invoice['status'] ?? '') !== 'open'): ?>
-  <div class="alert alert-info">This invoice is already paid, so it is view-only.</div>
-<?php endif; ?>
+<?php if (($invoice['status'] ?? '') === 'paid'): ?><div class="alert alert-warning">Editing a paid sale adjusts stock and recalculates its paid total. Use Returns when goods physically come back.</div><?php endif; ?>
 
 <form method="post" id="editInvoiceForm" class="card border-0 shadow-sm" style="border-radius:14px;">
   <input type="hidden" name="order_id" value="<?php echo $id; ?>">
   <div class="card-body p-4">
     <div class="row g-3 mb-4">
-      <div class="col-md-4"><label class="form-label small">Customer name</label><input name="customer_name" class="form-control" required value="<?php echo htmlspecialchars($invoice['table_name'] ?? ''); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div class="col-md-4"><label class="form-label small">Phone</label><input name="customer_phone" class="form-control" value="<?php echo htmlspecialchars($invoice['customer_phone'] ?? ''); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div class="col-md-4"><label class="form-label small">Email</label><input type="email" name="customer_email" class="form-control" value="<?php echo htmlspecialchars($invoice['customer_email'] ?? ''); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($invoice['sale_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail item</option><option value="retail_pack">Retail box</option><option value="wholesale" <?php echo ($invoice['sale_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale box</option></select></div>
-      <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>" <?php echo (int) ($invoice['credit_duration_days'] ?? 0) === $days ? 'selected' : ''; ?>><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
-      <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['discount_amount'] ?? 0)); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div class="col-md-4"><label class="form-label small">Extra charge</label><input type="number" min="0" step="0.01" name="additional_charges" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges'] ?? 0)); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div class="col-md-4"><label class="form-label small">Charge note</label><input type="text" name="additional_charges_note" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges_note'] ?? '')); ?>" placeholder="Delivery, packing…" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Customer name</label><input name="customer_name" class="form-control" required value="<?php echo htmlspecialchars($invoice['table_name'] ?? ''); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Phone</label><input name="customer_phone" class="form-control" value="<?php echo htmlspecialchars($invoice['customer_phone'] ?? ''); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Email</label><input type="email" name="customer_email" class="form-control" value="<?php echo htmlspecialchars($invoice['customer_email'] ?? ''); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Set invoice price</label><select name="sale_type" class="form-select" <?php echo !$editable ? 'disabled' : ''; ?>><option value="retail" <?php echo ($invoice['sale_type'] ?? 'retail') !== 'wholesale' ? 'selected' : ''; ?>>Retail item</option><option value="retail_pack">Retail box</option><option value="wholesale" <?php echo ($invoice['sale_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale box</option></select></div>
+      <div class="col-md-4"><label class="form-label small">Credit duration</label><select name="credit_duration_days" class="form-select" <?php echo !$editable ? 'disabled' : ''; ?>><option value="0">No due date</option><?php foreach ([2 => '2 days', 7 => '1 week', 14 => '2 weeks', 30 => '1 month', 45 => '45 days', 60 => '2 months'] as $days => $label): ?><option value="<?php echo $days; ?>" <?php echo (int) ($invoice['credit_duration_days'] ?? 0) === $days ? 'selected' : ''; ?>><?php echo htmlspecialchars($label); ?></option><?php endforeach; ?></select></div>
+      <div class="col-md-4"><label class="form-label small">Discount</label><input type="number" min="0" step="0.01" name="discount_amount" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['discount_amount'] ?? 0)); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Extra charge</label><input type="number" min="0" step="0.01" name="additional_charges" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges'] ?? 0)); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+      <div class="col-md-4"><label class="form-label small">Charge note</label><input type="text" name="additional_charges_note" class="form-control" value="<?php echo htmlspecialchars((string) ($invoice['additional_charges_note'] ?? '')); ?>" placeholder="Delivery, packing…" <?php echo !$editable ? 'disabled' : ''; ?>></div>
     </div>
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
       <h2 class="h6 fw-bold mb-0">Invoice products</h2>
-      <?php if (($invoice['status'] ?? '') === 'open'): ?><button type="button" class="btn btn-sm btn-outline-primary" id="addNewItem">Add product</button><?php endif; ?>
+      <?php if ($editable): ?><button type="button" class="btn btn-sm btn-outline-primary" id="addNewItem">Add product</button><?php endif; ?>
     </div>
 
     <div class="invoice-items">
@@ -134,11 +133,11 @@ ob_start();
             <div class="fw-semibold"><?php echo htmlspecialchars($it['product_name']); ?></div>
             <div class="text-muted small"><?php $shown = QtyFormat::saleLine($it); echo htmlspecialchars($shown['summary_qty'] . ($shown['price_note'] !== '' ? ' · ' . $shown['price_note'] : '')); ?> · KES <?php echo number_format((float) $it['line_total'], 2); ?></div>
           </div>
-          <div><label class="form-label small mb-1">Qty</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][quantity]" class="form-control qty-input" value="<?php echo htmlspecialchars(rtrim(rtrim(number_format((float) $it['quantity'], 2, '.', ''), '0'), '.')); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-          <div><label class="form-label small mb-1">Price</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][unit_price]" class="form-control price-input" value="<?php echo htmlspecialchars((string) $it['unit_price']); ?>" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>></div>
-      <div><label class="form-label small mb-1">Type</label><select name="existing_items[<?php echo (int) $it['id']; ?>][price_type]" class="form-select" <?php echo ($invoice['status'] ?? '') !== 'open' ? 'disabled' : ''; ?>><option value="retail" <?php echo ($it['price_type'] ?? 'retail') === 'retail' ? 'selected' : ''; ?>>Retail item</option><option value="retail_pack" <?php echo ($it['price_type'] ?? '') === 'retail_pack' ? 'selected' : ''; ?>>Retail box</option><option value="wholesale" <?php echo ($it['price_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
+          <div><label class="form-label small mb-1">Qty</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][quantity]" class="form-control qty-input" value="<?php echo htmlspecialchars(rtrim(rtrim(number_format((float) $it['quantity'], 2, '.', ''), '0'), '.')); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+          <div><label class="form-label small mb-1">Price</label><input type="number" step="0.01" min="0" name="existing_items[<?php echo (int) $it['id']; ?>][unit_price]" class="form-control price-input" value="<?php echo htmlspecialchars((string) $it['unit_price']); ?>" <?php echo !$editable ? 'disabled' : ''; ?>></div>
+      <div><label class="form-label small mb-1">Type</label><select name="existing_items[<?php echo (int) $it['id']; ?>][price_type]" class="form-select" <?php echo !$editable ? 'disabled' : ''; ?>><option value="retail" <?php echo ($it['price_type'] ?? 'retail') === 'retail' ? 'selected' : ''; ?>>Retail item</option><option value="retail_pack" <?php echo ($it['price_type'] ?? '') === 'retail_pack' ? 'selected' : ''; ?>>Retail box</option><option value="wholesale" <?php echo ($it['price_type'] ?? '') === 'wholesale' ? 'selected' : ''; ?>>Wholesale</option></select></div>
           <div class="fw-bold text-end line-output">KES 0</div>
-          <?php if (($invoice['status'] ?? '') === 'open'): ?>
+          <?php if ($editable): ?>
             <div><button type="button" class="btn btn-outline-danger w-100 remove-existing">Remove</button><input type="hidden" name="existing_items[<?php echo (int) $it['id']; ?>][remove]" value=""></div>
           <?php endif; ?>
         </div>
@@ -149,7 +148,7 @@ ob_start();
 
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 border-top pt-3 mt-3">
       <div class="fw-bold">New invoice total: <span id="invoiceEditTotal">KES 0</span></div>
-      <?php if (($invoice['status'] ?? '') === 'open'): ?><button class="btn btn-primary">Save invoice changes</button><?php endif; ?>
+      <?php if ($editable): ?><button class="btn btn-primary">Save sale changes</button><?php endif; ?>
     </div>
   </div>
 </form>
