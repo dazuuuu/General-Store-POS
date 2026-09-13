@@ -67,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title><?php echo htmlspecialchars($shopName); ?> — Staff terminal</title>
-<?php include __DIR__ . '/components/pwa_head.php'; ?>
+<?php if(!empty($shop['offline_enabled'])):include __DIR__ . '/components/pwa_head.php';?><script defer src="<?php echo public_url('assets/js/offline-pos.js');?>"></script><?php endif;?>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <style>
   *{box-sizing:border-box;}
@@ -189,6 +189,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       pinValue.value = pin;
       actionValue.value = btn.dataset.action;
     });
+  });
+  form.addEventListener('submit',function(e){
+    if(actionValue.value!=='login'||!window.OfflinePOS)return;
+    if(!navigator.onLine){
+      e.preventDefault();OfflinePOS.offlineLogin(pin).then(function(user){location.href=user.dashboard_url;}).catch(function(err){alert(err.message);});return;
+    }
+    e.preventDefault();OfflinePOS.rememberCandidate(pin).finally(function(){form.submit();});
   });
 })();
 </script>

@@ -1,13 +1,15 @@
 /* Modern Shop POS service worker — makes the app installable + fast.
    Pages are always network-first (so live data + auth stay correct);
    only static assets and the login shell are cached. */
-const CACHE = 'shop-pos-v4';
+const CACHE = 'shop-pos-v5';
 // Derived from this script's own URL, not hard-coded — works whatever
 // folder the app is deployed under.
 const BASE  = new URL('.', self.location).pathname.replace(/\/$/, '');
 const SHELL = [
   BASE + '/',
   BASE + '/manifest.webmanifest',
+  BASE + '/assets/js/offline-pos.js',
+  BASE + '/assets/js/pos-pack-cart.js',
   BASE + '/assets/icons/icon-192.png',
   BASE + '/assets/icons/icon-512.png',
   BASE + '/assets/icons/icon-512-maskable.png',
