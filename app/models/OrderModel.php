@@ -57,9 +57,6 @@ class OrderModel extends Model
         }
 
         $db = $this->db;
-        // ReturnModel performs compatibility schema checks; construct it before
-        // opening the transaction so MySQL DDL cannot implicitly commit this edit.
-        $returnModel = new ReturnModel($db);
         try {
             $db->beginTransaction();
 
@@ -219,6 +216,9 @@ class OrderModel extends Model
         }
 
         $db = $this->db;
+        // Construct before opening the transaction: compatibility DDL in the
+        // return model would otherwise make MySQL implicitly commit this edit.
+        $returnModel = new ReturnModel($db);
         try {
             $db->beginTransaction();
 
