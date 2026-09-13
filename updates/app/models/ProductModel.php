@@ -14,7 +14,14 @@ class ProductModel extends Model
 
     public const UNITS = ['carton', 'bale', 'parcel', 'sack', 'bag', 'box', 'pack', 'piece', 'dozen', 'bundle', 'roll', 'set', 'pair', 'kg', 'g', 'ml', 'litre', 'tonne'];
     public const SIZE_UNITS = ['ml', 'l'];
+    public const CONTINUOUS_UNITS = ['kg', 'g', 'ml', 'litre', 'l', 'tonne'];
     public const PRODUCT_TYPES = ['product', 'book', 'stationery']; // legacy book/stationery kept for old rows
+
+    /** Units sold by weight/volume (partial transfers make sense). */
+    public static function isContinuousUnit(?string $unit): bool
+    {
+        return in_array(strtolower(trim((string) $unit)), self::CONTINUOUS_UNITS, true);
+    }
 
     /**
      * @param array $in name, category_id, subcategory_id, supplier_id, description,

@@ -54,12 +54,56 @@
     function retailLineTotal(p, pieces) {
         pieces = parseFloat(pieces) || 0;
         if (pieces <= 0) return 0;
-        return pieces * p.price;
+        return applyTiersTotal(p, pieces, pieces * (p.price || 0));
+    }
+    function applyTiersTotal(p, qty, base) {
+        qty = parseFloat(qty) || 0;
+        base = parseFloat(base) || 0;
+        if (qty <= 0 || base <= 0) return Math.max(0, base);
+        var tiers = Array.isArray(p && p.tiers) ? p.tiers : [];
+        if (!tiers.length) return Math.round(base * 100) / 100;
+        var unitsPerPack = (p && p.unitsPerPack > 1) ? p.unitsPerPack : 1;
+        var bestUnit = null;
+        var amountOff = 0;
+        tiers.forEach(function (tier) {
+            if (!tierMatches(tier, qty, unitsPerPack)) return;
+            var unitPrice = parseFloat(tier.unit_price);
+            if (!isNaN(unitPrice) && unitPrice > 0 && (bestUnit === null || unitPrice < bestUnit)) {
+                bestUnit = unitPrice;
+            }
+            var off = parseFloat(tier.discount_amount) || 0;
+            if (off > amountOff) amountOff = off;
+        });
+        var total = bestUnit !== null ? (bestUnit * qty) : base;
+        return Math.round(Math.max(0, total - amountOff) * 100) / 100;
+    }
+    function tierMatches(tier, qty, unitsPerPack) {
+        if (qtyInRange(tier, qty)) return true;
+        if (unitsPerPack > 1.0001) {
+            return qtyInRange(tier, qty / unitsPerPack);
+        }
+        return false;
+    }
+    function qtyInRange(tier, qty) {
+        var min = parseFloat(tier.min_qty) || 0;
+        var max = (tier.max_qty === null || tier.max_qty === undefined || tier.max_qty === '')
+            ? null : parseFloat(tier.max_qty);
+        if (qty + 0.0001 < min) return false;
+        if (max !== null && !isNaN(max) && qty > max + 0.0001) return false;
+        return true;
     }
     function lineTotal(p, c) {
-        return retailLineTotal(p, c.retail || 0)
-            + (c.retailPack || 0) * productPrice(p, 'retail_pack')
-            + (c.wholesale || 0) * productPrice(p, 'wholesale');
+        var total = retailLineTotal(p, c.retail || 0);
+        if ((c.retailPack || 0) > 0 && hasRetailPack(p)) {
+            var packPieces = stockFromPacks(p, c.retailPack);
+            total += applyTiersTotal(p, packPieces, (c.retailPack || 0) * productPrice(p, 'retail_pack'));
+        }
+        if ((c.wholesale || 0) > 0) {
+            var wPieces = hasWholesalePack(p) ? stockFromPacks(p, c.wholesale) : (c.wholesale || 0);
+            var wBase = (c.wholesale || 0) * productPrice(p, 'wholesale');
+            total += applyTiersTotal(p, wPieces, wBase);
+        }
+        return Math.round(total * 100) / 100;
     }
     function serialize(cart, products, order) {
         var out = [];

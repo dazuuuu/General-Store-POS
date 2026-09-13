@@ -177,7 +177,11 @@ class PurchaseModel extends Model
                                 THEN pi.package_buying_price * pi.package_quantity
                               ELSE pi.buying_price * pi.quantity
                             END
-                       ), 0) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS cost_total
+                       ), 0) FROM purchase_items pi WHERE pi.purchase_id = p.id) AS cost_total,
+                       (SELECT GROUP_CONCAT(
+                            TRIM(CONCAT(COALESCE(pi.name, ''), IF(pi.variant_label IS NULL OR pi.variant_label = '', '', CONCAT(' ', pi.variant_label))))
+                            ORDER BY pi.id ASC SEPARATOR ', '
+                        ) FROM purchase_items pi WHERE pi.purchase_id = p.id AND COALESCE(pi.name, '') <> '') AS product_names
                   FROM purchases p
              LEFT JOIN suppliers s ON s.id = p.supplier_id
              LEFT JOIN users u ON u.id = p.staff_id
@@ -266,6 +270,10 @@ class PurchaseModel extends Model
     /**
      * Transfer selected purchase items into Store warehouse.
      * Sell prices can be overridden per line at transfer time (all optional).
+     * Supports partial transfers (e.g. move 2000kg of 10000kg, or 2 of 6 bales).
+     * Optional quantity-discount tiers are saved onto the resulting inventory product
+     * after Store → Inventory (stored on store product notes JSON + applied when
+     * the inventory product is created/updated).
      *
      * @param array $selections [purchase_item_id => override fields]
      */
@@ -297,12 +305,34 @@ class PurchaseModel extends Model
 
             $storeItems = [];
             $touchedPurchases = [];
+            $tierPlans = []; // store_product match key => tiers
+            $partialUpdates = []; // purchase_item_id => remaining fields
+
             foreach ($rows as $row) {
                 $id = (int) $row['id'];
                 $over = is_array($selections[$id] ?? null) ? $selections[$id] : [];
-                $merged = $this->mergeTransferOverrides($row, $over);
+                $split = $this->splitTransferQuantity($row, $over);
+                if ($split['transfer_qty'] <= 0) {
+                    continue;
+                }
+                $merged = $this->mergeTransferOverrides($row, $over, $split['transfer_qty'], $split['transfer_packages']);
                 $storeItems[] = $merged;
                 $touchedPurchases[(int) $row['purchase_id']] = true;
+                $tierPlans[] = [
+                    'name' => $merged['name'],
+                    'barcode' => $merged['barcode'] ?? '',
+                    'tiers' => $this->normalizeTierInput($over['tiers'] ?? []),
+                ];
+                $partialUpdates[$id] = [
+                    'remaining_qty' => $split['remaining_qty'],
+                    'remaining_packages' => $split['remaining_packages'],
+                    'merged' => $merged,
+                ];
+            }
+
+            if (!$storeItems) {
+                $this->db->rollBack();
+                return ['ok' => false, 'created' => 0, 'error' => 'Enter how much to transfer for at least one selected item.'];
             }
 
             $res = $store->createMany($storeItems, $staffId);
@@ -311,28 +341,84 @@ class PurchaseModel extends Model
                 return ['ok' => false, 'created' => 0, 'error' => $res['error'] ?? 'Could not create store products.'];
             }
 
-            // Link each transferred line to the newest matching stored product.
-            $link = $this->db->prepare(
+            $markDone = $this->db->prepare(
                 "UPDATE purchase_items
-                    SET status = 'transferred', store_product_id = ?,
+                    SET status = 'transferred', store_product_id = ?, quantity = ?, package_quantity = ?,
                         wholesale_price = ?, package_price = ?, retail_price = ?, retail_pack_price = ?,
                         transferred_at = NOW()
                   WHERE id = ? AND tenant_id = ?"
             );
-            foreach ($rows as $row) {
-                $id = (int) $row['id'];
-                $over = is_array($selections[$id] ?? null) ? $selections[$id] : [];
-                $merged = $this->mergeTransferOverrides($row, $over);
+            $keepPending = $this->db->prepare(
+                "UPDATE purchase_items
+                    SET quantity = ?, package_quantity = ?,
+                        wholesale_price = COALESCE(?, wholesale_price),
+                        package_price = COALESCE(?, package_price),
+                        retail_price = COALESCE(?, retail_price),
+                        retail_pack_price = COALESCE(?, retail_pack_price)
+                  WHERE id = ? AND tenant_id = ? AND status = 'pending'"
+            );
+            $insertTransferred = $this->db->prepare(
+                'INSERT INTO purchase_items
+                    (tenant_id, purchase_id, name, category_id, brand_id, barcode, unit, package_unit,
+                     package_quantity, units_per_package, variant_label, colors, quantity, faulty_quantity,
+                     buying_price, package_buying_price, wholesale_price, package_price, retail_price,
+                     retail_pack_price, image_path, notes, status, store_product_id, transferred_at)
+                 SELECT tenant_id, purchase_id, name, category_id, brand_id, barcode, unit, package_unit,
+                        ?, units_per_package, variant_label, colors, ?, 0,
+                        buying_price, package_buying_price, ?, ?, ?,
+                        ?, image_path, notes, \'transferred\', ?, NOW()
+                   FROM purchase_items WHERE id = ? AND tenant_id = ? LIMIT 1'
+            );
+
+            foreach ($partialUpdates as $id => $info) {
+                $merged = $info['merged'];
                 $storeId = $this->findLatestStoreProductId($merged['name'], $merged['barcode'] ?? null);
-                $link->execute([
-                    $storeId,
-                    $merged['wholesale_price'] !== '' && $merged['wholesale_price'] !== null ? (float) $merged['wholesale_price'] : null,
-                    $merged['package_price'] !== '' && $merged['package_price'] !== null ? (float) $merged['package_price'] : null,
-                    $merged['retail_price'] !== '' && $merged['retail_price'] !== null ? (float) $merged['retail_price'] : null,
-                    $merged['retail_pack_price'] !== '' && $merged['retail_pack_price'] !== null ? (float) $merged['retail_pack_price'] : null,
-                    $id,
-                    $tid,
-                ]);
+                $ws = $merged['wholesale_price'] !== '' && $merged['wholesale_price'] !== null ? (float) $merged['wholesale_price'] : null;
+                $pp = $merged['package_price'] !== '' && $merged['package_price'] !== null ? (float) $merged['package_price'] : null;
+                $rp = $merged['retail_price'] !== '' && $merged['retail_price'] !== null ? (float) $merged['retail_price'] : null;
+                $rpp = $merged['retail_pack_price'] !== '' && $merged['retail_pack_price'] !== null ? (float) $merged['retail_pack_price'] : null;
+
+                if ($info['remaining_qty'] > 0.0001) {
+                    // Keep original line pending with remaining stock; record transferred portion separately
+                    // so purchase status becomes partial.
+                    $keepPending->execute([
+                        $info['remaining_qty'],
+                        $info['remaining_packages'],
+                        $ws, $pp, $rp, $rpp,
+                        $id, $tid,
+                    ]);
+                    $insertTransferred->execute([
+                        $merged['package_quantity'],
+                        (float) $merged['quantity'],
+                        $ws, $pp, $rp, $rpp,
+                        $storeId,
+                        $id, $tid,
+                    ]);
+                } else {
+                    $markDone->execute([
+                        $storeId,
+                        (float) $merged['quantity'],
+                        $merged['package_quantity'],
+                        $ws, $pp, $rp, $rpp,
+                        $id, $tid,
+                    ]);
+                }
+
+                // Stash tiers on the store product notes as JSON so Inventory transfer can apply them.
+                if ($storeId && !empty($tierPlans)) {
+                    foreach ($tierPlans as $plan) {
+                        if ($plan['name'] !== $merged['name']) {
+                            continue;
+                        }
+                        if (($plan['barcode'] ?? '') !== '' && ($merged['barcode'] ?? '') !== '' && $plan['barcode'] !== $merged['barcode']) {
+                            continue;
+                        }
+                        if ($plan['tiers']) {
+                            $this->attachTiersToStoreProduct((int) $storeId, $plan['tiers']);
+                        }
+                        break;
+                    }
+                }
             }
 
             foreach (array_keys($touchedPurchases) as $purchaseId) {
@@ -352,6 +438,98 @@ class PurchaseModel extends Model
             error_log('PurchaseModel::transferToStore failed: ' . $e->getMessage());
             return ['ok' => false, 'created' => 0, 'error' => 'Could not transfer purchases to Store. ' . $e->getMessage()];
         }
+    }
+
+    /** @return array{transfer_qty:float,transfer_packages:?float,remaining_qty:float,remaining_packages:?float} */
+    private function splitTransferQuantity(array $row, array $over): array
+    {
+        $availableQty = (float) ($row['quantity'] ?? 0);
+        $inside = max(0.01, (float) ($row['units_per_package'] ?? 1));
+        $availablePkgs = ($row['package_quantity'] ?? '') !== '' ? (float) $row['package_quantity'] : null;
+        if (($availablePkgs === null || $availablePkgs <= 0) && $availableQty > 0 && !empty($row['package_unit'])) {
+            $availablePkgs = round($availableQty / $inside, 4);
+        }
+
+        $wantQty = ($over['transfer_quantity'] ?? '') !== '' ? max(0, (float) $over['transfer_quantity']) : null;
+        $wantPkgs = ($over['transfer_packages'] ?? '') !== '' ? max(0, (float) $over['transfer_packages']) : null;
+
+        // Default: transfer everything remaining.
+        if ($wantQty === null && $wantPkgs === null) {
+            $wantQty = $availableQty;
+            $wantPkgs = $availablePkgs;
+        } elseif ($wantPkgs !== null && $wantQty === null) {
+            $wantQty = round($wantPkgs * $inside, 4);
+        } elseif ($wantQty !== null && $wantPkgs === null && $availablePkgs !== null && $inside > 0) {
+            $wantPkgs = round($wantQty / $inside, 4);
+        }
+
+        $transferQty = min($availableQty, (float) $wantQty);
+        if ($transferQty <= 0) {
+            return ['transfer_qty' => 0.0, 'transfer_packages' => null, 'remaining_qty' => $availableQty, 'remaining_packages' => $availablePkgs];
+        }
+        $transferPkgs = $wantPkgs !== null ? min((float) ($availablePkgs ?? $wantPkgs), (float) $wantPkgs) : null;
+        if ($transferPkgs !== null && $transferPkgs > 0 && ($wantQty === null || ($over['transfer_quantity'] ?? '') === '')) {
+            $transferQty = min($availableQty, round($transferPkgs * $inside, 4));
+        }
+        $remainingQty = max(0, round($availableQty - $transferQty, 4));
+        $remainingPkgs = null;
+        if ($availablePkgs !== null) {
+            $usedPkgs = $transferPkgs !== null ? $transferPkgs : ($inside > 0 ? round($transferQty / $inside, 4) : 0);
+            $remainingPkgs = max(0, round($availablePkgs - $usedPkgs, 4));
+            $transferPkgs = $usedPkgs;
+        }
+
+        return [
+            'transfer_qty' => $transferQty,
+            'transfer_packages' => $transferPkgs,
+            'remaining_qty' => $remainingQty,
+            'remaining_packages' => $remainingPkgs,
+        ];
+    }
+
+    private function normalizeTierInput($tiers): array
+    {
+        if (!is_array($tiers)) {
+            return [];
+        }
+        $clean = [];
+        foreach ($tiers as $t) {
+            if (!is_array($t)) {
+                continue;
+            }
+            $min = (float) ($t['min_qty'] ?? 0);
+            if ($min <= 0) {
+                continue;
+            }
+            $unitPrice = ($t['unit_price'] ?? '') !== '' ? max(0, (float) $t['unit_price']) : null;
+            $discountAmount = ($t['discount_amount'] ?? '') !== '' ? max(0, (float) $t['discount_amount']) : null;
+            if (($unitPrice === null || $unitPrice < 0) && ($discountAmount === null || $discountAmount <= 0)) {
+                continue;
+            }
+            $clean[] = [
+                'min_qty' => $min,
+                'max_qty' => ($t['max_qty'] ?? '') !== '' ? max(0, (float) $t['max_qty']) : null,
+                'unit_price' => $unitPrice ?? 0.0,
+                'discount_amount' => $discountAmount,
+                'label' => trim((string) ($t['label'] ?? '')) ?: null,
+            ];
+        }
+        return $clean;
+    }
+
+    private function attachTiersToStoreProduct(int $storeProductId, array $tiers): void
+    {
+        $tid = \TenantContext::tenantId();
+        $payload = json_encode(['quantity_discounts' => $tiers]);
+        // Append marker into notes without wiping user notes.
+        $stmt = $this->db->prepare('SELECT notes FROM store_products WHERE id = ? AND tenant_id = ? LIMIT 1');
+        $stmt->execute([$storeProductId, $tid]);
+        $notes = (string) ($stmt->fetchColumn() ?: '');
+        $notes = preg_replace('/\n?\[QDISC\].*$/s', '', $notes);
+        $notes = trim($notes);
+        $notes = ($notes !== '' ? $notes . "\n" : '') . '[QDISC]' . $payload;
+        $this->db->prepare('UPDATE store_products SET notes = ? WHERE id = ? AND tenant_id = ?')
+            ->execute([$notes, $storeProductId, $tid]);
     }
 
     public function summary(): array
@@ -397,15 +575,19 @@ class PurchaseModel extends Model
         ];
     }
 
-    private function mergeTransferOverrides(array $row, array $over): array
+    private function mergeTransferOverrides(array $row, array $over, ?float $transferQty = null, ?float $transferPackages = null): array
     {
         $inside = max(0.01, (float) ($over['units_per_package'] ?? $row['units_per_package'] ?? 1));
-        $pkgQty = ($over['package_quantity'] ?? '') !== ''
-            ? max(0, (float) $over['package_quantity'])
-            : (($row['package_quantity'] ?? '') !== '' ? (float) $row['package_quantity'] : null);
-        $qty = ($over['quantity'] ?? '') !== ''
-            ? max(0, (float) $over['quantity'])
-            : (float) ($row['quantity'] ?? 0);
+        $pkgQty = $transferPackages !== null
+            ? max(0, $transferPackages)
+            : (($over['package_quantity'] ?? '') !== ''
+                ? max(0, (float) $over['package_quantity'])
+                : (($row['package_quantity'] ?? '') !== '' ? (float) $row['package_quantity'] : null));
+        $qty = $transferQty !== null
+            ? max(0, $transferQty)
+            : (($over['quantity'] ?? '') !== ''
+                ? max(0, (float) $over['quantity'])
+                : (float) ($row['quantity'] ?? 0));
         if ($qty <= 0 && $pkgQty !== null && $pkgQty > 0) {
             $qty = round($pkgQty * $inside, 2);
         }

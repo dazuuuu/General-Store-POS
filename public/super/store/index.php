@@ -224,9 +224,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'invoice') {
         $ids = $_POST['store_ids'] ?? [];
         $ids = is_array($ids) ? $ids : [];
-        $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_packages'] ?? []);
+        $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_packages'] ?? [], $_POST['transfer_quantities'] ?? []);
         if ($res['ok']) {
-            $_SESSION['flash']['success'] = 'Internal transfer invoice ' . $res['invoice_number'] . ' generated. Selected packages moved from Store into shop Inventory.';
+            $_SESSION['flash']['success'] = 'Internal transfer invoice ' . $res['invoice_number'] . ' generated. Selected stock moved from Store into shop Inventory.';
             header('Location: ' . public_url('super/store/invoice.php?id=' . (int) $res['invoice_id']));
             exit;
         }
@@ -368,8 +368,8 @@ ob_start();
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
   <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
-      <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select packages to transfer into shop Inventory</h2>
-      <p class="text-muted small mb-0 mt-1">Tick products and enter how many <strong>packages</strong> to move — only that count is added to Inventory; the rest stays in Store.</p>
+      <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select stock to transfer into shop Inventory</h2>
+      <p class="text-muted small mb-0 mt-1">Tick products and enter how many <strong>packages</strong> (or <strong>kg/L</strong> for measured goods) to move — only that amount goes to Inventory; the rest stays in Store.</p>
     </div>
     <div>
       <input type="text" id="warehouseSearch" class="form-control form-control-sm" placeholder="Search warehouse products..." style="max-width:240px;">
@@ -382,43 +382,68 @@ ob_start();
     <input type="hidden" name="action" value="invoice">
     <div class="table-responsive">
       <table class="table align-middle mb-0" id="warehouseTable">
-        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">In warehouse</th><th style="width:140px;">Packages to transfer</th><th class="text-end">Pkg cost</th><th class="text-end">Line</th><th></th></tr></thead>
+        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">In warehouse</th><th style="width:160px;">Qty to transfer</th><th class="text-end">Unit cost</th><th class="text-end">Line</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($pending as $p):
             $unitsPerPkg = max(0.01, (float) ($p['units_per_package'] ?? 1));
             $pkgUnit = trim((string) ($p['package_unit'] ?? '')) ?: 'package';
+            $innerUnit = trim((string) ($p['unit'] ?? 'piece')) ?: 'piece';
+            $isContinuous = Models\ProductModel::isContinuousUnit($innerUnit);
             $availPkgs = (float) ($p['package_quantity'] ?? 0);
             if ($availPkgs <= 0 && (float) $p['quantity'] > 0) {
                 $availPkgs = round((float) $p['quantity'] / $unitsPerPkg, 2);
             }
+            $availQty = (float) $p['quantity'];
             $pkgBuy = ($p['package_buying_price'] ?? '') !== '' && (float) $p['package_buying_price'] > 0
                 ? (float) $p['package_buying_price']
                 : round((float) $p['buying_price'] * $unitsPerPkg, 2);
-            $line = $availPkgs * $pkgBuy;
+            $unitBuy = (float) $p['buying_price'];
+            $line = $isContinuous ? ($availQty * $unitBuy) : ($availPkgs * $pkgBuy);
             $availPkgsInt = (int) floor($availPkgs + 1e-9);
             $sid = (int) $p['id'];
           ?>
-          <tr class="warehouse-row" data-search="<?php echo htmlspecialchars(strtolower($p['name'] . ' ' . ($p['barcode'] ?? '') . ' ' . ($p['category_name'] ?? '') . ' ' . ($p['brand_name'] ?? ''))); ?>">
+          <tr class="warehouse-row" data-search="<?php echo htmlspecialchars(strtolower($p['name'] . ' ' . ($p['barcode'] ?? '') . ' ' . ($p['category_name'] ?? '') . ' ' . ($p['brand_name'] ?? ''))); ?>" data-continuous="<?php echo $isContinuous ? '1' : '0'; ?>">
             <td><input class="form-check-input store-check" type="checkbox" name="store_ids[]" value="<?php echo $sid; ?>" form="transferInvoiceForm" data-line="<?php echo $line; ?>"></td>
             <td>
               <div class="fw-semibold"><?php echo htmlspecialchars($p['name']); ?></div>
-              <div class="text-muted small"><?php echo htmlspecialchars($p['barcode'] ?: 'No barcode'); ?><?php if (!empty($p['product_id'])): ?> · matched inventory<?php endif; ?> · <?php echo rtrim(rtrim(number_format($unitsPerPkg, 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['unit']); ?> / <?php echo htmlspecialchars($pkgUnit); ?></div>
+              <div class="text-muted small"><?php echo htmlspecialchars($p['barcode'] ?: 'No barcode'); ?><?php if (!empty($p['product_id'])): ?> · matched inventory<?php endif; ?>
+                <?php if ($isContinuous): ?>
+                  · measured in <?php echo htmlspecialchars($innerUnit); ?>
+                <?php else: ?>
+                  · <?php echo rtrim(rtrim(number_format($unitsPerPkg, 2), '0'), '.'); ?> <?php echo htmlspecialchars($innerUnit); ?> / <?php echo htmlspecialchars($pkgUnit); ?>
+                <?php endif; ?>
+              </div>
             </td>
             <td class="small"><?php echo htmlspecialchars($p['supplier_name'] ?: '—'); ?></td>
             <td class="small"><?php echo htmlspecialchars($p['category_name'] ?: '—'); ?></td>
             <td class="small"><?php echo htmlspecialchars($p['brand_name'] ?: '—'); ?></td>
             <td class="text-end">
-              <div class="fw-semibold"><?php echo rtrim(rtrim(number_format($availPkgs, 2), '0'), '.'); ?> <?php echo htmlspecialchars($pkgUnit); ?><?php echo $availPkgs == 1 ? '' : 's'; ?></div>
-              <div class="text-muted small"><?php echo rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.'); ?> <?php echo htmlspecialchars($p['unit']); ?> sealed</div>
+              <?php if ($isContinuous): ?>
+                <div class="fw-semibold"><?php echo rtrim(rtrim(number_format($availQty, 2), '0'), '.'); ?> <?php echo htmlspecialchars($innerUnit); ?></div>
+                <?php if ($availPkgs > 0): ?>
+                  <div class="text-muted small"><?php echo rtrim(rtrim(number_format($availPkgs, 2), '0'), '.'); ?> <?php echo htmlspecialchars($pkgUnit); ?><?php echo abs($availPkgs - 1) < 0.001 ? '' : 's'; ?></div>
+                <?php endif; ?>
+              <?php else: ?>
+                <div class="fw-semibold"><?php echo rtrim(rtrim(number_format($availPkgs, 2), '0'), '.'); ?> <?php echo htmlspecialchars($pkgUnit); ?><?php echo $availPkgs == 1 ? '' : 's'; ?></div>
+                <div class="text-muted small"><?php echo rtrim(rtrim(number_format($availQty, 2), '0'), '.'); ?> <?php echo htmlspecialchars($innerUnit); ?> sealed</div>
+              <?php endif; ?>
             </td>
             <td>
+              <?php if ($isContinuous): ?>
               <div class="input-group input-group-sm">
-                <input type="number" step="1" min="0" max="<?php echo (int) $availPkgsInt; ?>" name="transfer_packages[<?php echo $sid; ?>]" form="transferInvoiceForm" class="form-control form-control-sm transfer-qty" value="" placeholder="0" data-price="<?php echo htmlspecialchars((string) $pkgBuy); ?>" data-id="<?php echo $sid; ?>" data-units="<?php echo htmlspecialchars((string) $unitsPerPkg); ?>" data-pkg-unit="<?php echo htmlspecialchars($pkgUnit); ?>">
+                <input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $availQty); ?>" name="transfer_quantities[<?php echo $sid; ?>]" form="transferInvoiceForm" class="form-control form-control-sm transfer-qty" value="" placeholder="0" data-price="<?php echo htmlspecialchars((string) $unitBuy); ?>" data-id="<?php echo $sid; ?>" data-units="1" data-pkg-unit="<?php echo htmlspecialchars($innerUnit); ?>" data-continuous="1">
+                <span class="input-group-text"><?php echo htmlspecialchars($innerUnit); ?></span>
+              </div>
+              <div class="text-muted" style="font-size:.68rem;">max <?php echo rtrim(rtrim(number_format($availQty, 2), '0'), '.'); ?></div>
+              <?php else: ?>
+              <div class="input-group input-group-sm">
+                <input type="number" step="1" min="0" max="<?php echo (int) $availPkgsInt; ?>" name="transfer_packages[<?php echo $sid; ?>]" form="transferInvoiceForm" class="form-control form-control-sm transfer-qty" value="" placeholder="0" data-price="<?php echo htmlspecialchars((string) $pkgBuy); ?>" data-id="<?php echo $sid; ?>" data-units="<?php echo htmlspecialchars((string) $unitsPerPkg); ?>" data-pkg-unit="<?php echo htmlspecialchars($pkgUnit); ?>" data-continuous="0">
                 <span class="input-group-text"><?php echo htmlspecialchars($pkgUnit); ?>s</span>
               </div>
               <div class="text-muted" style="font-size:.68rem;">max <?php echo (int) $availPkgsInt; ?></div>
+              <?php endif; ?>
             </td>
-            <td class="text-end">KES <?php echo number_format($pkgBuy, 2); ?></td>
+            <td class="text-end">KES <?php echo number_format($isContinuous ? $unitBuy : $pkgBuy, 2); ?></td>
             <td class="text-end fw-semibold transfer-line" data-id="<?php echo $sid; ?>">KES 0.00</td>
             <td class="text-end store-actions">
               <button type="button" class="btn btn-sm btn-outline-secondary edit-store"
@@ -454,7 +479,7 @@ ob_start();
         <div class="col-md-2 fw-bold">Capital: <span id="selectedTotal">KES 0</span></div>
         <div class="col-md-2"><button type="submit" class="btn btn-primary btn-sm w-100" id="invoiceBtn" disabled>Generate &amp; save invoice</button></div>
       </div>
-      <p class="text-muted small mb-0 mt-2">This creates a saved transfer invoice (<code>STR-######</code>), moves only the packages you entered into shop Inventory, and keeps the invoice on this page for printing and capital tracking.</p>
+      <p class="text-muted small mb-0 mt-2">This creates a saved transfer invoice (<code>STR-######</code>), moves only the quantity you entered into shop Inventory, and keeps the invoice on this page for printing and capital tracking.</p>
     </div>
   </form>
   <?php foreach ($pending as $p): $sid = (int) $p['id']; ?>
@@ -1108,17 +1133,26 @@ ob_start();
     document.getElementById('grandRetailMargin').textContent = (grandRetail > 0 ? (grandRetailProfit / grandRetail * 100) : 0).toFixed(1) + '%';
   }
 
+  function transferAmount(qtyInput) {
+    if (!qtyInput) return 0;
+    var val = parseFloat(qtyInput.value) || 0;
+    if (qtyInput.dataset.continuous === '1') {
+      return Math.round(val * 100) / 100;
+    }
+    return Math.floor(val);
+  }
+
   function refreshSelectedTotal(){
     var total = 0, ready = 0;
     document.querySelectorAll('.store-check').forEach(function(c){
       var qtyInput = document.querySelector('.transfer-qty[data-id="' + c.value + '"]');
-      var pkgs = qtyInput ? Math.floor(parseFloat(qtyInput.value) || 0) : 0;
+      var amt = transferAmount(qtyInput);
       var price = qtyInput ? (parseFloat(qtyInput.dataset.price) || 0) : 0;
-      var line = pkgs * price;
+      var line = amt * price;
       var lineEl = document.querySelector('.transfer-line[data-id="' + c.value + '"]');
       if (lineEl) lineEl.textContent = money(line);
       if (c.checked) {
-        if (pkgs > 0) {
+        if (amt > 0) {
           ready++;
           total += line;
         }
@@ -1137,8 +1171,8 @@ ob_start();
     q.addEventListener('input', function(){
       var id = q.dataset.id;
       var check = document.querySelector('.store-check[value="' + id + '"]');
-      var pkgs = Math.floor(parseFloat(q.value) || 0);
-      if (check && pkgs > 0) check.checked = true;
+      var amt = transferAmount(q);
+      if (check && amt > 0) check.checked = true;
       refreshSelectedTotal();
     });
     q.addEventListener('keydown', function(e){
@@ -1152,12 +1186,11 @@ ob_start();
       document.querySelectorAll('.store-check').forEach(function(c){
         if (!c.checked) return;
         var qtyInput = document.querySelector('.transfer-qty[data-id="' + c.value + '"]');
-        var pkgs = qtyInput ? Math.floor(parseFloat(qtyInput.value) || 0) : 0;
-        if (pkgs > 0) ready++;
+        if (transferAmount(qtyInput) > 0) ready++;
       });
       if (ready === 0) {
         e.preventDefault();
-        alert('Select products and enter how many packages to transfer.');
+        alert('Select products and enter how much to transfer (packages or kg/L).');
         return;
       }
       if (!confirm('Generate and save transfer invoice for ' + ready + ' product line(s)? Stock will move to shop Inventory and the invoice will be stored as STR-######.')) {

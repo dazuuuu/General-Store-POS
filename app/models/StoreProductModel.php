@@ -41,6 +41,12 @@ class StoreProductModel extends Model
             if ($qty <= 0 && $pkgQty !== null && $pkgQty > 0) {
                 $qty = round($pkgQty * $inside, 2);
             }
+            $unit = $item['unit'] ?? 'piece';
+            $pkgUnit = trim((string) ($item['package_unit'] ?? ''));
+            if ($pkgUnit === '') {
+                // Continuous goods (kg/L) can sit as loose measured stock without a carton default.
+                $pkgUnit = ProductModel::isContinuousUnit($unit) ? null : 'carton';
+            }
 
             $this->insert([
                 'product_id' => (int) ($item['product_id'] ?? 0) ?: null,
@@ -49,8 +55,8 @@ class StoreProductModel extends Model
                 'brand_id' => (int) ($item['brand_id'] ?? 0) ?: null,
                 'supplier_id' => (int) ($item['supplier_id'] ?? 0) ?: null,
                 'barcode' => trim((string) ($item['barcode'] ?? '')) ?: null,
-                'unit' => $item['unit'] ?? 'piece',
-                'package_unit' => trim((string) ($item['package_unit'] ?? '')) ?: 'carton',
+                'unit' => $unit,
+                'package_unit' => $pkgUnit,
                 'package_quantity' => $pkgQty,
                 'units_per_package' => $inside,
                 'package_price' => ($item['package_price'] ?? '') !== '' ? max(0, (float) $item['package_price']) : null,
@@ -285,7 +291,11 @@ class StoreProductModel extends Model
      * $packageQuantities[store_product_id] = how many sealed packages (cartons/bales) to move.
      * Never opens a package — only whole packages. Does not default to transferring everything.
      */
-    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = []): array
+    /**
+     * @param array $packageQuantities whole packages to move (cartons/bales)
+     * @param array $transferQuantities continuous units (kg/L) to move by quantity
+     */
+    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = [], array $transferQuantities = []): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         if (!$ids) {
@@ -316,13 +326,38 @@ class StoreProductModel extends Model
                 if ($availablePkgs <= 0 && $availableItems > 0 && $unitsPerPkg > 0) {
                     $availablePkgs = round($availableItems / $unitsPerPkg, 2);
                 }
+                $isContinuous = ProductModel::isContinuousUnit($it['unit'] ?? null);
+                $sid = (int) $it['id'];
+
+                if ($isContinuous) {
+                    // kg / litre etc: transfer by measured quantity (partial sacks OK).
+                    $wantedQty = isset($transferQuantities[$sid]) ? max(0, (float) $transferQuantities[$sid]) : 0.0;
+                    if ($wantedQty <= 0 && isset($packageQuantities[$sid])) {
+                        $wantedQty = round(max(0, (float) $packageQuantities[$sid]) * $unitsPerPkg, 4);
+                    }
+                    $qty = min($availableItems, $wantedQty);
+                    if ($qty <= 0) {
+                        continue;
+                    }
+                    $pkgs = $unitsPerPkg > 0 ? round($qty / $unitsPerPkg, 4) : null;
+                    $copy = $it;
+                    $copy['quantity'] = $qty;
+                    $copy['transfer_packages'] = $pkgs;
+                    $copy['package_quantity'] = $pkgs;
+                    $copy['faulty_quantity'] = 0;
+                    $invoiceItems[] = $copy;
+                    $unitBuy = (float) $it['buying_price'];
+                    $subtotal += $qty * $unitBuy;
+                    continue;
+                }
+
                 if ($availablePkgs <= 0) {
                     $db->rollBack();
                     return ['ok' => false, 'invoice_id' => null, 'error' => ($it['name'] ?? 'Product') . ': no sealed packages left to transfer. Transfers are by package only.'];
                 }
 
-                $wantedPkgs = isset($packageQuantities[(int) $it['id']])
-                    ? (float) $packageQuantities[(int) $it['id']]
+                $wantedPkgs = isset($packageQuantities[$sid])
+                    ? (float) $packageQuantities[$sid]
                     : 0.0;
                 // Whole packages only — no opening cartons in the warehouse transfer.
                 $wantedPkgs = floor(max(0, $wantedPkgs) + 1e-9);
@@ -352,7 +387,7 @@ class StoreProductModel extends Model
             }
             if (!$invoiceItems) {
                 $db->rollBack();
-                return ['ok' => false, 'invoice_id' => null, 'error' => 'Enter how many packages (cartons/bales) to transfer for at least one selected product.'];
+                return ['ok' => false, 'invoice_id' => null, 'error' => 'Enter how much to transfer (packages or kg/L) for at least one selected product.'];
             }
 
             $db->prepare('INSERT INTO store_invoices (tenant_id, invoice_number, invoice_to, total, notes, created_by) VALUES (?,?,?,?,?,?)')
@@ -706,6 +741,7 @@ class StoreProductModel extends Model
         $existing = $existing ?: $this->findExistingInventoryProduct($it);
         if ($existing) {
             $this->restockExistingInventoryProduct((int) $existing['id'], $it);
+            $this->applyQuantityDiscountsFromNotes((int) $existing['id'], (string) ($it['notes'] ?? ''));
             return (int) $existing['id'];
         }
         $res = $productModel->create([
@@ -736,7 +772,26 @@ class StoreProductModel extends Model
         if (!$res['ok']) {
             throw new \RuntimeException('Could not create inventory product: ' . json_encode($res['errors']));
         }
-        return (int) $res['id'];
+        $productId = (int) $res['id'];
+        $this->applyQuantityDiscountsFromNotes($productId, (string) ($it['notes'] ?? ''));
+        return $productId;
+    }
+
+    /** Apply [QDISC]{...} quantity-discount tiers stored on store product notes. */
+    private function applyQuantityDiscountsFromNotes(int $productId, string $notes): void
+    {
+        if ($productId <= 0 || $notes === '' || strpos($notes, '[QDISC]') === false) {
+            return;
+        }
+        if (!preg_match('/\[QDISC\](\{.*\})\s*$/s', $notes, $m)) {
+            return;
+        }
+        $payload = json_decode($m[1], true);
+        $tiers = is_array($payload['quantity_discounts'] ?? null) ? $payload['quantity_discounts'] : [];
+        if (!$tiers) {
+            return;
+        }
+        (new PriceTierModel($this->db))->replaceForProduct($productId, $tiers);
     }
 
     private function restockExistingInventoryProduct(int $productId, array $it): void
@@ -881,6 +936,11 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_products', 'offer_starts_at', "ALTER TABLE `store_products` ADD COLUMN `offer_starts_at` DATETIME NULL AFTER `offer_price`");
         $this->ensureColumn('store_products', 'offer_ends_at', "ALTER TABLE `store_products` ADD COLUMN `offer_ends_at` DATETIME NULL AFTER `offer_starts_at`");
         $this->ensureColumn('store_products', 'image_path', "ALTER TABLE `store_products` ADD COLUMN `image_path` VARCHAR(255) NULL AFTER `offer_ends_at`");
+        // Quantity-discount JSON ([QDISC]...) needs room beyond VARCHAR(255).
+        try {
+            $this->db->exec('ALTER TABLE store_products MODIFY COLUMN notes TEXT NULL');
+        } catch (\PDOException $ignored) {
+        }
         $this->db->exec(
             "CREATE TABLE IF NOT EXISTS store_invoices (
                 id INT AUTO_INCREMENT PRIMARY KEY,

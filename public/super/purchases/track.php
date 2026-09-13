@@ -103,6 +103,7 @@ ob_start();
         <thead>
           <tr class="text-muted small text-uppercase">
             <th>Date</th>
+            <th>Products</th>
             <th>Supplier / shop</th>
             <th>Receipt</th>
             <th class="text-end">Items</th>
@@ -116,9 +117,11 @@ ob_start();
           <?php foreach ($rows as $r):
               $date = $r['purchase_date'] ?: date('Y-m-d', strtotime($r['created_at']));
               $shop = $r['shop_name'] ?: ($r['supplier_name'] ?: '—');
+              $names = trim((string) ($r['product_names'] ?? ''));
           ?>
           <tr>
             <td class="small"><?php echo htmlspecialchars(date('j M Y', strtotime($date))); ?></td>
+            <td class="fw-semibold small"><?php echo $names !== '' ? htmlspecialchars($names) : '<span class="text-muted">—</span>'; ?></td>
             <td class="fw-semibold small"><?php echo htmlspecialchars($shop); ?></td>
             <td class="small">
               <?php echo htmlspecialchars($r['receipt_number'] ?: '—'); ?>

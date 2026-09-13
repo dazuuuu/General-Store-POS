@@ -51,6 +51,7 @@ $tenantRow = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: 
 $vatRate = (float) ($tenantRow['vat_rate'] ?? 0);
 $vatInclusive = (int) ($tenantRow['vat_inclusive'] ?? 1) === 1;
 $products   = $P->sellable();
+$productTiers = (new Models\PriceTierModel($pdo))->forProducts(array_map(static fn($p) => (int) $p['id'], $products));
 $categories = $C->all(['type' => 'product'], 'name ASC');
 if (!$categories) { $categories = $C->all(['type' => 'subject'], 'name ASC'); }
 $brands     = $BA->all(['type' => 'brand'], 'name ASC');
@@ -363,6 +364,7 @@ ob_start();
               $faulty > 0 ? ('faulty ' . rtrim(rtrim(number_format($faulty, 2), '0'), '.')) : null,
           ]));
           $label = $p['name'] . ($sub ? " ({$sub})" : '');
+          $tiersJson = json_encode($productTiers[(int) $p['id']] ?? [], JSON_UNESCAPED_UNICODE);
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
              data-price="<?php echo $price; ?>" data-wholesale="<?php echo $wholesale; ?>"
@@ -373,6 +375,7 @@ ob_start();
              data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
              data-pack-price="<?php echo $packPrice; ?>"
              data-retail-pack-price="<?php echo $retailPackPrice; ?>"
+             data-tiers="<?php echo htmlspecialchars($tiersJson ?: '[]', ENT_QUOTES); ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -1156,6 +1159,8 @@ var PRODUCTS = {};
 var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
     var img = el.querySelector('.pos-card-img img');
+    var tiers = [];
+    try { tiers = JSON.parse(el.dataset.tiers || '[]') || []; } catch (e) { tiers = []; }
     PRODUCTS[el.dataset.id] = {
         name: el.dataset.name,
         price: parseFloat(el.dataset.price),
@@ -1168,6 +1173,7 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         packPrice: parseFloat(el.dataset.packPrice) || 0,
         retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
         barcode: el.dataset.barcode || '',
+        tiers: tiers,
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
