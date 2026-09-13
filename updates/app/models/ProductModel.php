@@ -471,6 +471,7 @@ class ProductModel extends Model
             'retail_pack_price' => "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`",
             'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `retail_pack_price`",
             'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
+            'tax_rate' => "ALTER TABLE `products` ADD COLUMN `tax_rate` DECIMAL(5,2) NULL AFTER `retail_price`",
         ];
 
         foreach ($checks as $column => $sql) {

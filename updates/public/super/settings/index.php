@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'loyalty_points_per_kes'  => max(0, round((float) ($_POST['loyalty_points_per_kes'] ?? 1), 2)),
         'loyalty_kes_per_point'   => max(0, round((float) ($_POST['loyalty_kes_per_point'] ?? 0.01), 4)),
         'low_stock_alert_enabled' => !empty($_POST['low_stock_alert_enabled']) ? 1 : 0,
+        'product_commission_enabled' => !empty($_POST['product_commission_enabled']) ? 1 : 0,
     ];
 
     if (!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])) {
@@ -210,6 +211,12 @@ ob_start();
             <input class="form-check-input" type="checkbox" name="low_stock_alert_enabled" value="1" id="lowStock"
                    <?php echo !isset($__tenant['low_stock_alert_enabled']) || !empty($__tenant['low_stock_alert_enabled']) ? 'checked' : ''; ?>>
             <label class="form-check-label" for="lowStock">Enable low stock alerts</label>
+          </div>
+          <div class="mb-3 form-check border rounded p-3 ps-5 bg-light">
+            <input class="form-check-input" type="checkbox" name="product_commission_enabled" value="1" id="productCommission"
+                   <?php echo !empty($__tenant['product_commission_enabled']) ? 'checked' : ''; ?>>
+            <label class="form-check-label fw-semibold" for="productCommission">Allow inventory sales with staff commission</label>
+            <div class="form-text">At POS, staff may raise a product's selling price but can never go below the calculated/current price. The extra amount is recorded as their commission.</div>
           </div>
           <div class="mb-4">
             <label class="form-label fw-semibold">Logo</label>

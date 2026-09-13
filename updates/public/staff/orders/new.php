@@ -481,6 +481,7 @@ ob_start();
 <script src="<?php echo htmlspecialchars(public_url('assets/js/pos-pack-cart.js')); ?>"></script>
 <script>
 var PC = window.PosPackCart;
+var PRODUCT_COMMISSION_ENABLED = <?php echo !empty($tenant['product_commission_enabled']) ? 'true' : 'false'; ?>;
 var PRODUCTS = {};
 var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
@@ -694,6 +695,12 @@ function render() {
         if ((c.wholesale || 0) > 0) {
             rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
         }
+        if (PRODUCT_COMMISSION_ENABLED && (c.retail || 0) > 0) {
+            rows += '<label class="pos-dual-row"><span class="pos-dual-label">Commission selling price'
+              + ' <span class="text-muted">(minimum ' + money(p.price) + ')</span></span>'
+              + '<input type="number" step="0.01" min="' + p.price + '" class="form-control form-control-sm"'
+              + ' style="max-width:130px;" data-commission-price="' + id + '" value="' + (c.customUnitPrice || p.price) + '"></label>';
+        }
         var line = document.createElement('div');
         line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML =
@@ -766,6 +773,16 @@ document.getElementById('cartRows').addEventListener('change', function (e) {
     if (input) syncTypedQty(input);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
+    var commissionInput = e.target.closest('[data-commission-price]');
+    if (commissionInput) {
+        var commissionId = commissionInput.dataset.commissionPrice;
+        var product = PRODUCTS[commissionId];
+        var entered = parseFloat(commissionInput.value);
+        ensureCart(commissionId).customUnitPrice = product && entered >= product.price ? entered : null;
+        document.getElementById('cartInput').value = JSON.stringify(PC.serialize(cart, PRODUCTS));
+        updateTotals();
+        return;
+    }
     var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
     if (!input) return;
     var info = qtyInputField(input);

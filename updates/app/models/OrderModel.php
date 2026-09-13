@@ -397,10 +397,17 @@ class OrderModel extends Model
             $sel = $db->prepare("SELECT id, name, selling_price, retail_price, quantity, unit FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE");
         }
         $insItem = $db->prepare(
-            'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, price_type, quantity, line_total, added_by)
-             VALUES (?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
         $dec = $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
+        $commissionEnabled = false;
+        try {
+            $setting = $db->prepare('SELECT product_commission_enabled FROM tenants WHERE id = ? LIMIT 1');
+            $setting->execute([$tid]);
+            $commissionEnabled = (bool) $setting->fetchColumn();
+        } catch (\Throwable $ignored) {
+        }
 
         foreach ($items as $it) {
             $pid = (int) $it['product_id'];
@@ -423,8 +430,19 @@ class OrderModel extends Model
             }
             $lineSaleType = $this->normalizePriceType($it['price_type'] ?? $saleType);
             $lineTotal = \Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
-            $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
-            if ($unitPrice <= 0) { $unitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($unitPrice * $qty, 2); }
+            $baseUnitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
+            if ($baseUnitPrice <= 0) { $baseUnitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($baseUnitPrice * $qty, 2); }
+            $unitPrice = $baseUnitPrice;
+            $commission = 0.0;
+            if ($commissionEnabled && ($it['unit_price'] ?? '') !== '') {
+                $requestedPrice = round((float) $it['unit_price'], 2);
+                if ($requestedPrice + 0.0001 < $baseUnitPrice) {
+                    return ['ok' => false, 'errors' => ['_' => "{$p['name']} cannot be sold below KES " . number_format($baseUnitPrice, 2) . '.']];
+                }
+                $unitPrice = $requestedPrice;
+                $commission = round(($unitPrice - $baseUnitPrice) * $qty, 2);
+                $lineTotal = round($unitPrice * $qty, 2);
+            }
             if ($enforceCreditLimit && isset($p['credit_limit']) && $p['credit_limit'] !== null && $p['credit_limit'] !== '') {
                 $limit = max((float) $p['credit_limit'], $creditOverride);
                 if ($limit > 0 && $lineTotal > $limit + 0.0001) {
@@ -432,7 +450,7 @@ class OrderModel extends Model
                 }
             }
 
-            $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $lineSaleType, $qty, $lineTotal, $staffId]);
+            $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
             $dec->execute([$qty, $pid, $tid, $qty]);
             if ($dec->rowCount() !== 1) {
                 return ['ok' => false, 'errors' => ['_' => "Stock changed for {$p['name']} while saving. Please try again."]];
@@ -1126,6 +1144,8 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'customer_id', "ALTER TABLE orders ADD COLUMN customer_id INT NULL AFTER customer_email");
         $this->ensureColumn('orders', 'sale_type', "ALTER TABLE orders ADD COLUMN sale_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER channel");
         $this->ensureColumn('order_items', 'price_type', "ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price");
+        $this->ensureColumn('order_items', 'base_unit_price', "ALTER TABLE order_items ADD COLUMN base_unit_price DECIMAL(12,2) NULL AFTER unit_price");
+        $this->ensureColumn('order_items', 'commission_amount', "ALTER TABLE order_items ADD COLUMN commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER base_unit_price");
         $this->widenPriceTypeColumn('order_items');
         $this->ensureColumn('orders', 'vat_rate', "ALTER TABLE orders ADD COLUMN vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
         $this->ensureColumn('orders', 'additional_charges', "ALTER TABLE orders ADD COLUMN additional_charges DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");

@@ -1,6 +1,6 @@
 (function (global) {
     function buckets() {
-        return { retail: 0, retailPack: 0, wholesale: 0 };
+        return { retail: 0, retailPack: 0, wholesale: 0, customUnitPrice: null };
     }
     function hasRetailPack(p) {
         return !!(p && p.packUnit && p.unitsPerPack > 1 && p.retailPackPrice > 0);
@@ -93,7 +93,10 @@
         return true;
     }
     function lineTotal(p, c) {
-        var total = retailLineTotal(p, c.retail || 0);
+        var retailQty = c.retail || 0;
+        var total = retailQty > 0 && parseFloat(c.customUnitPrice) >= (p.price || 0)
+            ? Math.round(retailQty * parseFloat(c.customUnitPrice) * 100) / 100
+            : retailLineTotal(p, retailQty);
         if ((c.retailPack || 0) > 0 && hasRetailPack(p)) {
             var packPieces = stockFromPacks(p, c.retailPack);
             total += applyTiersTotal(p, packPieces, (c.retailPack || 0) * productPrice(p, 'retail_pack'));
@@ -112,7 +115,9 @@
             var p = products[id], c = cart[id];
             if (!p || !c) return;
             if ((c.retail || 0) > 0) {
-                out.push({ product_id: parseInt(id, 10), quantity: c.retail, price_type: 'retail' });
+                var retailLine = { product_id: parseInt(id, 10), quantity: c.retail, price_type: 'retail' };
+                if (parseFloat(c.customUnitPrice) > 0) retailLine.unit_price = parseFloat(c.customUnitPrice);
+                out.push(retailLine);
             }
             if ((c.retailPack || 0) > 0 && hasRetailPack(p)) {
                 out.push({
