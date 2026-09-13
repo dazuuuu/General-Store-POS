@@ -91,7 +91,6 @@ try {
     <a class="t-sublink <?php echo $menuOn('/inventory'); ?>" href="<?php echo public_url('super/inventory/'); ?>">Shop Inventory</a>
     <?php if(TenantFeatures::enabled('store')):?><a class="t-sublink <?php echo $menuOn('/store'); ?>" href="<?php echo public_url('super/store/'); ?>">Store Warehouse</a><?php endif;?>
     <?php if(TenantFeatures::enabled('restaurant_menu')):?><a class="t-sublink <?php echo $menuOn('/menu'); ?>" href="<?php echo public_url('super/menu/'); ?>">Restaurant Menu</a><?php endif;?>
-    <?php if(TenantFeatures::enabled('serials')):?><a class="t-sublink <?php echo $menuOn('/serials'); ?>" href="<?php echo public_url('super/serials/'); ?>">Serial Numbers</a><?php endif;?>
     <?php if(TenantFeatures::enabled('purchases')):?>
     <div class="t-subsection"><i class="fas fa-cart-shopping me-1"></i>Purchases</div>
     <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/new'); ?>" href="<?php echo public_url('super/purchases/new.php'); ?>">Record purchase</a>

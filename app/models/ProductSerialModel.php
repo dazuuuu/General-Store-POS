@@ -4,18 +4,23 @@ class ProductSerialModel extends Model
 {
     protected string $table='product_serials';
     public function __construct(?\PDO $db=null){parent::__construct($db);$this->ensureSchema();}
+    public static function parse(string $text): array
+    {
+        return array_values(array_unique(array_filter(array_map('trim',preg_split('/[\\r\\n,]+/',$text)))));
+    }
     public function add(int $productId,string $text,bool $increaseStock=true): array
     {
-        $serials=array_values(array_unique(array_filter(array_map('trim',preg_split('/[\\r\\n,]+/',$text)))));
+        $serials=self::parse($text);
         if(!$serials)return ['ok'=>false,'count'=>0,'error'=>'Enter at least one serial number or IMEI.'];
         $tid=\TenantContext::tenantId();
-        try{$this->db->beginTransaction();$p=$this->db->prepare('SELECT id FROM products WHERE id=? AND tenant_id=? FOR UPDATE');$p->execute([$productId,$tid]);if(!$p->fetchColumn())throw new \RuntimeException('Product not found.');
+        $ownsTransaction=!$this->db->inTransaction();
+        try{if($ownsTransaction)$this->db->beginTransaction();$p=$this->db->prepare('SELECT id,is_menu_item FROM products WHERE id=? AND tenant_id=? FOR UPDATE');$p->execute([$productId,$tid]);$product=$p->fetch();if(!$product)throw new \RuntimeException('Product not found.');if(!empty($product['is_menu_item']))throw new \RuntimeException('Serial numbers apply to inventory products, not restaurant menu items.');
           $ins=$this->db->prepare("INSERT INTO product_serials(tenant_id,product_id,serial_number,status) VALUES(?,?,?,'in_stock')");
-          $count=0;foreach($serials as $serial){try{$ins->execute([$tid,$productId,$serial]);$count++;}catch(\PDOException $e){if($e->getCode()!=='23000')throw $e;}}
+          $count=0;foreach($serials as $serial){try{$ins->execute([$tid,$productId,$serial]);$count++;}catch(\PDOException $e){if($e->getCode()==='23000')throw new \RuntimeException('Serial number "'.$serial.'" is already recorded.');throw $e;}}
           if(!$count)throw new \RuntimeException('Those serial numbers are already recorded.');
           $this->db->prepare('UPDATE products SET serial_tracking=1,quantity=quantity+? WHERE id=? AND tenant_id=?')->execute([$increaseStock?$count:0,$productId,$tid]);
-          $this->db->commit();return ['ok'=>true,'count'=>$count,'error'=>null];
-        }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();return ['ok'=>false,'count'=>0,'error'=>$e->getMessage()];}
+          if($ownsTransaction)$this->db->commit();return ['ok'=>true,'count'=>$count,'error'=>null];
+        }catch(\Throwable $e){if($ownsTransaction&&$this->db->inTransaction())$this->db->rollBack();return ['ok'=>false,'count'=>0,'error'=>$e->getMessage()];}
     }
     public function forProduct(int $productId): array {$st=$this->db->prepare('SELECT * FROM product_serials WHERE tenant_id=? AND product_id=? ORDER BY id DESC');$st->execute([\TenantContext::tenantId(),$productId]);return $st->fetchAll();}
     private function ensureSchema(): void
