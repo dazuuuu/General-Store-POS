@@ -1601,9 +1601,11 @@ class OrderModel extends Model
             "SELECT oi.id, oi.order_id, oi.product_name, oi.quantity, oi.line_total,
                     oi.product_id, oi.price_type, oi.unit_price,
                     p.quantity AS stock_left, p.unit AS product_unit,
-                    p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
+                    p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
+                    p.category_id, c.name AS category_name
                FROM order_items oi
           LEFT JOIN products p ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id
+          LEFT JOIN categories c ON c.id = p.category_id AND c.tenant_id = oi.tenant_id
               WHERE oi.tenant_id = ? AND oi.order_id IN ($in) ORDER BY oi.id ASC"
         );
         $stmt->execute(array_merge([$tid], $orderIds));
@@ -1626,6 +1628,8 @@ class OrderModel extends Model
                 'pack_unit' => $r['pack_unit'] ?? '',
                 'pack_price' => $r['pack_price'] ?? null,
                 'retail_pack_price' => $r['retail_pack_price'] ?? null,
+                'category_id' => (int) ($r['category_id'] ?? 0),
+                'category_name' => $r['category_name'] ?? '',
             ];
         }
         return $out;
