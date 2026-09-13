@@ -139,24 +139,21 @@ ob_start();
 <div class="row g-3 mb-4">
   <?php
   $summaryCards = [
-      ['Today sales', (string) (int) ($todaySum['count'] ?? 0), 'fa-receipt', ''],
-      ['Today revenue', $currency . ' ' . number_format((float) ($todaySum['revenue'] ?? 0), 0), 'fa-coins', 'text-primary'],
-      ['7-day revenue', $currency . ' ' . number_format((float) ($weekSum['revenue'] ?? 0), 0), 'fa-chart-line', 'text-primary'],
-      ['7-day net profit', $profitAvailable ? $currency . ' ' . number_format($profitAfterLoss, 0) : 'Unavailable', 'fa-arrow-trend-up', $profitAfterLoss < 0 ? 'text-danger' : 'text-success'],
-      ['Credit owed', $currency . ' ' . number_format($dashCreditOwed, 0), 'fa-file-invoice-dollar', $dashCreditOwed > 0 ? 'text-warning' : ''],
-      ['Low stock', (string) count($lowStock), 'fa-triangle-exclamation', $lowStock ? 'text-danger' : 'text-success'],
-      ['Open invoices', (string) count($openTabs), 'fa-file-invoice', ''],
-      ['Staff accounts', (string) count($staffList), 'fa-users', ''],
+      ['Today sales', (string) (int) ($todaySum['count'] ?? 0), ''],
+      ['Today revenue', $currency . ' ' . number_format((float) ($todaySum['revenue'] ?? 0), 0), 'text-primary'],
+      ['7-day revenue', $currency . ' ' . number_format((float) ($weekSum['revenue'] ?? 0), 0), 'text-primary'],
+      ['7-day net profit', $profitAvailable ? $currency . ' ' . number_format($profitAfterLoss, 0) : 'Unavailable', $profitAfterLoss < 0 ? 'text-danger' : 'text-success'],
+      ['Credit owed', $currency . ' ' . number_format($dashCreditOwed, 0), $dashCreditOwed > 0 ? 'text-warning' : ''],
+      ['Low stock', (string) count($lowStock), $lowStock ? 'text-danger' : 'text-success'],
+      ['Open invoices', (string) count($openTabs), ''],
+      ['Staff accounts', (string) count($staffList), ''],
   ];
-  foreach ($summaryCards as [$label, $value, $cardIcon, $valueClass]):
+  foreach ($summaryCards as [$label, $value, $valueClass]):
   ?>
     <div class="col-6 col-xl-3">
       <div class="card border-0 shadow-sm h-100" style="border-radius:12px;">
         <div class="card-body p-3">
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <span class="text-muted small text-uppercase fw-semibold"><?php echo htmlspecialchars($label); ?></span>
-            <i class="fas <?php echo $cardIcon; ?> text-muted"></i>
-          </div>
+          <div class="text-muted small text-uppercase fw-semibold mb-2"><?php echo htmlspecialchars($label); ?></div>
           <div class="h5 mb-0 fw-bold <?php echo $valueClass; ?>"><?php echo htmlspecialchars($value); ?></div>
         </div>
       </div>
