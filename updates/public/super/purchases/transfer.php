@@ -26,11 +26,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $selections[$id] = is_array($lines[$id] ?? null) ? $lines[$id] : [];
     }
-    $res = $PUR->transferToStore($selections, (int) TenantContext::userId());
+    $res = $PUR->transferSelected($selections, (int) TenantContext::userId());
     if ($res['ok']) {
         $_SESSION['flash']['success'] = $res['created'] . ' item' . ($res['created'] === 1 ? '' : 's')
-            . ' moved to Store warehouse. Generate a Store transfer invoice when ready for shop Inventory.';
-        header('Location: ' . $storeUrl);
+            . ' transferred to the destination selected on each purchase.';
+        header('Location: ' . public_url('super/inventory/'));
         exit;
     }
     $error = $res['error'] ?? 'Transfer failed.';
@@ -43,8 +43,8 @@ ob_start();
 ?>
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
   <div>
-    <h1 class="h5 fw-bold mb-1">Transfer purchases → Store</h1>
-    <p class="text-muted small mb-0">Move all or part of a purchase into Store (e.g. 2,000 kg of 10,000 kg). Set optional sell prices and quantity discounts (buy ≥ 10 kg → KES 100 off, or cheaper unit price). Then invoice from Store into shop Inventory for POS.</p>
+    <h1 class="h5 fw-bold mb-1">Transfer purchases</h1>
+    <p class="text-muted small mb-0">Move all or part of a purchase. It goes directly to Shop Inventory unless Store Warehouse was selected while recording the purchase.</p>
   </div>
   <a class="btn btn-sm btn-outline-secondary" href="<?php echo $base; ?>">Purchases</a>
 </div>
@@ -102,6 +102,9 @@ ob_start();
           $shop = $it['shop_name'] ?: ($it['supplier_name'] ?: '—');
           $isContinuous = Models\ProductModel::isContinuousUnit($innerUnit);
       ?>
+      <div class="small fw-semibold mb-1 text-<?php echo ($it['transfer_destination']??'shop')==='store'?'warning':'success';?>">
+        Destination: <?php echo ($it['transfer_destination']??'shop')==='store'?'Store Warehouse':'Shop Inventory';?>
+      </div>
       <div class="border rounded mb-3 p-3 transfer-row" style="border-color:#e2e8f0!important;" data-id="<?php echo $id; ?>"
            data-pkg-buy="<?php echo htmlspecialchars((string) $pkgBuy); ?>"
            data-unit-buy="<?php echo htmlspecialchars((string) $unitBuy); ?>"

@@ -785,6 +785,16 @@ class StoreProductModel extends Model
         return $productId;
     }
 
+    /** Reuse the Store→Inventory product matching logic for direct purchase intake. */
+    public function upsertDirectInventory(ProductModel $productModel, array $item, array $tiers = []): int
+    {
+        if ($tiers) {
+            $notes = trim((string)($item['notes'] ?? ''));
+            $item['notes'] = $notes . ($notes !== '' ? "\n" : '') . '[QDISC]' . json_encode(['quantity_discounts'=>$tiers]);
+        }
+        return $this->transferOneToInventory($productModel, $item);
+    }
+
     /** Apply [QDISC]{...} quantity-discount tiers stored on store product notes. */
     private function applyQuantityDiscountsFromNotes(int $productId, string $notes): void
     {

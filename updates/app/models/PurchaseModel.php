@@ -70,8 +70,8 @@ class PurchaseModel extends Model
             $this->db->beginTransaction();
             $this->db->prepare(
                 'INSERT INTO purchases
-                    (tenant_id, supplier_id, shop_name, receipt_number, receipt_image_path, purchase_date, notes, staff_id, status)
-                 VALUES (?,?,?,?,?,?,?,?,?)'
+                    (tenant_id, supplier_id, shop_name, receipt_number, receipt_image_path, purchase_date, notes, staff_id, transfer_destination, status)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)'
             )->execute([
                 $tid,
                 $supplierId > 0 ? $supplierId : null,
@@ -81,6 +81,7 @@ class PurchaseModel extends Model
                 $this->dateOrNull($header['purchase_date'] ?? null),
                 $this->nullIfBlank($header['notes'] ?? null),
                 $staffId > 0 ? $staffId : null,
+                ($header['transfer_destination'] ?? '') === 'store' ? 'store' : 'shop',
                 'recorded',
             ]);
             $purchaseId = (int) $this->db->lastInsertId();
@@ -252,7 +253,7 @@ class PurchaseModel extends Model
             $params[] = $supplierId;
         }
 
-        $sql = "SELECT pi.*, p.shop_name, p.receipt_number, p.purchase_date, p.created_at AS purchase_created_at,
+        $sql = "SELECT pi.*, p.shop_name, p.receipt_number, p.purchase_date, p.transfer_destination, p.created_at AS purchase_created_at,
                        p.supplier_id, s.name AS supplier_name, c.name AS category_name, br.name AS brand_name
                   FROM purchase_items pi
                   JOIN purchases p ON p.id = pi.purchase_id AND p.tenant_id = pi.tenant_id
@@ -438,6 +439,69 @@ class PurchaseModel extends Model
             error_log('PurchaseModel::transferToStore failed: ' . $e->getMessage());
             return ['ok' => false, 'created' => 0, 'error' => 'Could not transfer purchases to Store. ' . $e->getMessage()];
         }
+    }
+
+    /** Route each purchase according to the destination chosen while recording it. */
+    public function transferSelected(array $selections, int $staffId): array
+    {
+        $ids=array_values(array_unique(array_filter(array_map('intval',array_keys($selections)))));
+        if(!$ids)return ['ok'=>false,'created'=>0,'error'=>'Select at least one purchase item to transfer.'];
+        $in=implode(',',array_fill(0,count($ids),'?'));
+        $st=$this->db->prepare("SELECT pi.id,COALESCE(p.transfer_destination,'shop') destination FROM purchase_items pi JOIN purchases p ON p.id=pi.purchase_id AND p.tenant_id=pi.tenant_id WHERE pi.tenant_id=? AND pi.id IN ($in)");
+        $st->execute(array_merge([\TenantContext::tenantId()],$ids));
+        $groups=['store'=>[],'shop'=>[]];
+        foreach($st->fetchAll() as $row){$d=$row['destination']==='store'?'store':'shop';$groups[$d][(int)$row['id']]=$selections[(int)$row['id']];}
+        $created=0;
+        foreach($groups as $destination=>$lines){
+            if(!$lines)continue;
+            $res=$destination==='store'?$this->transferToStore($lines,$staffId):$this->transferToShop($lines,$staffId);
+            if(!$res['ok'])return $res;
+            $created+=(int)$res['created'];
+        }
+        return ['ok'=>true,'created'=>$created,'error'=>null];
+    }
+
+    /** Transfer purchase lines directly into Shop Inventory, skipping Store Warehouse. */
+    public function transferToShop(array $selections,int $staffId): array
+    {
+        $ids=array_values(array_unique(array_filter(array_map('intval',array_keys($selections)))));
+        if(!$ids)return ['ok'=>false,'created'=>0,'error'=>'Select at least one purchase item to transfer.'];
+        $tid=\TenantContext::tenantId();
+        // Constructors may perform compatibility DDL; run them before the transaction.
+        $store=new StoreProductModel($this->db);
+        $products=new ProductModel($this->db);
+        try{
+            $this->db->beginTransaction();
+            $in=implode(',',array_fill(0,count($ids),'?'));
+            $st=$this->db->prepare("SELECT pi.*,p.supplier_id,p.shop_name FROM purchase_items pi JOIN purchases p ON p.id=pi.purchase_id AND p.tenant_id=pi.tenant_id WHERE pi.tenant_id=? AND pi.status='pending' AND pi.id IN ($in) FOR UPDATE");
+            $st->execute(array_merge([$tid],$ids));$rows=$st->fetchAll();
+            $keep=$this->db->prepare("UPDATE purchase_items SET quantity=?,package_quantity=?,wholesale_price=COALESCE(?,wholesale_price),package_price=COALESCE(?,package_price),retail_price=COALESCE(?,retail_price),retail_pack_price=COALESCE(?,retail_pack_price) WHERE id=? AND tenant_id=? AND status='pending'");
+            $done=$this->db->prepare("UPDATE purchase_items SET status='transferred',product_id=?,store_product_id=NULL,quantity=?,package_quantity=?,wholesale_price=?,package_price=?,retail_price=?,retail_pack_price=?,transferred_at=NOW() WHERE id=? AND tenant_id=?");
+            $copy=$this->db->prepare("INSERT INTO purchase_items(tenant_id,purchase_id,name,category_id,brand_id,barcode,unit,package_unit,package_quantity,units_per_package,variant_label,colors,quantity,faulty_quantity,buying_price,package_buying_price,wholesale_price,package_price,retail_price,retail_pack_price,image_path,notes,status,product_id,transferred_at) SELECT tenant_id,purchase_id,name,category_id,brand_id,barcode,unit,package_unit,?,units_per_package,variant_label,colors,?,0,buying_price,package_buying_price,?,?,?,?,image_path,notes,'transferred',?,NOW() FROM purchase_items WHERE id=? AND tenant_id=?");
+            $created=0;$purchases=[];
+            foreach($rows as $row){
+                $id=(int)$row['id'];$over=(array)($selections[$id]??[]);$split=$this->splitTransferQuantity($row,$over);
+                if($split['transfer_qty']<=0)continue;
+                $item=$this->mergeTransferOverrides($row,$over,$split['transfer_qty'],$split['transfer_packages']);
+                $productId=$store->upsertDirectInventory($products,$item,$this->normalizeTierInput($over['tiers']??[]));
+                $vals=[
+                    $item['wholesale_price']!==''?(float)$item['wholesale_price']:null,
+                    $item['package_price']!==''?(float)$item['package_price']:null,
+                    $item['retail_price']!==''?(float)$item['retail_price']:null,
+                    $item['retail_pack_price']!==''?(float)$item['retail_pack_price']:null,
+                ];
+                if($split['remaining_qty']>0.0001){
+                    $keep->execute([$split['remaining_qty'],$split['remaining_packages'],$vals[0],$vals[1],$vals[2],$vals[3],$id,$tid]);
+                    $copy->execute([$item['package_quantity'],$item['quantity'],$vals[0],$vals[1],$vals[2],$vals[3],$productId,$id,$tid]);
+                }else{
+                    $done->execute([$productId,$item['quantity'],$item['package_quantity'],$vals[0],$vals[1],$vals[2],$vals[3],$id,$tid]);
+                }
+                $purchases[(int)$row['purchase_id']]=true;$created++;
+            }
+            if(!$created)throw new \RuntimeException('Enter how much to transfer for at least one item.');
+            foreach(array_keys($purchases) as $purchaseId)$this->refreshPurchaseStatus($purchaseId);
+            $this->db->commit();return ['ok'=>true,'created'=>$created,'error'=>null];
+        }catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();return ['ok'=>false,'created'=>0,'error'=>'Could not transfer purchases to Shop Inventory. '.$e->getMessage()];}
     }
 
     /** @return array{transfer_qty:float,transfer_packages:?float,remaining_qty:float,remaining_packages:?float} */
@@ -798,6 +862,7 @@ class PurchaseModel extends Model
                 purchase_date DATE NULL,
                 notes VARCHAR(255) NULL,
                 staff_id INT NULL,
+                transfer_destination ENUM('store','shop') NOT NULL DEFAULT 'shop',
                 status ENUM('recorded','partial','transferred') NOT NULL DEFAULT 'recorded',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 transferred_at DATETIME NULL,
@@ -807,6 +872,8 @@ class PurchaseModel extends Model
                 KEY idx_purchases_receipt (tenant_id, receipt_number)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        try{$this->db->query('SELECT transfer_destination FROM purchases LIMIT 1');}
+        catch(\PDOException $e){try{$this->db->exec("ALTER TABLE purchases ADD COLUMN transfer_destination ENUM('store','shop') NOT NULL DEFAULT 'shop' AFTER staff_id");}catch(\PDOException $ignored){}}
         $this->ensureTable('purchase_items', "
             CREATE TABLE IF NOT EXISTS purchase_items (
                 id INT AUTO_INCREMENT PRIMARY KEY,

@@ -141,9 +141,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purchase_date' => trim((string) ($_POST['purchase_date'] ?? '')),
                 'notes' => trim((string) ($_POST['notes'] ?? '')),
                 'staff_id' => TenantContext::userId(),
+                'transfer_destination' => ($_POST['transfer_destination'] ?? '') === 'store' ? 'store' : 'shop',
             ], $items);
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = 'Purchase saved. Transfer items to Store when you are ready to set sell prices.';
+                $_SESSION['flash']['success'] = 'Purchase saved. Transfer destination: ' . (($_POST['transfer_destination'] ?? '') === 'store' ? 'Store Warehouse' : 'Shop Inventory') . '.';
                 header('Location: ' . $base . 'view.php?id=' . (int) $res['purchase_id']);
                 exit;
             }
@@ -158,7 +159,7 @@ ob_start();
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
   <div>
     <h1 class="h5 fw-bold mb-1">Record purchase</h1>
-    <p class="text-muted small mb-0">Log what you bought from a supplier/shop. Attach a receipt photo or number. Items stay here until you transfer them to Store (then Inventory).</p>
+    <p class="text-muted small mb-0">Log what you bought and choose whether its transfer goes directly to Shop Inventory or first to Store Warehouse.</p>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-secondary" href="<?php echo $base; ?>">View purchases</a>
@@ -193,6 +194,16 @@ ob_start();
         <div class="col-md-2">
           <label class="form-label fw-semibold">Receipt photo</label>
           <input type="file" name="receipt_image" accept="image/*" class="form-control">
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold d-block">Where should this purchase go when transferred?</label>
+          <div class="btn-group" role="group">
+            <input class="btn-check" type="radio" name="transfer_destination" id="destShop" value="shop" <?php echo ($_POST['transfer_destination']??'shop')!=='store'?'checked':'';?>>
+            <label class="btn btn-outline-primary" for="destShop"><i class="fas fa-shop me-1"></i>Direct to Shop Inventory</label>
+            <input class="btn-check" type="radio" name="transfer_destination" id="destStore" value="store" <?php echo ($_POST['transfer_destination']??'')==='store'?'checked':'';?>>
+            <label class="btn btn-outline-primary" for="destStore"><i class="fas fa-warehouse me-1"></i>Store Warehouse first</label>
+          </div>
+          <div class="form-text">Choose Store only when you operate a separate warehouse/store.</div>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">Notes</label>
