@@ -57,6 +57,9 @@ class OrderModel extends Model
         }
 
         $db = $this->db;
+        // ReturnModel performs compatibility schema checks; construct it before
+        // opening the transaction so MySQL DDL cannot implicitly commit this edit.
+        $returnModel = new ReturnModel($db);
         try {
             $db->beginTransaction();
 
@@ -239,7 +242,7 @@ class OrderModel extends Model
                 $existingRows[(int) $row['id']] = $row;
             }
 
-            $returns = (new ReturnModel($db))->returnsForItems('order', array_keys($existingRows));
+            $returns = $returnModel->returnsForItems('order', array_keys($existingRows));
             $productSel = $db->prepare(
                 "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
                         quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
