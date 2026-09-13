@@ -1,0 +1,78 @@
+[01-Jul-2026 06:43:22 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:24 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:24 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:24 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:30 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:32 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:33 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:34 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:34 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:35 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:35 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:35 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23
+[01-Jul-2026 06:43:35 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1045] Access denied for user 'root'@'localhost' (using password: YES) in /home/dazutech/public_html/Kitale/app/helpers/Database.php:23
+Stack trace:
+#0 /home/dazutech/public_html/Kitale/app/helpers/Database.php(23): PDO->__construct('mysql:host=loca...', 'root', Object(SensitiveParameterValue), Array)
+#1 /home/dazutech/public_html/Kitale/public/super/dashboard/index.php(6): Database::pdo()
+#2 {main}
+  thrown in /home/dazutech/public_html/Kitale/app/helpers/Database.php on line 23

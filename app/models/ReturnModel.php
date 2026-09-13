@@ -42,6 +42,85 @@ class ReturnModel extends Model
         return $row ?: null;
     }
 
+    public function searchReceipts(string $query = '', int $limit = 8): array
+    {
+        $tid = \TenantContext::tenantId();
+        if ($tid === null) { return []; }
+        $q = trim($query);
+        $like = '%' . $q . '%';
+
+        $orderSql = "
+            SELECT 'order' AS source_type, o.id, o.receipt_number, o.table_name AS customer_name,
+                   o.total, o.created_at, u.username AS staff_name,
+                   (
+                       SELECT GROUP_CONCAT(oi.product_name SEPARATOR ', ')
+                         FROM order_items oi
+                        WHERE oi.tenant_id = o.tenant_id AND oi.order_id = o.id
+                   ) AS items_summary
+              FROM orders o
+         LEFT JOIN users u ON u.id = o.opened_by
+             WHERE o.tenant_id = ? AND o.status <> 'void'
+        ";
+        $orderParams = [$tid];
+        if ($q !== '') {
+            $orderSql .= " AND (
+                o.receipt_number LIKE ? OR o.table_name LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM order_items oi2
+                     WHERE oi2.tenant_id = o.tenant_id AND oi2.order_id = o.id AND oi2.product_name LIKE ?
+                )
+            )";
+            $orderParams[] = $like;
+            $orderParams[] = $like;
+            $orderParams[] = $like;
+        }
+        $orderSql .= " ORDER BY o.id DESC LIMIT " . (int)$limit;
+
+        $saleSql = "
+            SELECT 'sale' AS source_type, s.id, s.receipt_number, s.customer_name,
+                   s.total, s.created_at, u.username AS staff_name,
+                   (
+                       SELECT GROUP_CONCAT(si.product_name SEPARATOR ', ')
+                         FROM sale_items si
+                        WHERE si.tenant_id = s.tenant_id AND si.sale_id = s.id
+                   ) AS items_summary
+              FROM sales s
+         LEFT JOIN users u ON u.id = s.staff_id
+             WHERE s.tenant_id = ? AND s.status <> 'voided'
+        ";
+        $saleParams = [$tid];
+        if ($q !== '') {
+            $saleSql .= " AND (
+                s.receipt_number LIKE ? OR s.customer_name LIKE ? OR s.customer_phone LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM sale_items si2
+                     WHERE si2.tenant_id = s.tenant_id AND si2.sale_id = s.id AND si2.product_name LIKE ?
+                )
+            )";
+            $saleParams[] = $like;
+            $saleParams[] = $like;
+            $saleParams[] = $like;
+            $saleParams[] = $like;
+        }
+        $saleSql .= " ORDER BY s.id DESC LIMIT " . (int)$limit;
+
+        try {
+            $st1 = $this->db->prepare($orderSql);
+            $st1->execute($orderParams);
+            $orders = $st1->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+
+            $st2 = $this->db->prepare($saleSql);
+            $st2->execute($saleParams);
+            $sales = $st2->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+
+            $combined = array_merge($orders, $sales);
+            usort($combined, fn($a, $b) => strtotime($b['created_at']) <=> strtotime($a['created_at']));
+            return array_slice($combined, 0, $limit);
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
     public function receiptItems(string $sourceType, int $sourceId): array
     {
         $tid = \TenantContext::tenantId();

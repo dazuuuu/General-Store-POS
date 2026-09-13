@@ -49,14 +49,18 @@ ob_start();
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
   <div class="card-body p-4">
-    <form method="get" class="row g-2 align-items-end">
+    <form method="get" class="row g-2 align-items-end" id="receiptSearchForm">
       <div class="col-12 col-sm-8">
-        <label class="form-label small mb-1">Original receipt number</label>
-        <input type="text" name="receipt" class="form-control form-control-lg text-uppercase" placeholder="e.g. ORD-000123 or RCP-000123"
-               value="<?php echo htmlspecialchars($receiptQuery); ?>" autofocus>
+        <label class="form-label small mb-1 fw-semibold"><i class="fas fa-magnifying-glass me-1 text-primary"></i>Original receipt or customer / product</label>
+        <div class="position-relative">
+          <input type="text" name="receipt" id="receiptSearchInput" class="form-control form-control-lg text-uppercase" placeholder="Type receipt #, customer name, or product..."
+                 value="<?php echo htmlspecialchars($receiptQuery); ?>" autocomplete="off" autofocus>
+          <div id="receiptSuggestMenu" class="dropdown-menu shadow-lg border-0 w-100 mt-1 py-0" style="max-height:360px;overflow-y:auto;display:none;z-index:1060;border-radius:10px;"></div>
+        </div>
+        <div class="text-muted small mt-1" style="font-size:0.75rem;">Type receipt #, customer, or product to see live suggestions, then click or press Enter to autofill</div>
       </div>
       <div class="col-12 col-sm-4">
-        <button class="btn btn-primary btn-lg w-100"><i class="fas fa-magnifying-glass me-1"></i>Find sale</button>
+        <button class="btn btn-primary btn-lg w-100" id="receiptSearchBtn"><i class="fas fa-magnifying-glass me-1"></i>Find sale</button>
       </div>
     </form>
   </div>
@@ -190,6 +194,156 @@ document.querySelectorAll('.return-form').forEach(function (form) {
     }
   });
 });
+
+(function() {
+  var input = document.getElementById('receiptSearchInput');
+  var menu = document.getElementById('receiptSuggestMenu');
+  var form = document.getElementById('receiptSearchForm');
+  if (!input || !menu || !form) return;
+
+  var apiUrl = <?php echo json_encode(public_url('api/returns/search_receipts.php')); ?>;
+  var timer = null;
+  var activeIndex = -1;
+  var currentItems = [];
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  function renderMenu(items) {
+    currentItems = items || [];
+    activeIndex = -1;
+    menu.innerHTML = '';
+    if (!currentItems.length) {
+      menu.innerHTML = '<div class="px-3 py-3 text-muted small text-center"><i class="fas fa-circle-exclamation me-1"></i>No matching sales or orders found</div>';
+      menu.style.display = 'block';
+      return;
+    }
+
+    var header = document.createElement('div');
+    header.className = 'px-3 py-1 bg-light border-bottom text-muted small fw-semibold text-uppercase';
+    header.style.fontSize = '0.68rem';
+    header.textContent = 'Matching sales & credit tabs (' + currentItems.length + ')';
+    menu.appendChild(header);
+
+    currentItems.forEach(function(item, idx) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dropdown-item px-3 py-2 border-bottom d-flex justify-content-between align-items-start gap-2 text-wrap';
+      btn.style.cursor = 'pointer';
+      btn.dataset.index = idx;
+
+      var isOrder = item.source_type === 'order';
+      var badgeHtml = isOrder 
+        ? '<span class="badge bg-info-subtle text-info border border-info-subtle" style="font-size:0.68rem;">Credit Tab</span>'
+        : '<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.68rem;">Sale</span>';
+
+      btn.innerHTML = 
+        '<div class="flex-grow-1 text-start">' +
+          '<div class="d-flex align-items-center gap-2 flex-wrap mb-1">' +
+            '<span class="fw-bold text-primary font-monospace">' + escapeHtml(item.receipt_number) + '</span>' +
+            badgeHtml +
+            '<span class="fw-semibold text-dark">' + escapeHtml(item.customer_name) + '</span>' +
+          '</div>' +
+          '<div class="text-muted small" style="font-size:0.75rem;">' +
+            '<i class="fas fa-boxes-stacked me-1 text-secondary"></i>' + escapeHtml(item.items_summary) +
+          '</div>' +
+          '<div class="text-muted" style="font-size:0.7rem;margin-top:2px;">' +
+            escapeHtml(item.date_formatted) + (item.staff_name && item.staff_name !== '—' ? ' · by ' + escapeHtml(item.staff_name) : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="text-end text-nowrap ms-2">' +
+          '<div class="fw-bold text-dark" style="font-size:0.85rem;">KES ' + (item.total || 0).toLocaleString() + '</div>' +
+          '<span class="badge bg-primary-subtle text-primary border border-primary-subtle mt-1" style="font-size:0.68rem;"><i class="fas fa-check me-1"></i>Autofill</span>' +
+        '</div>';
+
+      btn.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        chooseItem(item);
+      });
+      menu.appendChild(btn);
+    });
+    menu.style.display = 'block';
+  }
+
+  function chooseItem(item) {
+    if (!item || !item.receipt_number) return;
+    input.value = item.receipt_number;
+    menu.style.display = 'none';
+    form.submit();
+  }
+
+  function updateActive() {
+    var buttons = menu.querySelectorAll('.dropdown-item');
+    buttons.forEach(function(b, idx) {
+      if (idx === activeIndex) {
+        b.classList.add('active');
+        b.scrollIntoView({ block: 'nearest' });
+      } else {
+        b.classList.remove('active');
+      }
+    });
+  }
+
+  function queryApi(val) {
+    clearTimeout(timer);
+    timer = setTimeout(function() {
+      fetch(apiUrl + '?q=' + encodeURIComponent(val))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          renderMenu(data.items || []);
+        })
+        .catch(function() {});
+    }, 160);
+  }
+
+  input.addEventListener('input', function() {
+    var q = input.value.trim();
+    if (!q) {
+      menu.style.display = 'none';
+      menu.innerHTML = '';
+      return;
+    }
+    queryApi(q);
+  });
+
+  input.addEventListener('focus', function() {
+    var q = input.value.trim();
+    if (q) {
+      queryApi(q);
+    }
+  });
+
+  input.addEventListener('keydown', function(e) {
+    var buttons = menu.querySelectorAll('.dropdown-item');
+    if (menu.style.display !== 'block' || !buttons.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIndex = (activeIndex + 1) % buttons.length;
+      updateActive();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = (activeIndex - 1 + buttons.length) % buttons.length;
+      updateActive();
+    } else if (e.key === 'Enter') {
+      if (activeIndex >= 0 && currentItems[activeIndex]) {
+        e.preventDefault();
+        chooseItem(currentItems[activeIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      menu.style.display = 'none';
+    }
+  });
+
+  input.addEventListener('blur', function() {
+    setTimeout(function() {
+      menu.style.display = 'none';
+    }, 200);
+  });
+})();
 </script>
 <?php
 $content = ob_get_clean();

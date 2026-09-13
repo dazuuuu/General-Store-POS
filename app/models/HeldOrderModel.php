@@ -87,6 +87,26 @@ class HeldOrderModel extends Model
         return $stmt->fetchAll();
     }
 
+    /** Held orders with preview item lists for tenant */
+    public function listWithItemsForTenant(): array
+    {
+        $list = $this->listForTenant();
+        if (!$list) { return []; }
+        $tid = \TenantContext::tenantId();
+        $stmt = $this->db->prepare('SELECT held_order_id, product_name, quantity, unit_price, price_type FROM held_order_items WHERE tenant_id = ? ORDER BY id ASC');
+        $stmt->execute([$tid]);
+        $all = $stmt->fetchAll();
+        $byOrder = [];
+        foreach ($all as $row) {
+            $byOrder[$row['held_order_id']][] = $row;
+        }
+        foreach ($list as &$h) {
+            $h['items'] = $byOrder[$h['id']] ?? [];
+        }
+        unset($h);
+        return $list;
+    }
+
     public function items(int $heldOrderId): array
     {
         $tid = \TenantContext::tenantId();

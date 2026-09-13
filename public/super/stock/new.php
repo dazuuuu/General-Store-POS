@@ -101,68 +101,52 @@ function stock_package_fields(array $row, array $units): array
 
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : 'store';
     $supplierName = trim($_POST['supplier'] ?? '');
     $supplierId = $supplierName !== '' ? (int) $SUP->findOrCreate($supplierName) : 0;
     $rows = $_POST['items'] ?? [];
 
-    if (!$error) {
-        $items = [];
-        foreach ($rows as $i => $row) {
-            $pkg = stock_package_fields($row, $units);
-            $title = trim($row['title'] ?? '');
-            $productChoice = trim($row['product_choice'] ?? '');
-            $hasContent = $title !== '' || $productChoice !== ''
-                || (float) ($row['package_quantity'] ?? 0) > 0
-                || (float) ($row['buying_price'] ?? 0) > 0;
-            if (!$hasContent) {
-                continue;
-            }
-            if ($productChoice === '' && $title === '') {
-                $error = 'Enter a product name for each filled row.';
-                break;
-            }
-            if ((float) ($row['package_quantity'] ?? 0) <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Enter how many packages (cartons/bales) you received.';
-                break;
-            }
-            if ((float) ($row['units_per_package'] ?? 0) <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Enter how many items are inside each package.';
-                break;
-            }
-            if (($pkg['package_buying_price'] ?? 0) <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Enter the buying price of each package.';
-                break;
-            }
-            if ($productChoice === '' && (float) ($row['selling_price'] ?? 0) <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Enter the retail price of a single item inside.';
-                break;
-            }
-            if ($productChoice === '' && ($pkg['package_price'] ?? 0) <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Enter the wholesale selling price of each package.';
-                break;
-            }
-            if ($productChoice === '' && ($pkg['retail_pack_price'] ?? 0) <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Enter the retail selling price of each package.';
-                break;
-            }
-            $qty = (float) $pkg['quantity'];
-            $faulty = (float) $pkg['faulty_quantity'];
-            if ($qty <= 0) {
-                $error = ($title !== '' ? $title . ': ' : '') . 'Packages × items inside must be greater than zero.';
-                break;
-            }
+    $items = [];
+    foreach ($rows as $i => $row) {
+        $title = trim($row['title'] ?? '');
+        $productChoice = trim($row['product_choice'] ?? '');
+        $packageQty = max(0, (float) ($row['package_quantity'] ?? 0));
+        $inside = max(0, (float) ($row['units_per_package'] ?? 0));
+        $directQty = max(0, (float) ($row['quantity'] ?? 0));
+        $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
+        $packageWholesale = max(0, (float) ($row['wholesale_price'] ?? 0));
+        $packageRetail = max(0, (float) ($row['retail_pack_price'] ?? 0));
+        $itemRetail = max(0, (float) ($row['selling_price'] ?? 0));
+        $barcode = trim((string) ($row['barcode'] ?? ''));
 
-            $remark = trim($row['remark'] ?? '');
-            $unit = $pkg['unit'];
-            $batchNotes = trim((string) ($_POST['notes'] ?? ''));
-            $lineNotes = $remark !== '' ? $remark : $batchNotes;
+        $hasContent = $title !== '' || $productChoice !== ''
+            || $packageQty > 0 || $directQty > 0 || $packageCost > 0
+            || $packageWholesale > 0 || $packageRetail > 0 || $itemRetail > 0
+            || $barcode !== '';
+        if (!$hasContent) {
+            continue;
+        }
 
-            if ($productChoice !== '') {
-                $existing = $P->find((int) $productChoice);
-                if (!$existing || (int) $existing['tenant_id'] !== (int) TenantContext::tenantId()) {
-                    $error = ($title !== '' ? $title . ': ' : '') . 'Matched inventory product was not found.';
-                    break;
-                }
+        if ($productChoice === '' && $title === '') {
+            $p = $itemRetail > 0 ? $itemRetail : ($packageRetail > 0 ? $packageRetail : ($packageCost > 0 ? $packageCost : 0));
+            $title = $p > 0 ? ('Product KES ' . number_format($p, 0)) : ('Item ' . date('j M H:i'));
+        }
+
+        $effectiveInside = $inside > 0 ? $inside : 1.0;
+        $qty = $directQty > 0 ? $directQty : ($packageQty > 0 ? round($packageQty * $effectiveInside, 2) : 0.0);
+        $faulty = max(0, (float) ($row['faulty_quantity'] ?? 0));
+        $unitBuying = ($packageCost > 0 && $effectiveInside > 0) ? round($packageCost / $effectiveInside, 2) : 0.0;
+        $unitWholesale = ($packageWholesale > 0 && $effectiveInside > 0) ? round($packageWholesale / $effectiveInside, 2) : 0.0;
+        $receiveUnit = trim((string) ($row['unit'] ?? '')) ?: 'carton';
+        $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
+
+        $remark = trim($row['remark'] ?? '');
+        $batchNotes = trim((string) ($_POST['notes'] ?? ''));
+        $lineNotes = $remark !== '' ? $remark : $batchNotes;
+
+        if ($productChoice !== '') {
+            $existing = $P->find((int) $productChoice);
+            if ($existing && (int) $existing['tenant_id'] === (int) TenantContext::tenantId()) {
                 $items[] = [
                     'product_id' => (int) $existing['id'],
                     'name' => $existing['name'],
@@ -170,19 +154,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'brand_id' => (int) ($existing['brand_id'] ?? 0),
                     'supplier_id' => $supplierId,
                     'barcode' => $existing['barcode'] ?? '',
-                    'unit' => $unit,
-                    'package_unit' => $pkg['package_unit'],
-                    'package_quantity' => $pkg['package_quantity'],
-                    'units_per_package' => $pkg['units_per_package'],
-                    'package_price' => $pkg['package_price'],
-                    'retail_pack_price' => ($pkg['retail_pack_price'] ?? 0) > 0 ? $pkg['retail_pack_price'] : ($existing['retail_pack_price'] ?? null),
-                    'package_buying_price' => $pkg['package_buying_price'],
+                    'unit' => $innerUnit,
+                    'package_unit' => $receiveUnit,
+                    'package_quantity' => $packageQty > 0 ? $packageQty : null,
+                    'units_per_package' => $effectiveInside,
+                    'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
+                    'retail_pack_price' => $packageRetail > 0 ? $packageRetail : ($existing['retail_pack_price'] ?? null),
+                    'package_buying_price' => $packageCost > 0 ? $packageCost : null,
                     'colors' => '',
                     'quantity' => $qty,
                     'faulty_quantity' => $faulty,
-                    'buying_price' => $pkg['buying_price'],
-                    'retail_price' => $existing['retail_price'] ?? $existing['selling_price'] ?? 0,
-                    'wholesale_price' => $pkg['wholesale_price'] !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? 0),
+                    'buying_price' => $unitBuying > 0 ? $unitBuying : (float)($existing['buying_price'] ?? 0),
+                    'retail_price' => $itemRetail > 0 ? $itemRetail : (float)($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
+                    'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : (float)($existing['wholesale_price'] ?? 0),
                     'offer_price' => '',
                     'offer_starts_at' => '',
                     'offer_ends_at' => '',
@@ -191,49 +175,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
                 continue;
             }
-
-            $title = trim($row['title'] ?? '');
-            if ($title === '') { continue; }
-
-            $img = stock_handle_image(stock_row_image_file((int) $i));
-            if (!$img['ok']) { $error = $title . ': ' . $img['error']; break; }
-
-            $items[] = [
-                'product_id' => 0,
-                'name' => $title,
-                'category_id' => (int) $C->findOrCreate($row['category'] ?? '', 'product'),
-                'brand_id' => (int) $BA->findOrCreate('brand', $row['brand'] ?? ''),
-                'supplier_id' => $supplierId,
-                'barcode' => trim($row['barcode'] ?? ''),
-                'unit' => $unit,
-                'package_unit' => $pkg['package_unit'],
-                'package_quantity' => $pkg['package_quantity'],
-                'units_per_package' => $pkg['units_per_package'],
-                'package_price' => $pkg['package_price'],
-                'retail_pack_price' => $pkg['retail_pack_price'],
-                'package_buying_price' => $pkg['package_buying_price'],
-                'colors' => '',
-                'quantity' => $qty,
-                'faulty_quantity' => $faulty,
-                'buying_price' => $pkg['buying_price'],
-                'retail_price' => $row['selling_price'] ?? 0,
-                'wholesale_price' => $pkg['wholesale_price'],
-                'offer_price' => $row['offer_price'] ?? '',
-                'offer_starts_at' => $row['offer_starts_at'] ?? '',
-                'offer_ends_at' => $row['offer_ends_at'] ?? '',
-                'image_path' => $img['path'] ?? '',
-                'notes' => $lineNotes,
-            ];
         }
 
-        if (!$error && !$items) {
-            $error = 'Add at least one product with a good (sellable) quantity.';
-        }
+        $img = stock_handle_image(stock_row_image_file((int) $i));
+        $imgPath = $img['ok'] ? ($img['path'] ?? '') : '';
 
-        if (!$error) {
+        $items[] = [
+            'product_id' => 0,
+            'name' => $title,
+            'category_id' => !empty($row['category']) ? (int) $C->findOrCreate($row['category'], 'product') : 0,
+            'brand_id' => !empty($row['brand']) ? (int) $BA->findOrCreate('brand', $row['brand']) : 0,
+            'supplier_id' => $supplierId,
+            'barcode' => $barcode,
+            'unit' => $innerUnit,
+            'package_unit' => $receiveUnit,
+            'package_quantity' => $packageQty > 0 ? $packageQty : null,
+            'units_per_package' => $effectiveInside,
+            'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
+            'retail_pack_price' => $packageRetail > 0 ? $packageRetail : null,
+            'package_buying_price' => $packageCost > 0 ? $packageCost : null,
+            'colors' => '',
+            'quantity' => $qty,
+            'faulty_quantity' => $faulty,
+            'buying_price' => $unitBuying,
+            'retail_price' => $itemRetail,
+            'wholesale_price' => $unitWholesale,
+            'offer_price' => $row['offer_price'] ?? '',
+            'offer_starts_at' => $row['offer_starts_at'] ?? '',
+            'offer_ends_at' => $row['offer_ends_at'] ?? '',
+            'image_path' => $imgPath,
+            'notes' => $lineNotes,
+        ];
+    }
+
+    if (!$items) {
+        $error = 'Please fill in at least one product name or price to record.';
+    } else {
+        if ($destination === 'shop') {
+            $savedCount = 0;
+            foreach ($items as $it) {
+                if (!empty($it['product_id'])) {
+                    $curr = $P->find((int) $it['product_id']);
+                    if ($curr) {
+                        $newQty = (float) $curr['quantity'] + (float) $it['quantity'];
+                        $P->edit((int) $curr['id'], array_merge($curr, [
+                            'quantity' => $newQty,
+                            'buying_price' => $it['buying_price'] > 0 ? $it['buying_price'] : ($curr['buying_price'] ?? 0),
+                            'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
+                            'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),
+                            'wholesale_price' => $it['wholesale_price'] > 0 ? $it['wholesale_price'] : ($curr['wholesale_price'] ?? 0),
+                        ]));
+                        $savedCount++;
+                    }
+                } else {
+                    $pRes = $P->create([
+                        'name' => $it['name'],
+                        'category_id' => $it['category_id'] ?: null,
+                        'brand_id' => $it['brand_id'] ?: null,
+                        'supplier_id' => $it['supplier_id'] ?: null,
+                        'barcode' => $it['barcode'] ?: null,
+                        'unit' => $it['unit'] ?: 'piece',
+                        'pack_unit' => $it['package_unit'] ?: 'carton',
+                        'pack_price' => $it['package_price'] ?: null,
+                        'retail_pack_price' => $it['retail_pack_price'] ?: null,
+                        'package_buying_price' => $it['package_buying_price'] ?: null,
+                        'units_per_pack' => $it['units_per_package'] ?: 1,
+                        'quantity' => $it['quantity'] ?: 0,
+                        'faulty_quantity' => $it['faulty_quantity'] ?: 0,
+                        'buying_price' => $it['buying_price'] ?: 0,
+                        'wholesale_price' => $it['wholesale_price'] ?: 0,
+                        'retail_price' => $it['retail_price'] ?: 0,
+                        'offer_price' => $it['offer_price'] ?: null,
+                        'offer_starts_at' => $it['offer_starts_at'] ?: null,
+                        'offer_ends_at' => $it['offer_ends_at'] ?: null,
+                        'image_path' => $it['image_path'] ?: null,
+                        'description' => $it['notes'] ?: null,
+                    ]);
+                    if ($pRes['ok']) {
+                        $savedCount++;
+                    }
+                }
+            }
+            $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';
+            header('Location: ' . public_url('super/inventory/'));
+            exit;
+        } else {
             $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' saved to Store (warehouse). Generate an internal transfer invoice to move them into shop Inventory.';
+                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' saved to Store (warehouse). Generate an internal transfer invoice anytime to move them into shop Inventory.';
                 header('Location: ' . public_url('super/store/'));
                 exit;
             }
@@ -242,7 +271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$page_title = 'Record products to Store';
+$page_title = 'Record Stock';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
@@ -250,8 +279,34 @@ ob_start();
 <form method="post" enctype="multipart/form-data" id="stockForm" novalidate>
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
-      <h2 class="h5 mb-3">Warehouse delivery (Store)</h2>
-      <p class="text-muted small mb-3">Products land in the <strong>Store warehouse</strong> first. Use <a href="<?php echo public_url('super/store/'); ?>">Store → Generate invoice</a> to transfer into shop Inventory for selling — no double entry.</p>
+      <h2 class="h5 mb-2">Record Destination</h2>
+      <p class="text-muted small mb-3">Choose where these products will be saved:</p>
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <label class="d-flex align-items-start p-3 border rounded cursor-pointer destination-card h-100" style="cursor:pointer;border-radius:10px;">
+            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" checked id="destStore">
+            <div>
+              <div class="fw-bold text-dark"><i class="fas fa-box-archive text-primary me-2"></i>Store (Warehouse)</div>
+              <div class="small text-muted mt-1">Products land in the Store warehouse awaiting transfer to shop via invoice.</div>
+            </div>
+          </label>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="d-flex align-items-start p-3 border rounded cursor-pointer destination-card h-100" style="cursor:pointer;border-radius:10px;">
+            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" id="destShop">
+            <div>
+              <div class="fw-bold text-dark"><i class="fas fa-store text-success me-2"></i>Shop (Active Inventory)</div>
+              <div class="small text-muted mt-1">Products appear directly in shop Inventory, available immediately for cashier counter sales.</div>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
+    <div class="card-body p-4">
+      <h2 class="h5 mb-3">Batch &amp; Supplier info <span class="text-muted fw-normal small">(optional)</span></h2>
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
@@ -271,7 +326,7 @@ ob_start();
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="h5 mb-0">Products received into Store</h2>
+        <h2 class="h5 mb-0" id="productsHeading">Products to record</h2>
         <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn"><i class="fas fa-plus me-1"></i>Add another product</button>
       </div>
       <div id="rows"></div>
@@ -288,7 +343,7 @@ ob_start();
     </div>
   </div>
 
-  <button class="btn btn-primary btn-lg"><i class="fas fa-boxes-stacked me-1"></i>Save products to Store warehouse</button>
+  <button class="btn btn-primary btn-lg" id="submitBtn"><i class="fas fa-boxes-stacked me-1"></i><span id="submitBtnText">Save products to Store warehouse</span></button>
 </form>
 
 <template id="rowTpl">
@@ -299,7 +354,7 @@ ob_start();
     </div>
     <div class="row g-2">
       <div class="col-12 col-sm-6">
-        <label class="form-label small mb-1">Product name</label>
+        <label class="form-label small mb-1">Product name <span class="text-muted">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="items[__I__][title]" class="form-control form-control-sm ta-input productTitle" data-field="title" placeholder="e.g. Yellow beans, Soft drink 500ml" autocomplete="off">
           <div class="ta-menu"></div>
@@ -308,7 +363,7 @@ ob_start();
         <div class="matchNote small mt-1" style="display:none;"></div>
       </div>
       <div class="col-12 col-sm-6">
-        <label class="form-label small mb-1"><i class="fas fa-barcode me-1"></i>Barcode <span class="text-muted">(optional — scan it)</span></label>
+        <label class="form-label small mb-1"><i class="fas fa-barcode me-1"></i>Barcode <span class="text-muted">(optional)</span></label>
         <input type="text" name="items[__I__][barcode]" class="form-control form-control-sm barcodeInput" placeholder="Scan or type a barcode" autocomplete="off">
         <div class="barcodeNote small mt-1" style="display:none;"></div>
       </div>
@@ -321,7 +376,7 @@ ob_start();
       </div>
 
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Category</label>
+        <label class="form-label small mb-1">Category <span class="text-muted">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="items[__I__][category]" class="form-control form-control-sm ta-input" data-field="category" placeholder="e.g. Cereals, Drinks" autocomplete="off">
           <div class="ta-menu"></div>
@@ -335,36 +390,36 @@ ob_start();
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Received as <span class="text-danger">*</span></label>
-        <select name="items[__I__][unit]" class="form-select form-select-sm unitSelect" required>
+        <label class="form-label small mb-1">Packaging unit <span class="text-muted">(optional)</span></label>
+        <select name="items[__I__][unit]" class="form-select form-select-sm unitSelect">
           <?php foreach (array_values(array_filter($units, fn($u) => $u !== 'piece')) as $u): ?>
-            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $u === 'carton' ? 'selected' : ''; ?>><?php echo htmlspecialchars($u); ?></option>
+            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $u === 'carton' ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($u)); ?></option>
           <?php endforeach; ?>
         </select>
       </div>
 
       <div class="col-12 mt-2 packageFields">
-        <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
-          <div class="small fw-semibold mb-2 text-danger">Package details (all required)</div>
+        <div class="border rounded p-2" style="border-color:#e2e8f0!important;background:#fafbfc;">
+          <div class="small fw-semibold mb-2 text-secondary"><i class="fas fa-boxes-stacked me-1"></i>Package &amp; Unit details <span class="fw-normal text-muted">(optional)</span></div>
           <div class="row g-2">
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1 packageQtyLabel">Number of packages <span class="text-danger">*</span></label>
-              <input type="number" step="0.01" min="0.01" name="items[__I__][package_quantity]" class="form-control form-control-sm packageQty" required placeholder="e.g. 20">
+              <label class="form-label small mb-1 packageQtyLabel">Number of cartons <span class="text-muted">(optional)</span></label>
+              <input type="number" step="0.01" min="0" name="items[__I__][package_quantity]" class="form-control form-control-sm packageQty" placeholder="e.g. 20">
             </div>
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1 unitsPerPackageLabel">Items inside each package <span class="text-danger">*</span></label>
-              <input type="number" step="0.01" min="0.01" name="items[__I__][units_per_package]" class="form-control form-control-sm unitsPerPackage" required placeholder="e.g. 12">
+              <label class="form-label small mb-1 unitsPerPackageLabel">Items inside each carton <span class="text-muted">(optional)</span></label>
+              <input type="number" step="0.01" min="0" name="items[__I__][units_per_package]" class="form-control form-control-sm unitsPerPackage" placeholder="e.g. 12">
             </div>
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1">Inside unit</label>
+              <label class="form-label small mb-1">Inside item unit <span class="text-muted">(optional)</span></label>
               <select name="items[__I__][inner_unit]" class="form-select form-select-sm">
                 <?php foreach ($units as $u): ?>
-                  <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
+                  <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars(ucfirst($u)); ?></option>
                 <?php endforeach; ?>
               </select>
             </div>
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1">Total items</label>
+              <label class="form-label small mb-1">Calculated pack items</label>
               <div class="form-control form-control-sm bg-light totalItems">0</div>
             </div>
           </div>
@@ -372,28 +427,28 @@ ob_start();
       </div>
 
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1 qtyLabel">Total sellable items</label>
-        <input type="number" step="0.01" min="0" name="items[__I__][quantity]" class="form-control form-control-sm qty" readonly placeholder="0">
+        <label class="form-label small mb-1 qtyLabel">Total sellable items <span class="text-muted">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="items[__I__][quantity]" class="form-control form-control-sm qty" placeholder="Auto or enter directly">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Faulty / broken packages</label>
+        <label class="form-label small mb-1">Faulty / broken items <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][faulty_quantity]" class="form-control form-control-sm" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1 buyingLabel">Buying price of the package <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="items[__I__][buying_price]" class="form-control form-control-sm buyingPrice" required placeholder="0">
+        <label class="form-label small mb-1 buyingLabel">Buying price per package <span class="text-muted">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="items[__I__][buying_price]" class="form-control form-control-sm buyingPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 wholesaleLabel">Selling price of the package (wholesale) <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" required placeholder="0">
+        <label class="form-label small mb-1 wholesaleLabel">Wholesale price per package <span class="text-muted">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 retailPackLabel">Selling price of the package (retail) <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="items[__I__][retail_pack_price]" class="form-control form-control-sm retailPackPrice" required placeholder="0">
+        <label class="form-label small mb-1 retailPackLabel">Retail price per package <span class="text-muted">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="items[__I__][retail_pack_price]" class="form-control form-control-sm retailPackPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 retailLabel">Selling price of items inside (retail) <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="items[__I__][selling_price]" class="form-control form-control-sm retailPrice" required placeholder="0">
+        <label class="form-label small mb-1 retailLabel">Retail price per single item <span class="text-muted">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="items[__I__][selling_price]" class="form-control form-control-sm retailPrice" placeholder="0">
       </div>
       <div class="col-12 mt-2 newProductFields">
         <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
@@ -671,12 +726,18 @@ ob_start();
   function recalc() {
     var grand = 0, grandWholesale = 0, grandRetail = 0;
     document.querySelectorAll('.stock-row').forEach(function (row) {
-      var unit = row.querySelector('.unitSelect').value;
+      var unit = row.querySelector('.unitSelect').value || 'package';
       var pkgFields = row.querySelector('.packageFields');
       var qtyInput = row.querySelector('.qty');
       var pkgQty = parseFloat((row.querySelector('.packageQty') || {}).value) || 0;
       var perPkg = parseFloat((row.querySelector('.unitsPerPackage') || {}).value) || 0;
-      var qty = (pkgQty > 0 && perPkg > 0) ? (pkgQty * perPkg) : 0;
+      var qty = 0;
+      if (pkgQty > 0 && perPkg > 0) {
+        qty = pkgQty * perPkg;
+        qtyInput.value = Math.round(qty * 100) / 100;
+      } else {
+        qty = parseFloat(qtyInput.value) || 0;
+      }
       var buy = parseFloat(row.querySelector('.buyingPrice').value) || 0;
       var retail = parseFloat(row.querySelector('.retailPrice').value) || 0;
       var wholesale = parseFloat(row.querySelector('.wholesalePrice').value) || 0;
@@ -684,21 +745,18 @@ ob_start();
       if (pkgFields) pkgFields.style.display = 'block';
       var packageQtyLabel = row.querySelector('.packageQtyLabel');
       var unitsPerPackageLabel = row.querySelector('.unitsPerPackageLabel');
-      if (packageQtyLabel) packageQtyLabel.innerHTML = 'Number of ' + unit + 's <span class="text-danger">*</span>';
-      if (unitsPerPackageLabel) unitsPerPackageLabel.innerHTML = 'Items inside each ' + unit + ' <span class="text-danger">*</span>';
-      qtyInput.value = qty > 0 ? (Math.round(qty * 100) / 100) : '';
-      qtyInput.readOnly = true;
-      row.querySelector('.qtyLabel').textContent = 'Total sellable items';
-      row.querySelector('.buyingLabel').innerHTML = 'Buying price of the package <span class="text-danger">*</span>';
-      row.querySelector('.wholesaleLabel').innerHTML = 'Selling price of the package (wholesale) <span class="text-danger">*</span>';
+      if (packageQtyLabel) packageQtyLabel.innerHTML = 'Number of ' + unit + 's <span class="text-muted">(optional)</span>';
+      if (unitsPerPackageLabel) unitsPerPackageLabel.innerHTML = 'Items inside each ' + unit + ' <span class="text-muted">(optional)</span>';
+      row.querySelector('.buyingLabel').innerHTML = 'Buying price per ' + unit + ' <span class="text-muted">(optional)</span>';
+      row.querySelector('.wholesaleLabel').innerHTML = 'Wholesale price per ' + unit + ' <span class="text-muted">(optional)</span>';
       var retailPackLabel = row.querySelector('.retailPackLabel');
-      if (retailPackLabel) retailPackLabel.innerHTML = 'Selling price of the package (retail) <span class="text-danger">*</span>';
-      row.querySelector('.retailLabel').innerHTML = 'Selling price of items inside (retail) <span class="text-danger">*</span>';
+      if (retailPackLabel) retailPackLabel.innerHTML = 'Retail price per ' + unit + ' <span class="text-muted">(optional)</span>';
+      row.querySelector('.retailLabel').innerHTML = 'Retail price per single item <span class="text-muted">(optional)</span>';
       var totalItems = row.querySelector('.totalItems');
-      if (totalItems) totalItems.textContent = Math.round(qty * 100) / 100;
-      var total = pkgQty * buy;
-      var wholesaleReturn = pkgQty * wholesale;
-      var retailPackReturn = pkgQty * (retailPack > 0 ? retailPack : 0);
+      if (totalItems) totalItems.textContent = Math.round((pkgQty > 0 && perPkg > 0 ? qty : 0) * 100) / 100;
+      var total = pkgQty > 0 ? (pkgQty * buy) : (qty * buy);
+      var wholesaleReturn = pkgQty > 0 && wholesale > 0 ? (pkgQty * wholesale) : (qty * wholesale);
+      var retailPackReturn = pkgQty > 0 && retailPack > 0 ? (pkgQty * retailPack) : 0;
       var retailReturn = retailPackReturn > 0 ? retailPackReturn : (qty * retail);
       var wholesaleProfit = wholesaleReturn - total;
       var retailProfit = retailReturn - total;
@@ -733,6 +791,23 @@ ob_start();
 
   var supplierInput = document.querySelector('.ta-input[data-field="supplier"]');
   if (supplierInput) attachTypeahead(supplierInput, 'supplier');
+
+  function updateDestUI() {
+    var isShop = document.getElementById('destShop').checked;
+    var btnText = document.getElementById('submitBtnText');
+    var heading = document.getElementById('productsHeading');
+    if (isShop) {
+      if (btnText) btnText.textContent = 'Save products to Shop Inventory (Sell immediately)';
+      if (heading) heading.textContent = 'Products for Shop Inventory (Direct Selling)';
+    } else {
+      if (btnText) btnText.textContent = 'Save products to Store warehouse';
+      if (heading) heading.textContent = 'Products for Store Warehouse (Awaiting Transfer)';
+    }
+  }
+  document.querySelectorAll('.dest-radio').forEach(function (r) {
+    r.addEventListener('change', updateDestUI);
+  });
+  updateDestUI();
 })();
 </script>
 <?php

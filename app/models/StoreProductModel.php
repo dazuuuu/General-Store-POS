@@ -16,10 +16,32 @@ class StoreProductModel extends Model
         $created = 0;
         foreach ($items as $item) {
             $name = trim((string) ($item['name'] ?? ''));
-            $qty = (float) ($item['quantity'] ?? 0);
-            if ($name === '' || $qty <= 0) {
+            $hasAnyData = $name !== ''
+                || (float) ($item['quantity'] ?? 0) > 0
+                || (float) ($item['package_quantity'] ?? 0) > 0
+                || (float) ($item['buying_price'] ?? 0) > 0
+                || (float) ($item['package_buying_price'] ?? 0) > 0
+                || (float) ($item['retail_price'] ?? 0) > 0
+                || (float) ($item['wholesale_price'] ?? 0) > 0
+                || (float) ($item['package_price'] ?? 0) > 0
+                || (float) ($item['retail_pack_price'] ?? 0) > 0
+                || trim((string) ($item['barcode'] ?? '')) !== '';
+            if (!$hasAnyData) {
                 continue;
             }
+
+            if ($name === '') {
+                $p = (float) ($item['retail_price'] ?? $item['package_price'] ?? $item['retail_pack_price'] ?? $item['buying_price'] ?? $item['package_buying_price'] ?? 0);
+                $name = $p > 0 ? ('Product KES ' . number_format($p, 0)) : ('Item ' . date('j M H:i'));
+            }
+
+            $inside = ($item['units_per_package'] ?? '') !== '' ? max(0.01, (float) $item['units_per_package']) : 1.0;
+            $pkgQty = ($item['package_quantity'] ?? '') !== '' ? max(0, (float) $item['package_quantity']) : null;
+            $qty = (float) ($item['quantity'] ?? 0);
+            if ($qty <= 0 && $pkgQty !== null && $pkgQty > 0) {
+                $qty = round($pkgQty * $inside, 2);
+            }
+
             $this->insert([
                 'product_id' => (int) ($item['product_id'] ?? 0) ?: null,
                 'name' => $name,
@@ -28,9 +50,9 @@ class StoreProductModel extends Model
                 'supplier_id' => (int) ($item['supplier_id'] ?? 0) ?: null,
                 'barcode' => trim((string) ($item['barcode'] ?? '')) ?: null,
                 'unit' => $item['unit'] ?? 'piece',
-                'package_unit' => trim((string) ($item['package_unit'] ?? '')) ?: null,
-                'package_quantity' => ($item['package_quantity'] ?? '') !== '' ? max(0, (float) $item['package_quantity']) : null,
-                'units_per_package' => ($item['units_per_package'] ?? '') !== '' ? max(0.01, (float) $item['units_per_package']) : null,
+                'package_unit' => trim((string) ($item['package_unit'] ?? '')) ?: 'carton',
+                'package_quantity' => $pkgQty,
+                'units_per_package' => $inside,
                 'package_price' => ($item['package_price'] ?? '') !== '' ? max(0, (float) $item['package_price']) : null,
                 'retail_pack_price' => ($item['retail_pack_price'] ?? '') !== '' ? max(0, (float) $item['retail_pack_price']) : null,
                 'colors' => trim((string) ($item['colors'] ?? '')) ?: null,
@@ -69,20 +91,26 @@ class StoreProductModel extends Model
         return $stmt->fetchAll();
     }
 
-    public function invoices(int $limit = 100): array
+    public function invoices(int $limit = 100, ?string $type = null): array
     {
         $tid = \TenantContext::tenantId();
+        $typeSql = $type ? (" AND si.invoice_type = " . $this->db->quote($type)) : "";
         $stmt = $this->db->prepare(
             "SELECT si.*, u.username AS created_by_name,
                     (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count
                FROM store_invoices si
           LEFT JOIN users u ON u.id = si.created_by
-              WHERE si.tenant_id = ?
+              WHERE si.tenant_id = ? {$typeSql}
            ORDER BY si.created_at DESC, si.id DESC
               LIMIT " . (int) $limit
         );
         $stmt->execute([$tid]);
         return $stmt->fetchAll();
+    }
+
+    public function returnInvoices(int $limit = 100): array
+    {
+        return $this->invoices($limit, 'return');
     }
 
     /** Warehouse capital still in Store + shop Inventory capital (buying cost). */
@@ -462,6 +490,204 @@ class StoreProductModel extends Model
         }
     }
 
+    /**
+     * Return products from Shop Inventory back to Store Warehouse.
+     * Generates a Warehouse Return Note (WRN-xxxxxx).
+     * Reduces shop inventory and restores warehouse store products.
+     * Tracks profit reduction.
+     *
+     * @param array $items [ ['product_id' => int, 'quantity' => float, 'package_quantity' => ?float], ... ]
+     */
+    public function returnToWarehouse(array $items, string $notes, int $staffId): array
+    {
+        $tid = \TenantContext::tenantId();
+        $db = $this->db;
+        $items = array_values(array_filter($items, fn($it) => (int)($it['product_id'] ?? 0) > 0 && (float)($it['quantity'] ?? 0) > 0));
+        if (!$items) {
+            return ['ok' => false, 'invoice_id' => null, 'error' => 'Choose at least one shop product and quantity to return.'];
+        }
+
+        try {
+            $db->beginTransaction();
+
+            $subtotalCost = 0.0;
+            $profitReduced = 0.0;
+            $returnItems = [];
+
+            foreach ($items as $item) {
+                $pid = (int) $item['product_id'];
+                $returnQty = (float) $item['quantity'];
+
+                $sel = $db->prepare('SELECT * FROM products WHERE id = ? AND tenant_id = ? FOR UPDATE');
+                $sel->execute([$pid, $tid]);
+                $prod = $sel->fetch();
+                if (!$prod) {
+                    throw new \RuntimeException('Shop product #' . $pid . ' not found.');
+                }
+
+                $available = (float) $prod['quantity'];
+                if ($returnQty > $available + 0.0001) {
+                    throw new \RuntimeException('Cannot return ' . $returnQty . ' of ' . $prod['name'] . '; only ' . $available . ' available in shop.');
+                }
+
+                $unitsPerPack = max(0.01, (float) ($prod['units_per_pack'] ?? 1));
+                $pkgUnit = trim((string) ($prod['pack_unit'] ?? '')) ?: 'carton';
+                $returnPkgs = isset($item['package_quantity']) && (float) $item['package_quantity'] > 0
+                    ? (float) $item['package_quantity']
+                    : ($unitsPerPack > 1 ? round($returnQty / $unitsPerPack, 2) : $returnQty);
+
+                $unitBuy = (float) ($prod['buying_price'] ?? 0);
+                if ($unitBuy <= 0 && (float) ($prod['package_buying_price'] ?? 0) > 0 && $unitsPerPack > 0) {
+                    $unitBuy = round((float) $prod['package_buying_price'] / $unitsPerPack, 2);
+                }
+                $unitRetail = (float) ($prod['retail_price'] ?? $prod['selling_price'] ?? 0);
+                $unitProfit = max(0, $unitRetail - $unitBuy);
+
+                $lineCost = round($returnQty * $unitBuy, 2);
+                $lineProfitLoss = round($returnQty * $unitProfit, 2);
+
+                $subtotalCost += $lineCost;
+                $profitReduced += $lineProfitLoss;
+
+                $returnItems[] = [
+                    'product' => $prod,
+                    'quantity' => $returnQty,
+                    'package_quantity' => $returnPkgs,
+                    'package_unit' => $pkgUnit,
+                    'units_per_package' => $unitsPerPack,
+                    'unit_price' => $unitBuy,
+                    'retail_price' => $unitRetail,
+                    'line_total' => $lineCost,
+                    'profit_impact' => -$lineProfitLoss,
+                ];
+            }
+
+            // Insert store_invoices header
+            $stmt = $db->prepare(
+                'INSERT INTO store_invoices (tenant_id, invoice_number, invoice_type, source, destination, invoice_to, total, profit_impact, notes, created_by)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)'
+            );
+            $stmt->execute([
+                $tid,
+                'PENDING',
+                'return',
+                'Shop Inventory',
+                'Store Warehouse',
+                'Store Warehouse',
+                round($subtotalCost, 2),
+                -round($profitReduced, 2),
+                trim($notes) ?: 'Returned from Shop to Store',
+                $staffId
+            ]);
+            $invoiceId = (int) $db->lastInsertId();
+            $number = 'WRN-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT);
+            $db->prepare('UPDATE store_invoices SET invoice_number = ? WHERE id = ? AND tenant_id = ?')
+               ->execute([$number, $invoiceId, $tid]);
+
+            foreach ($returnItems as $ri) {
+                $prod = $ri['product'];
+                $pid = (int) $prod['id'];
+                $returnQty = $ri['quantity'];
+                $returnPkgs = $ri['package_quantity'];
+
+                // 1. Decrement shop product
+                $newShopQty = max(0, round((float) $prod['quantity'] - $returnQty, 2));
+                $db->prepare('UPDATE products SET quantity = ? WHERE id = ? AND tenant_id = ?')
+                   ->execute([$newShopQty, $pid, $tid]);
+
+                // 2. Increment or create store product
+                $findSp = $db->prepare(
+                    "SELECT id, quantity, package_quantity FROM store_products
+                      WHERE tenant_id = ? AND product_id = ? AND status = 'stored'
+                   ORDER BY id DESC LIMIT 1"
+                );
+                $findSp->execute([$tid, $pid]);
+                $existingSp = $findSp->fetch();
+                $storeProductId = 0;
+
+                if ($existingSp) {
+                    $storeProductId = (int) $existingSp['id'];
+                    $newStoreQty = round((float) $existingSp['quantity'] + $returnQty, 2);
+                    $newStorePkgs = round((float) ($existingSp['package_quantity'] ?? 0) + $returnPkgs, 2);
+                    $db->prepare('UPDATE store_products SET quantity = ?, package_quantity = ? WHERE id = ? AND tenant_id = ?')
+                       ->execute([$newStoreQty, $newStorePkgs, $storeProductId, $tid]);
+                } else {
+                    $insSp = $db->prepare(
+                        "INSERT INTO store_products (
+                            tenant_id, product_id, name, category_id, brand_id, supplier_id, barcode, unit,
+                            package_unit, package_quantity, units_per_package, package_price, retail_pack_price,
+                            quantity, buying_price, package_buying_price, retail_price, wholesale_price,
+                            notes, status, created_by
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                    );
+                    $insSp->execute([
+                        $tid,
+                        $pid,
+                        $prod['name'],
+                        $prod['category_id'] ?: null,
+                        $prod['brand_id'] ?: null,
+                        $prod['supplier_id'] ?: null,
+                        $prod['barcode'] ?: null,
+                        $prod['unit'] ?: 'piece',
+                        $ri['package_unit'],
+                        $returnPkgs,
+                        $ri['units_per_package'],
+                        $prod['pack_price'] ?: null,
+                        $prod['retail_pack_price'] ?: null,
+                        $returnQty,
+                        $ri['unit_price'],
+                        $prod['package_buying_price'] ?: null,
+                        $prod['retail_price'] ?: 0,
+                        $prod['wholesale_price'] ?: 0,
+                        'Returned from shop (' . $number . ')',
+                        'stored',
+                        $staffId
+                    ]);
+                    $storeProductId = (int) $db->lastInsertId();
+                }
+
+                // 3. Insert invoice item
+                $db->prepare(
+                    'INSERT INTO store_invoice_items (
+                        tenant_id, invoice_id, store_product_id, product_id, product_name,
+                        quantity, unit, package_unit, package_quantity, units_per_package,
+                        package_price, unit_price, line_total, profit_impact
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                )->execute([
+                    $tid,
+                    $invoiceId,
+                    $storeProductId,
+                    $pid,
+                    $prod['name'],
+                    $returnQty,
+                    $prod['unit'] ?? 'piece',
+                    $ri['package_unit'],
+                    $returnPkgs,
+                    $ri['units_per_package'],
+                    $prod['pack_price'] ?: null,
+                    $ri['unit_price'],
+                    $ri['line_total'],
+                    $ri['profit_impact'],
+                ]);
+            }
+
+            $db->commit();
+            return [
+                'ok' => true,
+                'invoice_id' => $invoiceId,
+                'invoice_number' => $number,
+                'total_cost' => round($subtotalCost, 2),
+                'profit_reduced' => round($profitReduced, 2),
+                'error' => null,
+            ];
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            return ['ok' => false, 'invoice_id' => null, 'error' => $e->getMessage()];
+        }
+    }
+
     private function transferOneToInventory(ProductModel $productModel, array $it): int
     {
         $tid = \TenantContext::tenantId();
@@ -692,6 +918,11 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_invoice_items', 'package_quantity', "ALTER TABLE `store_invoice_items` ADD COLUMN `package_quantity` DECIMAL(12,2) NULL AFTER `package_unit`");
         $this->ensureColumn('store_invoice_items', 'units_per_package', "ALTER TABLE `store_invoice_items` ADD COLUMN `units_per_package` DECIMAL(12,2) NULL AFTER `package_quantity`");
         $this->ensureColumn('store_invoice_items', 'package_price', "ALTER TABLE `store_invoice_items` ADD COLUMN `package_price` DECIMAL(12,2) NULL AFTER `units_per_package`");
+        $this->ensureColumn('store_invoices', 'invoice_type', "ALTER TABLE `store_invoices` ADD COLUMN `invoice_type` ENUM('transfer','return') NOT NULL DEFAULT 'transfer' AFTER `invoice_number`");
+        $this->ensureColumn('store_invoices', 'source', "ALTER TABLE `store_invoices` ADD COLUMN `source` VARCHAR(64) NULL DEFAULT 'Store' AFTER `invoice_type`");
+        $this->ensureColumn('store_invoices', 'destination', "ALTER TABLE `store_invoices` ADD COLUMN `destination` VARCHAR(64) NULL DEFAULT 'Shop Inventory' AFTER `source`");
+        $this->ensureColumn('store_invoices', 'profit_impact', "ALTER TABLE `store_invoices` ADD COLUMN `profit_impact` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `total`");
+        $this->ensureColumn('store_invoice_items', 'profit_impact', "ALTER TABLE `store_invoice_items` ADD COLUMN `profit_impact` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `line_total`");
     }
 
     private function ensureColumn(string $table, string $column, string $sql): void

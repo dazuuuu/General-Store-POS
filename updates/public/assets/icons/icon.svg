@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Duaqabe icon">
+  <path d="M100 274a156 156 0 0 1 126-153l-22 55a96 96 0 0 0-48 98z" fill="#050706"/>
+  <path d="M356 274a96 96 0 0 0-48-98l-22-55a156 156 0 0 1 126 153z" fill="#050706"/>
+  <path d="M152 286h208" stroke="#050706" stroke-width="7" stroke-linecap="round"/>
+  <path d="M213 153h86l15 118H198z" fill="#159447"/>
+  <path d="M220 153h73l12 105H204z" fill="#0f843e"/>
+  <path d="M222 161c0-51 19-80 55-80 24 0 43 17 43 42 0 19-12 34-30 34-14 0-20-10-16-22 4-14 18-22 37-20" fill="none" stroke="#050706" stroke-width="7" stroke-linecap="round"/>
+  <path d="M221 160c0-49 20-78 55-78" fill="none" stroke="#1a1d1c" stroke-width="3" stroke-linecap="round" opacity=".35"/>
+  <circle cx="219" cy="162" r="10" fill="#f8faf8"/>
+  <circle cx="293" cy="162" r="10" fill="#f8faf8"/>
+  <path d="M222 150l-4 13M296 150l-5 13" stroke="#050706" stroke-width="6" stroke-linecap="round"/>
+  <text x="256" y="357" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="800" fill="#050706">D</text>
+  <path d="M256 428l-62-66h124z" fill="#050706"/>
+</svg>

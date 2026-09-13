@@ -105,56 +105,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $batchNotes = trim((string) ($_POST['notes'] ?? ''));
         $items = [];
         foreach ($_POST['items'] ?? [] as $i => $row) {
-            $pkg = store_package_fields($row, $units);
             $nameProbe = trim((string) ($row['title'] ?? ''));
             $productChoiceProbe = (int) ($row['product_choice'] ?? 0);
+            $packageQty = max(0, (float) ($row['package_quantity'] ?? 0));
+            $inside = max(0, (float) ($row['units_per_package'] ?? 0));
+            $directQty = max(0, (float) ($row['quantity'] ?? 0));
+            $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
+            $packageWholesale = max(0, (float) ($row['wholesale_price'] ?? 0));
+            $packageRetail = max(0, (float) ($row['retail_pack_price'] ?? 0));
+            $itemRetail = max(0, (float) ($row['selling_price'] ?? 0));
+            $barcode = trim((string) ($row['barcode'] ?? ''));
+
             $hasContent = $nameProbe !== '' || $productChoiceProbe > 0
-                || (float) ($row['package_quantity'] ?? 0) > 0
-                || (float) ($row['buying_price'] ?? 0) > 0;
+                || $packageQty > 0 || $directQty > 0 || $packageCost > 0
+                || $packageWholesale > 0 || $packageRetail > 0 || $itemRetail > 0
+                || $barcode !== '';
             if (!$hasContent) {
                 continue;
             }
-            if ((float) ($row['package_quantity'] ?? 0) <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter how many packages (cartons/bales) you received.';
-                break;
+
+            if ($nameProbe === '' && $productChoiceProbe <= 0) {
+                $p = $itemRetail > 0 ? $itemRetail : ($packageRetail > 0 ? $packageRetail : ($packageCost > 0 ? $packageCost : 0));
+                $nameProbe = $p > 0 ? ('Product KES ' . number_format($p, 0)) : ('Item ' . date('j M H:i'));
             }
-            if ((float) ($row['units_per_package'] ?? 0) <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter how many items are inside each package.';
-                break;
-            }
-            if (($pkg['package_buying_price'] ?? 0) <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package buying price.';
-                break;
-            }
-            if ($productChoiceProbe <= 0 && ($pkg['package_price'] ?? 0) <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package wholesale price.';
-                break;
-            }
-            if ($productChoiceProbe <= 0 && ($pkg['retail_pack_price'] ?? 0) <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the package retail price.';
-                break;
-            }
-            if ($productChoiceProbe <= 0 && (float) ($row['selling_price'] ?? 0) <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Enter the retail price of a single item inside.';
-                break;
-            }
-            $qty = (float) $pkg['quantity'];
-            if ($qty <= 0) {
-                $error = ($nameProbe !== '' ? $nameProbe . ': ' : '') . 'Packages × items inside must be greater than zero.';
-                break;
-            }
+
+            $effectiveInside = $inside > 0 ? $inside : 1.0;
+            $qty = $directQty > 0 ? $directQty : ($packageQty > 0 ? round($packageQty * $effectiveInside, 2) : 0.0);
+            $faulty = max(0, (float) ($row['faulty_quantity'] ?? 0));
+            $unitBuying = ($packageCost > 0 && $effectiveInside > 0) ? round($packageCost / $effectiveInside, 2) : 0.0;
+            $unitWholesale = ($packageWholesale > 0 && $effectiveInside > 0) ? round($packageWholesale / $effectiveInside, 2) : 0.0;
+            $receiveUnit = trim((string) ($row['unit'] ?? '')) ?: 'carton';
+            $innerUnit = in_array($row['inner_unit'] ?? '', $units, true) ? $row['inner_unit'] : 'piece';
+
             $productId = (int) ($row['product_choice'] ?? 0);
             $existing = $productId > 0 ? $P->find($productId) : null;
             if ($existing && (int) $existing['tenant_id'] !== (int) TenantContext::tenantId()) {
                 $existing = null;
                 $productId = 0;
             }
-            $name = trim((string) ($row['title'] ?? ''));
+            $name = $nameProbe;
             if ($existing) {
                 $name = $existing['name'];
-            }
-            if ($name === '') {
-                continue;
             }
 
             $imgPath = '';
@@ -176,19 +167,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'brand_id' => $brandId,
                 'supplier_id' => $supplierId,
                 'barcode' => $existing ? ($existing['barcode'] ?? '') : ($row['barcode'] ?? ''),
-                'unit' => $pkg['unit'],
-                'package_unit' => $pkg['package_unit'],
-                'package_quantity' => $pkg['package_quantity'],
-                'units_per_package' => $pkg['units_per_package'],
-                'package_price' => $pkg['package_price'],
-                'retail_pack_price' => ($pkg['retail_pack_price'] ?? 0) > 0 ? $pkg['retail_pack_price'] : ($existing['retail_pack_price'] ?? null),
+                'unit' => $innerUnit,
+                'package_unit' => $receiveUnit,
+                'package_quantity' => $packageQty > 0 ? $packageQty : null,
+                'units_per_package' => $effectiveInside,
+                'package_price' => $packageWholesale > 0 ? $packageWholesale : null,
+                'retail_pack_price' => $packageRetail > 0 ? $packageRetail : ($existing['retail_pack_price'] ?? null),
+                'package_buying_price' => $packageCost > 0 ? $packageCost : null,
                 'colors' => '',
                 'quantity' => $qty,
-                'faulty_quantity' => $pkg['faulty_quantity'],
-                'buying_price' => $pkg['buying_price'],
-                'package_buying_price' => $pkg['package_buying_price'],
-                'retail_price' => ($row['selling_price'] ?? '') !== '' ? $row['selling_price'] : ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
-                'wholesale_price' => ($row['wholesale_price'] ?? '') !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? $existing['selling_price'] ?? 0),
+                'faulty_quantity' => $faulty,
+                'buying_price' => $unitBuying > 0 ? $unitBuying : (float)($existing['buying_price'] ?? 0),
+                'retail_price' => $itemRetail > 0 ? $itemRetail : (float)($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
+                'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : (float)($existing['wholesale_price'] ?? 0),
                 'offer_price' => $existing ? '' : ($row['offer_price'] ?? ''),
                 'offer_starts_at' => $existing ? '' : ($row['offer_starts_at'] ?? ''),
                 'offer_ends_at' => $existing ? '' : ($row['offer_ends_at'] ?? ''),
@@ -196,15 +187,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'notes' => trim((string) ($row['remark'] ?? '')) ?: $batchNotes,
             ];
         }
-        if (!$error) {
+        if (!$error && $items) {
             $res = $SP->createMany($items, TenantContext::userId());
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' in Store warehouse. Select them below and generate an internal transfer invoice to move stock into shop Inventory.';
+                $_SESSION['flash']['success'] = $res['created'] . ' product' . ($res['created'] === 1 ? '' : 's') . ' saved in Store warehouse. Select them below and generate an internal transfer invoice to move stock into shop Inventory.';
                 header('Location: ' . public_url('super/store/'));
                 exit;
             }
             $error = $res['error'] ?? 'Could not store products.';
+        } elseif (!$error && !$items) {
+            $error = 'Please fill in at least one product name or price to record to Store.';
         }
+    } elseif ($action === 'return_to_warehouse') {
+        $returnItems = [];
+        $rawItems = $_POST['return_items'] ?? [];
+        foreach ($rawItems as $row) {
+            $pid = (int) ($row['product_id'] ?? 0);
+            $qty = (float) ($row['quantity'] ?? 0);
+            $pkgQty = isset($row['package_quantity']) && $row['package_quantity'] !== '' ? (float) $row['package_quantity'] : null;
+            if ($pid > 0 && ($qty > 0 || ($pkgQty !== null && $pkgQty > 0))) {
+                $returnItems[] = [
+                    'product_id' => $pid,
+                    'quantity' => $qty,
+                    'package_quantity' => $pkgQty,
+                ];
+            }
+        }
+        $notes = trim((string) ($_POST['notes'] ?? ''));
+        $res = $SP->returnToWarehouse($returnItems, $notes, TenantContext::userId());
+        if ($res['ok']) {
+            $_SESSION['flash']['success'] = 'Warehouse Return Note ' . $res['invoice_number'] . ' generated. ' . count($returnItems) . ' product(s) returned to Store warehouse (Expected profit reduced by KES ' . number_format($res['profit_reduced'], 2) . ').';
+            header('Location: ' . public_url('super/store/invoice.php?id=' . (int) $res['invoice_id']));
+            exit;
+        }
+        $error = $res['error'] ?? 'Could not process return to warehouse.';
     } elseif ($action === 'invoice') {
         $ids = $_POST['store_ids'] ?? [];
         $ids = is_array($ids) ? $ids : [];
@@ -255,7 +271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'delete_store_invoice') {
         $res = $SP->deleteInvoice((int) ($_POST['invoice_id'] ?? 0));
         if ($res['ok']) {
-            $_SESSION['flash']['success'] = 'Internal transfer invoice deleted and products returned to Store warehouse.';
+            $_SESSION['flash']['success'] = 'Invoice deleted and stock reversed.';
             header('Location: ' . public_url('super/store/'));
             exit;
         }
@@ -264,7 +280,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pending = $SP->pending();
-$invoices = $SP->invoices(30);
+$invoices = $SP->invoices(50);
+$shopProducts = $P->all([], 'name ASC');
+$shopProductsData = array_values(array_map(function($p) {
+    $upp = max(1, (float)($p['units_per_pack'] ?? 1));
+    $pkgBuy = (float)($p['package_buying_price'] ?? 0);
+    $buy = (float)($p['buying_price'] ?? 0);
+    if ($buy <= 0 && $pkgBuy > 0 && $upp > 0) {
+        $buy = round($pkgBuy / $upp, 2);
+    }
+    $retail = (float)($p['retail_price'] ?? $p['selling_price'] ?? 0);
+    return [
+        'id' => (int) $p['id'],
+        'name' => (string) $p['name'],
+        'barcode' => (string) ($p['barcode'] ?? ''),
+        'qty' => (float) ($p['quantity'] ?? 0),
+        'unit' => (string) ($p['unit'] ?? 'piece'),
+        'pack_unit' => (string) ($p['pack_unit'] ?? 'package'),
+        'units_per_package' => $upp,
+        'buying_price' => $buy,
+        'retail_price' => $retail,
+        'unit_profit' => max(0, $retail - $buy),
+    ];
+}, $shopProducts));
 $page_title = 'Store warehouse';
 ob_start();
 ?>
@@ -272,12 +310,13 @@ ob_start();
 
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
   <div>
-    <h1 class="h5 fw-bold mb-1">Store · main warehouse</h1>
-    <p class="text-muted small mb-0">Receive stock here first. Generate an <strong>internal transfer invoice</strong> to move selected products into shop Inventory for selling — balances stay tracked for capital.</p>
+    <h1 class="h5 fw-bold mb-1"><i class="fas fa-box-archive text-primary me-2"></i>Store · Main Warehouse</h1>
+    <p class="text-muted small mb-0">Receive stock here first, generate <strong>transfer invoices</strong> to move into shop Inventory, or <strong>return stock</strong> back from the shop to the warehouse.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/stationery/new.php'); ?>"><i class="fas fa-box-open me-1"></i>Record one</a>
     <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/stock/new.php'); ?>"><i class="fas fa-boxes-stacked me-1"></i>Record in bulk</a>
+    <a class="btn btn-sm btn-outline-warning text-dark" href="#returnWarehouseSection"><i class="fas fa-rotate-left me-1"></i>Return to Warehouse</a>
     <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-store me-1"></i>Shop Inventory</a>
   </div>
 </div>
@@ -286,7 +325,7 @@ ob_start();
   <input type="hidden" name="action" value="store">
   <div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
     <div class="card-body p-4">
-      <h2 class="h5 mb-3">Warehouse batch</h2>
+      <h2 class="h5 mb-3">Warehouse batch intake <span class="text-muted fw-normal small">(optional)</span></h2>
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="form-label">Supplier <span class="text-muted">(optional)</span></label>
@@ -327,9 +366,14 @@ ob_start();
 </form>
 
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
-  <div class="px-4 py-3 border-bottom bg-white">
-    <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select packages to transfer into shop Inventory</h2>
-    <p class="text-muted small mb-0 mt-1">Tick products and enter how many <strong>sealed packages</strong> (cartons/bales) to move — you cannot open a package here. Only that package count is added to Inventory; the rest stays in Store.</p>
+  <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <h2 class="h6 fw-bold mb-0">Waiting in warehouse · select packages to transfer into shop Inventory</h2>
+      <p class="text-muted small mb-0 mt-1">Tick products and enter how many <strong>packages</strong> to move — only that count is added to Inventory; the rest stays in Store.</p>
+    </div>
+    <div>
+      <input type="text" id="warehouseSearch" class="form-control form-control-sm" placeholder="Search warehouse products..." style="max-width:240px;">
+    </div>
   </div>
   <?php if (!$pending): ?>
     <div class="p-4 text-muted small">No products in Store right now. Use Record product / Record in bulk, or the form above.</div>
@@ -337,7 +381,7 @@ ob_start();
   <form method="post" id="transferInvoiceForm" action="">
     <input type="hidden" name="action" value="invoice">
     <div class="table-responsive">
-      <table class="table align-middle mb-0">
+      <table class="table align-middle mb-0" id="warehouseTable">
         <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">In warehouse</th><th style="width:140px;">Packages to transfer</th><th class="text-end">Pkg cost</th><th class="text-end">Line</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($pending as $p):
@@ -354,7 +398,7 @@ ob_start();
             $availPkgsInt = (int) floor($availPkgs + 1e-9);
             $sid = (int) $p['id'];
           ?>
-          <tr>
+          <tr class="warehouse-row" data-search="<?php echo htmlspecialchars(strtolower($p['name'] . ' ' . ($p['barcode'] ?? '') . ' ' . ($p['category_name'] ?? '') . ' ' . ($p['brand_name'] ?? ''))); ?>">
             <td><input class="form-check-input store-check" type="checkbox" name="store_ids[]" value="<?php echo $sid; ?>" form="transferInvoiceForm" data-line="<?php echo $line; ?>"></td>
             <td>
               <div class="fw-semibold"><?php echo htmlspecialchars($p['name']); ?></div>
@@ -422,28 +466,88 @@ ob_start();
   <?php endif; ?>
 </div>
 
+<!-- RETURN TO WAREHOUSE FEATURE -->
+<div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;" id="returnWarehouseSection">
+  <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <h2 class="h6 fw-bold mb-0 text-dark"><i class="fas fa-rotate-left text-warning me-2"></i>Return Products to Warehouse (Shop → Store)</h2>
+      <p class="text-muted small mb-0 mt-1">Return sellable items from shop inventory back to the warehouse. Shop stock will decrease, warehouse stock will increase, and expected profit will reduce accordingly.</p>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-warning text-dark" id="addReturnRowBtn"><i class="fas fa-plus me-1"></i>Add item to return</button>
+  </div>
+  <form method="post" id="returnWarehouseForm" class="p-4 bg-light">
+    <input type="hidden" name="action" value="return_to_warehouse">
+    <div id="returnRowsWrap">
+      <!-- Dynamic return rows -->
+    </div>
+    <div class="row g-2 align-items-end mt-2 pt-3 border-top">
+      <div class="col-md-5">
+        <label class="form-label small mb-1">Return Reason / Notes <span class="text-muted">(optional)</span></label>
+        <input name="notes" class="form-control form-control-sm" placeholder="e.g. Returned excess stock to warehouse">
+      </div>
+      <div class="col-md-4">
+        <div class="p-2 bg-white rounded border">
+          <div class="small text-muted">Estimated Profit Reduction:</div>
+          <div class="fw-bold text-danger" id="totalProfitReductionDisplay">KES 0.00</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <button type="submit" class="btn btn-warning btn-sm w-100 fw-bold py-2" id="confirmReturnBtn" disabled><i class="fas fa-box-archive me-1"></i>Generate Return Note (WRN)</button>
+      </div>
+    </div>
+  </form>
+</div>
+
 <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
   <div class="px-4 py-3 border-bottom bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
-      <h2 class="h6 fw-bold mb-0">Saved transfer invoices (Store → Inventory)</h2>
-      <p class="text-muted small mb-0">Every transfer is saved as <strong>STR-######</strong>. Open Print to view or reprint.</p>
+      <h2 class="h6 fw-bold mb-0">Saved Invoices &amp; Warehouse Return Notes</h2>
+      <p class="text-muted small mb-0">Transfer invoices (<strong>STR-######</strong>) and Return notes (<strong>WRN-######</strong>).</p>
     </div>
   </div>
   <div class="table-responsive">
     <table class="table align-middle mb-0">
-      <thead><tr class="text-muted small text-uppercase"><th>Invoice #</th><th>To</th><th>Items</th><th>When</th><th class="text-end">Capital moved</th><th></th></tr></thead>
+      <thead>
+        <tr class="text-muted small text-uppercase">
+          <th>Invoice / Note #</th>
+          <th>Type</th>
+          <th>From / To</th>
+          <th>Items</th>
+          <th>When</th>
+          <th class="text-end">Total Value</th>
+          <th class="text-end">Profit Impact</th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody>
-        <?php if (!$invoices): ?><tr><td colspan="6" class="text-center text-muted py-4">No saved transfer invoices yet. Generate one from the warehouse list above.</td></tr><?php endif; ?>
-        <?php foreach ($invoices as $inv): ?>
+        <?php if (!$invoices): ?><tr><td colspan="8" class="text-center text-muted py-4">No saved transfer invoices or return notes yet.</td></tr><?php endif; ?>
+        <?php foreach ($invoices as $inv):
+          $isReturn = ($inv['invoice_type'] ?? '') === 'return';
+          $profitImpact = (float) ($inv['profit_impact'] ?? 0);
+        ?>
         <tr>
           <td class="fw-semibold"><a href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>"><?php echo htmlspecialchars($inv['invoice_number']); ?></a></td>
-          <td><?php echo htmlspecialchars($inv['invoice_to'] ?: '—'); ?></td>
+          <td>
+            <?php if ($isReturn): ?>
+              <span class="badge bg-warning text-dark"><i class="fas fa-rotate-left me-1"></i>Return (Shop → Store)</span>
+            <?php else: ?>
+              <span class="badge bg-primary"><i class="fas fa-arrow-right me-1"></i>Transfer (Store → Shop)</span>
+            <?php endif; ?>
+          </td>
+          <td><?php echo htmlspecialchars($inv['invoice_to'] ?: ($isReturn ? 'Store Warehouse' : 'Shop Inventory')); ?></td>
           <td><?php echo (int) $inv['item_count']; ?></td>
           <td class="small text-muted"><?php echo date('j M Y, g:i a', strtotime($inv['created_at'])); ?></td>
           <td class="text-end fw-semibold">KES <?php echo number_format((float) $inv['total'], 2); ?></td>
+          <td class="text-end">
+            <?php if ($isReturn && $profitImpact < 0): ?>
+              <span class="badge bg-danger" title="Expected profit reduced">KES <?php echo number_format($profitImpact, 2); ?></span>
+            <?php else: ?>
+              <span class="text-muted">—</span>
+            <?php endif; ?>
+          </td>
           <td class="text-end store-actions">
             <a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>">Open / Print</a>
-            <button type="submit" class="btn btn-sm btn-outline-danger" form="deleteStoreInvoiceForm-<?php echo (int) $inv['id']; ?>" onclick="return confirm('Delete this transfer invoice and reverse its stock move back to Store?');">Delete</button>
+            <button type="submit" class="btn btn-sm btn-outline-danger" form="deleteStoreInvoiceForm-<?php echo (int) $inv['id']; ?>" onclick="return confirm('Delete this invoice and reverse its stock changes?');">Delete</button>
           </td>
         </tr>
         <?php endforeach; ?>
@@ -506,7 +610,7 @@ ob_start();
     </div>
     <div class="row g-2">
       <div class="col-12 col-sm-6">
-        <label class="form-label small mb-1">Product name</label>
+        <label class="form-label small mb-1">Product name <span class="text-muted">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="items[__I__][title]" class="form-control form-control-sm ta-input productTitle" data-field="title" placeholder="e.g. Yellow beans, Soft drink 500ml" autocomplete="off">
           <div class="ta-menu"></div>
@@ -515,7 +619,7 @@ ob_start();
         <div class="matchNote small mt-1" style="display:none;"></div>
       </div>
       <div class="col-12 col-sm-6">
-        <label class="form-label small mb-1"><i class="fas fa-barcode me-1"></i>Barcode <span class="text-muted">(optional — scan it)</span></label>
+        <label class="form-label small mb-1"><i class="fas fa-barcode me-1"></i>Barcode <span class="text-muted">(optional)</span></label>
         <input type="text" name="items[__I__][barcode]" class="form-control form-control-sm barcodeInput" placeholder="Scan or type a barcode" autocomplete="off">
         <div class="barcodeNote small mt-1" style="display:none;"></div>
       </div>
@@ -527,7 +631,7 @@ ob_start();
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1">Category</label>
+        <label class="form-label small mb-1">Category <span class="text-muted">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="items[__I__][category]" class="form-control form-control-sm ta-input" data-field="category" placeholder="e.g. Cereals, Drinks" autocomplete="off">
           <div class="ta-menu"></div>
@@ -541,33 +645,33 @@ ob_start();
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Received as <span class="text-danger">*</span></label>
+        <label class="form-label small mb-1">Packaging unit <span class="text-muted">(optional)</span></label>
         <select name="items[__I__][unit]" class="form-select form-select-sm unitSelect">
           <?php
             $packageUnits = array_values(array_filter($units, fn($u) => $u !== 'piece'));
             foreach ($packageUnits as $u):
           ?>
-            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $u === 'carton' ? 'selected' : ''; ?>><?php echo htmlspecialchars($u); ?></option>
+            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $u === 'carton' ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($u)); ?></option>
           <?php endforeach; ?>
         </select>
       </div>
       <div class="col-12 mt-2 packageFields">
-        <div class="border rounded p-2" style="border-color:#e2e8f0!important;">
-          <div class="small fw-semibold mb-2 text-danger"><i class="fas fa-boxes-stacked me-1"></i>Package details (required)</div>
+        <div class="border rounded p-2" style="border-color:#e2e8f0!important;background:#fafbfc;">
+          <div class="small fw-semibold mb-2 text-secondary"><i class="fas fa-boxes-stacked me-1"></i>Package &amp; Unit details <span class="text-muted fw-normal">(optional)</span></div>
           <div class="row g-2">
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1 packageQtyLabel">Number of packages</label>
+              <label class="form-label small mb-1 packageQtyLabel">Number of packages <span class="text-muted">(optional)</span></label>
               <input type="number" step="0.01" min="0" name="items[__I__][package_quantity]" class="form-control form-control-sm packageQty" placeholder="0">
             </div>
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1 unitsPerPackageLabel">Items inside each package</label>
+              <label class="form-label small mb-1 unitsPerPackageLabel">Items inside each package <span class="text-muted">(optional)</span></label>
               <input type="number" step="0.01" min="0" name="items[__I__][units_per_package]" class="form-control form-control-sm unitsPerPackage" placeholder="0">
             </div>
             <div class="col-6 col-sm-3">
-              <label class="form-label small mb-1">Inside unit</label>
+              <label class="form-label small mb-1">Inside unit <span class="text-muted">(optional)</span></label>
               <select name="items[__I__][inner_unit]" class="form-select form-select-sm">
                 <?php foreach ($units as $u): ?>
-                  <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
+                  <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars(ucfirst($u)); ?></option>
                 <?php endforeach; ?>
               </select>
             </div>
@@ -579,27 +683,27 @@ ob_start();
         </div>
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1 qtyLabel">Good qty received</label>
-        <input type="number" step="0.01" min="0" name="items[__I__][quantity]" class="form-control form-control-sm qty" placeholder="0">
+        <label class="form-label small mb-1 qtyLabel">Total sellable items <span class="text-muted">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="items[__I__][quantity]" class="form-control form-control-sm qty" placeholder="Auto or enter directly">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1">Faulty / broken</label>
+        <label class="form-label small mb-1">Faulty / broken items <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][faulty_quantity]" class="form-control form-control-sm" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2">
-        <label class="form-label small mb-1 buyingLabel">Buying price of the package</label>
+        <label class="form-label small mb-1 buyingLabel">Buying price per package <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][buying_price]" class="form-control form-control-sm buyingPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 retailLabel">Selling price of items inside (retail price)</label>
+        <label class="form-label small mb-1 retailLabel">Retail price per single item <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][selling_price]" class="form-control form-control-sm retailPrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 wholesaleLabel">Selling price of the package (wholesale price)</label>
+        <label class="form-label small mb-1 wholesaleLabel">Wholesale price per package <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" placeholder="0">
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
-        <label class="form-label small mb-1 retailPackLabel">Selling price of the package (retail price)</label>
+        <label class="form-label small mb-1 retailPackLabel">Retail price per package <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][retail_pack_price]" class="form-control form-control-sm retailPackPrice" placeholder="0">
       </div>
       <div class="col-12 mt-2 newProductFields">
@@ -636,6 +740,46 @@ ob_start();
   </div>
 </template>
 
+<template id="returnRowTpl">
+  <div class="return-row card border p-3 mb-2 bg-white rounded-3 shadow-sm position-relative">
+    <button type="button" class="btn btn-outline-danger btn-sm position-absolute top-0 end-0 m-2 remove-return-row" title="Remove" style="padding:0.15rem 0.45rem;"><i class="fas fa-times"></i></button>
+    <div class="row g-2 align-items-center">
+      <div class="col-12 col-md-5">
+        <label class="form-label small mb-1 fw-semibold"><i class="fas fa-magnifying-glass me-1 text-warning"></i>Product to Return</label>
+        <div class="position-relative">
+          <input type="text" class="form-control form-control-sm return-prod-search" placeholder="Type product name or barcode..." autocomplete="off">
+          <input type="hidden" name="return_items[__I__][product_id]" class="return-prod-id" value="">
+          <div class="return-prod-menu dropdown-menu shadow-lg border-0 w-100 mt-1 py-0" style="max-height:280px;overflow-y:auto;display:none;z-index:1060;border-radius:10px;"></div>
+        </div>
+        <div class="d-flex align-items-center justify-content-between mt-1">
+          <div class="text-muted small return-stock-info" style="font-size:0.75rem;">Type name or scan barcode to autofill</div>
+          <button type="button" class="btn btn-link btn-sm text-secondary p-0 return-clear-prod" style="font-size:0.72rem;display:none;text-decoration:none;"><i class="fas fa-rotate-left me-1"></i>Change</button>
+        </div>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1 return-pkg-label">Packages</label>
+        <div class="input-group input-group-sm">
+          <input type="number" step="0.01" min="0" name="return_items[__I__][package_quantity]" class="form-control form-control-sm return-pkg-qty" placeholder="0">
+          <span class="input-group-text return-pkg-unit" style="font-size:0.75rem;">pkgs</span>
+        </div>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1 return-item-label">Total items to return</label>
+        <div class="input-group input-group-sm">
+          <input type="number" step="0.01" min="0" name="return_items[__I__][quantity]" class="form-control form-control-sm return-item-qty" placeholder="0">
+          <span class="input-group-text return-inner-unit" style="font-size:0.75rem;">pcs</span>
+        </div>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-1">Expected profit reduction</label>
+        <div class="border rounded px-2 py-1 bg-light text-danger fw-bold small return-profit-display" style="min-height:31px;display:flex;align-items:center;">
+          -KES 0.00
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style>
   .store-row .newProductFields { display: block; }
   .store-row.is-restock .newProductFields { display: none !important; }
@@ -651,6 +795,14 @@ ob_start();
     padding: .4rem .65rem; font-size: .85rem; cursor: pointer;
   }
   .ta-menu button:hover, .ta-menu button.active { background: #f1f5f9; }
+  .return-prod-menu {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 1060;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(15,23,42,.12);
+  }
+  .return-prod-menu .dropdown-item:hover, .return-prod-menu .dropdown-item.active {
+    background-color: #f8fafc;
+  }
   .matchNote { color: #0d6efd; }
   .store-actions{white-space:nowrap;}
   .store-actions .btn{margin:.1rem;}
@@ -667,6 +819,7 @@ ob_start();
 <script>
 (function () {
   var API = <?php echo json_encode($apiBase); ?>;
+  var SHOP_PRODUCTS = <?php echo json_encode($shopProductsData); ?>;
   var tplHtml = document.getElementById('rowTpl').innerHTML;
   var rowsWrap = document.getElementById('rows');
   var idx = 0;
@@ -1035,6 +1188,326 @@ ob_start();
       new bootstrap.Modal(document.getElementById('editStoreModal')).show();
     });
   });
+  // Warehouse live search
+  var wSearch = document.getElementById('warehouseSearch');
+  if (wSearch) {
+    wSearch.addEventListener('input', function() {
+      var q = this.value.toLowerCase().trim();
+      document.querySelectorAll('.warehouse-row').forEach(function(row) {
+        var txt = (row.getAttribute('data-search') || '').toLowerCase();
+        row.style.display = (!q || txt.indexOf(q) !== -1) ? '' : 'none';
+      });
+    });
+  }
+
+  // Return products to warehouse logic
+  var returnWrap = document.getElementById('returnRowsWrap');
+  var returnTpl = document.getElementById('returnRowTpl');
+  var addReturnRowBtn = document.getElementById('addReturnRowBtn');
+  var confirmReturnBtn = document.getElementById('confirmReturnBtn');
+  var totalProfitReductionDisplay = document.getElementById('totalProfitReductionDisplay');
+  var returnIndex = 0;
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  function recalcReturns() {
+    var totalProfitLoss = 0;
+    var ready = 0;
+    if (!returnWrap) return;
+    returnWrap.querySelectorAll('.return-row').forEach(function(row) {
+      var prod = row._selectedProduct;
+      var prodIdInput = row.querySelector('.return-prod-id');
+      var profitDisp = row.querySelector('.return-profit-display');
+      var itemQtyInput = row.querySelector('.return-item-qty');
+      var qty = itemQtyInput ? (parseFloat(itemQtyInput.value) || 0) : 0;
+      if (prod && prodIdInput && prodIdInput.value && qty > 0) {
+        var retail = parseFloat(prod.retail_price) || 0;
+        var buying = parseFloat(prod.buying_price) || 0;
+        var unitProfit = Math.max(0, retail - buying);
+        var lineLoss = Math.round(unitProfit * qty * 100) / 100;
+        totalProfitLoss += lineLoss;
+        if (profitDisp) profitDisp.textContent = '-KES ' + money(lineLoss);
+        ready++;
+      } else {
+        if (profitDisp) profitDisp.textContent = '-KES 0.00';
+      }
+    });
+    if (totalProfitReductionDisplay) {
+      totalProfitReductionDisplay.textContent = '-KES ' + money(totalProfitLoss);
+    }
+    if (confirmReturnBtn) {
+      confirmReturnBtn.disabled = ready === 0;
+    }
+  }
+
+  function addReturnRow() {
+    if (!returnWrap || !returnTpl) return;
+    var html = returnTpl.innerHTML.replace(/__I__/g, returnIndex++);
+    var div = document.createElement('div');
+    div.innerHTML = html.trim();
+    var row = div.firstElementChild;
+    returnWrap.appendChild(row);
+
+    var searchInput = row.querySelector('.return-prod-search');
+    var prodIdInput = row.querySelector('.return-prod-id');
+    var menu = row.querySelector('.return-prod-menu');
+    var clearBtn = row.querySelector('.return-clear-prod');
+    var pkgQtyInput = row.querySelector('.return-pkg-qty');
+    var itemQtyInput = row.querySelector('.return-item-qty');
+    var pkgUnitLabel = row.querySelector('.return-pkg-unit');
+    var innerUnitLabel = row.querySelector('.return-inner-unit');
+    var stockInfo = row.querySelector('.return-stock-info');
+    var removeBtn = row.querySelector('.remove-return-row');
+
+    var searchTimer = null;
+    var activeIdx = -1;
+    var currentMatches = [];
+
+    row._selectedProduct = null;
+
+    if (removeBtn) {
+      removeBtn.addEventListener('click', function() {
+        row.remove();
+        recalcReturns();
+      });
+    }
+
+    function selectProduct(p) {
+      row._selectedProduct = p;
+      if (!p) {
+        prodIdInput.value = '';
+        searchInput.value = '';
+        if (stockInfo) stockInfo.textContent = 'Type name or scan barcode to autofill';
+        if (clearBtn) clearBtn.style.display = 'none';
+        if (pkgUnitLabel) pkgUnitLabel.textContent = 'pkgs';
+        if (innerUnitLabel) innerUnitLabel.textContent = 'pcs';
+        if (itemQtyInput) itemQtyInput.removeAttribute('max');
+        recalcReturns();
+        return;
+      }
+
+      prodIdInput.value = p.id;
+      searchInput.value = p.name;
+      menu.style.display = 'none';
+      if (clearBtn) clearBtn.style.display = 'inline-block';
+
+      var avail = parseFloat(p.qty) || 0;
+      var unit = p.unit || 'piece';
+      var packUnit = p.pack_unit || 'package';
+      var upp = parseFloat(p.units_per_package) || 1;
+      var buying = parseFloat(p.buying_price) || 0;
+      var retail = parseFloat(p.retail_price) || 0;
+      var margin = Math.max(0, retail - buying);
+
+      if (pkgUnitLabel) pkgUnitLabel.textContent = packUnit + 's';
+      if (innerUnitLabel) innerUnitLabel.textContent = unit;
+      if (itemQtyInput) itemQtyInput.max = avail;
+      if (stockInfo) {
+        var packText = upp > 1 ? ' (' + (Math.round((avail / upp) * 10) / 10) + ' ' + packUnit + 's)' : '';
+        stockInfo.innerHTML = '<span class="text-primary fw-semibold">In shop: ' + avail + ' ' + escapeHtml(unit) + packText + '</span> · Buy: KES ' + money(buying) + ' · Sell: KES ' + money(retail) + ' · Margin: KES ' + money(margin) + '/' + escapeHtml(unit);
+      }
+
+      recalcReturns();
+
+      // Automatically focus quantity input
+      if (upp > 1 && pkgQtyInput) {
+        pkgQtyInput.focus();
+        pkgQtyInput.select();
+      } else if (itemQtyInput) {
+        itemQtyInput.focus();
+        itemQtyInput.select();
+      }
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        selectProduct(null);
+        searchInput.focus();
+      });
+    }
+
+    function renderProductMenu(matches) {
+      currentMatches = matches || [];
+      activeIdx = -1;
+      menu.innerHTML = '';
+      if (!currentMatches.length) {
+        menu.innerHTML = '<div class="px-3 py-2 text-muted small text-center"><i class="fas fa-circle-exclamation me-1"></i>No shop products matching that search</div>';
+        menu.style.display = 'block';
+        return;
+      }
+
+      var hdr = document.createElement('div');
+      hdr.className = 'px-3 py-1 bg-light border-bottom text-muted small fw-semibold text-uppercase';
+      hdr.style.fontSize = '0.68rem';
+      hdr.textContent = 'Shop Products (' + currentMatches.length + ')';
+      menu.appendChild(hdr);
+
+      currentMatches.forEach(function(p, i) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'dropdown-item px-3 py-2 border-bottom d-flex justify-content-between align-items-center gap-2 text-wrap';
+        btn.style.cursor = 'pointer';
+
+        var upp = parseFloat(p.units_per_package) || 1;
+        var packUnit = p.pack_unit || 'pkg';
+        var packText = upp > 1 ? ' (' + (Math.round((p.qty / upp) * 10) / 10) + ' ' + packUnit + 's)' : '';
+
+        btn.innerHTML =
+          '<div class="text-start flex-grow-1">' +
+            '<div class="fw-semibold text-dark">' + escapeHtml(p.name) + 
+              (p.barcode ? ' <span class="badge bg-light text-secondary border font-monospace ms-1" style="font-size:0.7rem;">' + escapeHtml(p.barcode) + '</span>' : '') +
+            '</div>' +
+            '<div class="text-muted small" style="font-size:0.75rem;">' +
+              'Shop stock: <strong class="' + (p.qty > 0 ? 'text-primary' : 'text-danger') + '">' + p.qty + ' ' + escapeHtml(p.unit) + packText + '</strong>' +
+              ' · Sell: KES ' + money(p.retail_price) + ' · Buy: KES ' + money(p.buying_price) +
+            '</div>' +
+          '</div>' +
+          '<span class="badge bg-warning-subtle text-dark border border-warning-subtle ms-2" style="font-size:0.68rem;"><i class="fas fa-check me-1"></i>Autofill</span>';
+
+        btn.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectProduct(p);
+        });
+        menu.appendChild(btn);
+      });
+      menu.style.display = 'block';
+    }
+
+    function searchProducts(q) {
+      q = (q || '').toLowerCase().trim();
+      var products = window.SHOP_PRODUCTS || [];
+      if (!q) {
+        renderProductMenu(products.slice(0, 8));
+        return;
+      }
+      var matches = products.filter(function(p) {
+        var name = (p.name || '').toLowerCase();
+        var barcode = (p.barcode || '').toLowerCase();
+        return name.indexOf(q) !== -1 || barcode.indexOf(q) !== -1;
+      }).slice(0, 10);
+      renderProductMenu(matches);
+    }
+
+    searchInput.addEventListener('input', function() {
+      if (row._selectedProduct && searchInput.value !== row._selectedProduct.name) {
+        row._selectedProduct = null;
+        prodIdInput.value = '';
+        if (clearBtn) clearBtn.style.display = 'none';
+        if (stockInfo) stockInfo.textContent = 'Type name or scan barcode to autofill';
+        recalcReturns();
+      }
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function() {
+        searchProducts(searchInput.value);
+      }, 100);
+    });
+
+    searchInput.addEventListener('focus', function() {
+      if (!row._selectedProduct) {
+        searchProducts(searchInput.value);
+      }
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+      var items = menu.querySelectorAll('.dropdown-item');
+      if (menu.style.display !== 'block' || !items.length) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+        }
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIdx = (activeIdx + 1) % items.length;
+        items.forEach(function(it, idx) {
+          it.classList.toggle('active', idx === activeIdx);
+          if (idx === activeIdx) it.scrollIntoView({ block: 'nearest' });
+        });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIdx = (activeIdx - 1 + items.length) % items.length;
+        items.forEach(function(it, idx) {
+          it.classList.toggle('active', idx === activeIdx);
+          if (idx === activeIdx) it.scrollIntoView({ block: 'nearest' });
+        });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeIdx >= 0 && currentMatches[activeIdx]) {
+          selectProduct(currentMatches[activeIdx]);
+        } else if (currentMatches.length === 1) {
+          selectProduct(currentMatches[0]);
+        }
+      } else if (e.key === 'Escape') {
+        menu.style.display = 'none';
+      }
+    });
+
+    searchInput.addEventListener('blur', function() {
+      setTimeout(function() {
+        menu.style.display = 'none';
+      }, 200);
+    });
+
+    if (pkgQtyInput) {
+      pkgQtyInput.addEventListener('input', function() {
+        var p = row._selectedProduct;
+        var upp = p ? (parseFloat(p.units_per_package) || 1) : 1;
+        var pkgs = parseFloat(pkgQtyInput.value) || 0;
+        if (itemQtyInput) {
+          itemQtyInput.value = Math.round(pkgs * upp * 100) / 100;
+        }
+        recalcReturns();
+      });
+    }
+
+    if (itemQtyInput) {
+      itemQtyInput.addEventListener('input', function() {
+        var p = row._selectedProduct;
+        var upp = p ? (parseFloat(p.units_per_package) || 1) : 1;
+        var items = parseFloat(itemQtyInput.value) || 0;
+        if (pkgQtyInput && upp > 1) {
+          pkgQtyInput.value = Math.round((items / upp) * 100) / 100;
+        }
+        recalcReturns();
+      });
+    }
+
+    recalcReturns();
+  }
+
+  if (addReturnRowBtn) {
+    addReturnRowBtn.addEventListener('click', addReturnRow);
+  }
+  if (returnWrap && returnWrap.children.length === 0) {
+    addReturnRow();
+  }
+
+  var returnWarehouseForm = document.getElementById('returnWarehouseForm');
+  if (returnWarehouseForm) {
+    returnWarehouseForm.addEventListener('submit', function(e) {
+      var ready = 0;
+      returnWrap.querySelectorAll('.return-row').forEach(function(row) {
+        var prodIdInput = row.querySelector('.return-prod-id');
+        var itemQtyInput = row.querySelector('.return-item-qty');
+        var qty = itemQtyInput ? (parseFloat(itemQtyInput.value) || 0) : 0;
+        if (prodIdInput && prodIdInput.value && qty > 0) ready++;
+      });
+      if (ready === 0) {
+        e.preventDefault();
+        alert('Please search and select at least one shop product, and enter the return quantity.');
+        return;
+      }
+      if (!confirm('Generate Warehouse Return Note (WRN) for ' + ready + ' product line(s)? Items will be removed from shop inventory and returned to Store warehouse. Shop profit will be reduced.')) {
+        e.preventDefault();
+      }
+    });
+  }
+
   refreshSelectedTotal();
 })();
 </script>

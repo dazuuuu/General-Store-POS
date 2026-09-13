@@ -61,6 +61,8 @@ $banks      = PaymentOptions::kenyaBanks();
 $saccos     = PaymentOptions::kenyaSaccos();
 $byId = [];
 foreach ($products as $p) { $byId[(int) $p['id']] = $p; }
+$heldOrders = $HO->listWithItemsForTenant();
+$heldCount  = count($heldOrders);
 
 $error = '';
 $cartJson = '[]';
@@ -98,6 +100,17 @@ if ($resumeId > 0) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? 'pay';
+
+    if ($action === 'discard_held') {
+        $delId = (int) ($_POST['held_id'] ?? 0);
+        if ($delId > 0) {
+            $HO->discard($delId);
+            $_SESSION['flash']['success'] = 'Held sale #' . $delId . ' discarded.';
+        }
+        header('Location: ' . $shopUrl);
+        exit;
+    }
+
     $cart = json_decode($_POST['cart'] ?? '[]', true);
     $cartJson = $_POST['cart'] ?? '[]';
     $customerName = trim((string) ($_POST['table_name'] ?? ''));
@@ -114,11 +127,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'hold') {
+        if ($customerName === '') {
+            $customerName = 'Walk-in #' . date('H:i');
+        }
         $res = $HO->hold(['customer_name' => $customerName, 'staff_id' => TenantContext::userId(), 'items' => $items]);
         if ($res['ok']) {
             if ($heldOrderId > 0) { $HO->discard($heldOrderId); }
-            $_SESSION['flash']['success'] = 'Sale held' . ($customerName !== '' ? ' for ' . $customerName : '') . '.';
-            header('Location: ' . public_url('staff/orders/held.php'));
+            $resumeAfter = (int) ($_POST['resume_after'] ?? 0);
+            $_SESSION['flash']['success'] = 'Sale held' . ($customerName !== '' ? ' for ' . $customerName : '') . '. Ready for next customer.';
+            $targetUrl = $resumeAfter > 0 ? ($shopUrl . '?resume=' . $resumeAfter) : $shopUrl;
+            header('Location: ' . $targetUrl);
             exit;
         }
         $error = $res['errors']['_'] ?? ($res['errors']['customer_name'] ?? 'Could not hold this sale.');
@@ -212,16 +230,40 @@ ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
-<?php if ($isSuperShop): ?>
-<div class="d-flex flex-wrap gap-2 mb-3">
-  <a class="btn btn-sm btn-outline-primary" href="<?php echo $bulkUrl; ?>"><i class="fas fa-boxes-stacked me-1"></i>Bulk sale</a>
-  <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-file-invoice-dollar me-1"></i>Credit sales</a>
-  <a class="btn btn-sm btn-outline-secondary" href="<?php echo $documentsUrl; ?>"><i class="fas fa-file-lines me-1"></i>Documents</a>
-  <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-warehouse me-1"></i>Inventory</a>
-  <?php if (TenantContext::can(Capabilities::STOCK_ENTER)): ?>
-    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/stationery/new.php'); ?>"><i class="fas fa-box-open me-1"></i>Record product</a>
-    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/stock/new.php'); ?>"><i class="fas fa-boxes-stacked me-1"></i>Record stock in bulk</a>
-  <?php endif; ?>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div class="d-flex flex-wrap gap-2 align-items-center">
+    <button type="button" class="btn btn-sm btn-outline-warning fw-bold d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#heldSalesModal">
+      <i class="fas fa-pause-circle"></i>
+      <span>Held Sales</span>
+      <span class="badge bg-warning text-dark rounded-pill" id="heldSalesBadge"><?php echo $heldCount; ?></span>
+    </button>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo $ordersBase; ?>"><i class="fas fa-file-invoice-dollar me-1"></i>Credit sales</a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('staff/orders/held.php'); ?>"><i class="fas fa-list me-1"></i>All held list</a>
+    <?php if ($isSuperShop): ?>
+      <a class="btn btn-sm btn-outline-primary" href="<?php echo $bulkUrl; ?>"><i class="fas fa-boxes-stacked me-1"></i>Bulk sale</a>
+      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $documentsUrl; ?>"><i class="fas fa-file-lines me-1"></i>Documents</a>
+      <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-warehouse me-1"></i>Inventory</a>
+      <?php if (TenantContext::can(Capabilities::STOCK_ENTER)): ?>
+        <a class="btn btn-sm btn-outline-secondary" href="<?php echo public_url('super/stationery/new.php'); ?>"><i class="fas fa-box-open me-1"></i>Record product</a>
+      <?php endif; ?>
+    <?php endif; ?>
+  </div>
+  <div>
+    <button type="button" class="btn btn-sm btn-light border text-secondary fw-semibold" id="clearSaleBtn" title="Clear current cart and start a fresh sale">
+      <i class="fas fa-rotate-left me-1"></i>New sale
+    </button>
+  </div>
+</div>
+
+<?php if ($heldOrderId > 0): ?>
+<div class="alert alert-warning py-2 px-3 d-flex justify-content-between align-items-center mb-3 border-warning" style="border-radius:12px;">
+  <div>
+    <i class="fas fa-bookmark me-1 text-warning"></i>
+    Currently resumed: <strong><?php echo htmlspecialchars($customerName ?: 'Held #' . $heldOrderId); ?></strong>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <a href="<?php echo $shopUrl; ?>" class="btn btn-sm btn-outline-danger py-1" title="Discard this hold and start a fresh sale">Start new sale</a>
+  </div>
 </div>
 <?php endif; ?>
 
@@ -341,7 +383,7 @@ ob_start();
             <?php if (!empty($p['image_path'])): ?><img src="<?php echo htmlspecialchars($p['image_path']); ?>" alt="">
             <?php else: ?><i class="fas fa-box"></i><?php endif; ?>
           </div>
-          <div class="pos-card-name"><?php echo htmlspecialchars($p['name']); ?><?php echo $sub ? '<br><small>' . htmlspecialchars($sub) . '</small>' : ''; ?></div>
+          <div class="pos-card-name"><?php echo htmlspecialchars($p['name']); ?><?php echo $sub ? '<small>' . htmlspecialchars($sub) . '</small>' : ''; ?></div>
           <div class="pos-card-price" data-card-price>
             <?php if (!empty($p['on_offer'])): ?>
               <span class="pos-card-regprice">KES <?php echo number_format((float) $p['regular_price'], 0); ?></span>
@@ -370,17 +412,39 @@ ob_start();
 
   <aside class="pos-side" id="posSide">
     <div class="pos-side-head">
-      <h2 class="pos-side-title">Sale Details</h2>
-      <div class="pos-customer">
+      <div class="pos-side-mobile-head d-lg-none d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
+        <div class="fw-bold fs-6 text-dark"><i class="fas fa-receipt me-2 text-primary"></i>Order Details</div>
+        <button type="button" class="btn-close" id="closeMobileCartBtn" aria-label="Close Order Details"></button>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="pos-side-title mb-0">Order Details</h2>
+        <span class="badge bg-light text-dark border fw-bold" id="cartTotalItemsBadge">0 items</span>
+      </div>
+      <?php if ($heldOrderId > 0): ?>
+      <div class="pos-resumed-indicator mb-2 d-flex justify-content-between align-items-center p-2 rounded bg-warning bg-opacity-10 border border-warning">
+        <div class="small text-dark text-truncate">
+          <i class="fas fa-bookmark text-warning me-1"></i> Resumed: <strong><?php echo htmlspecialchars($customerName ?: 'Hold #' . $heldOrderId); ?></strong>
+        </div>
+        <a href="<?php echo $shopUrl; ?>" class="btn btn-xs btn-outline-danger py-0 px-2" title="Clear and start new sale">New sale</a>
+      </div>
+      <?php endif; ?>
+      <div class="pos-customer mb-2">
         <div class="pos-customer-icon"><i class="fas fa-user"></i></div>
-        <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>" autocomplete="off" placeholder="Search customer">
+        <input type="text" name="table_name" id="customerName" class="pos-customer-input" value="<?php echo htmlspecialchars($customerName); ?>" autocomplete="off" placeholder="Customer name or table (optional)">
         <div class="customer-suggest-menu" id="customerSuggestMenu"></div>
       </div>
     </div>
 
     <div class="pos-cart-wrap">
+      <div class="pos-cart-search-wrap mb-2" id="cartSearchWrap" style="display:none;">
+        <div class="pos-cart-search-box">
+          <i class="fas fa-search pos-cart-search-icon"></i>
+          <input type="text" id="cartSearchInput" class="pos-cart-search-input" placeholder="Search items in this order..." autocomplete="off">
+          <button type="button" id="cartSearchClear" class="pos-cart-search-clear" style="display:none;" title="Clear search"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div id="cartSearchCount" class="pos-cart-search-count small text-muted mt-1" style="display:none;"></div>
+      </div>
       <div class="pos-cart" id="cartRows"><div class="text-muted small text-center py-4">Tap a product to add it.</div></div>
-      <button type="button" class="pos-cart-more" id="cartViewAll" style="display:none;"></button>
     </div>
 
     <div class="pos-side-foot" id="posSideFoot">
@@ -414,8 +478,12 @@ ob_start();
       </div>
 
       <div class="pos-actions" id="cartButtons">
-        <button type="submit" class="pos-btn pos-btn-outline" id="holdBtn" disabled>Hold Sale</button>
-        <button type="button" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>Checkout</button>
+        <button type="button" class="pos-btn pos-btn-outline" id="holdBtn" disabled>
+          <i class="fas fa-pause me-1"></i>Hold Sale
+        </button>
+        <button type="button" class="pos-btn pos-btn-primary" id="checkoutBtn" disabled>
+          Checkout <i class="fas fa-arrow-right ms-1"></i>
+        </button>
       </div>
 
       <div id="payPanel" style="display:none;">
@@ -486,6 +554,132 @@ ob_start();
 </div>
 </form>
 
+<!-- Sticky Mobile Cart Bar for screens < 992px -->
+<div class="pos-mobile-bar d-lg-none" id="posMobileBar">
+  <div class="pos-mobile-bar-info" id="openMobileCartFromBar">
+    <div class="pos-mobile-cart-icon">
+      <i class="fas fa-shopping-cart"></i>
+      <span class="pos-mobile-badge" id="mobileCartCountBadge">0</span>
+    </div>
+    <div>
+      <div class="small text-muted" style="line-height:1;">Total:</div>
+      <div class="fw-bold text-dark fs-6" id="mobileBarTotal">KES 0</div>
+    </div>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <button type="button" class="btn btn-sm btn-outline-warning fw-bold d-inline-flex align-items-center" data-bs-toggle="modal" data-bs-target="#heldSalesModal" title="Held Sales">
+      <i class="fas fa-pause-circle me-1"></i> <span class="badge bg-warning text-dark rounded-pill"><?php echo $heldCount; ?></span>
+    </button>
+    <button type="button" class="btn btn-sm btn-primary fw-bold px-3 py-2" id="mobileOpenCartBtn">
+      View Order <i class="fas fa-chevron-up ms-1"></i>
+    </button>
+  </div>
+</div>
+
+<!-- Modal: Held Sales -->
+<div class="modal fade" id="heldSalesModal" tabindex="-1" aria-labelledby="heldSalesModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content border-0 shadow" style="border-radius:16px;">
+      <div class="modal-header border-bottom py-3">
+        <h5 class="modal-title fw-bold" id="heldSalesModalLabel">
+          <i class="fas fa-pause-circle text-warning me-2"></i>Held Sales (<?php echo $heldCount; ?>)
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-3">
+        <?php if (!$heldOrders): ?>
+          <div class="text-center py-5 text-muted">
+            <i class="fas fa-pause fa-2x mb-3 d-block text-warning" style="opacity:.35;"></i>
+            <div class="fw-bold mb-1">No sales on hold</div>
+            <div class="small">When you pause a sale using "Hold Sale", it will appear here so you can resume it anytime.</div>
+          </div>
+        <?php else: ?>
+          <div class="row g-3">
+            <?php foreach ($heldOrders as $ho): ?>
+              <div class="col-12 col-md-6">
+                <div class="card h-100 border shadow-sm" style="border-radius:12px;">
+                  <div class="card-body p-3 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-start mb-1">
+                      <div>
+                        <span class="badge bg-warning text-dark mb-1">Hold #<?php echo (int) $ho['id']; ?></span>
+                        <div class="fw-bold text-dark fs-6"><?php echo htmlspecialchars($ho['customer_name'] ?: 'Walk-in customer'); ?></div>
+                      </div>
+                      <div class="text-end">
+                        <div class="fw-bold text-success fs-5">KES <?php echo number_format((float) $ho['total'], 0); ?></div>
+                        <div class="small text-muted"><?php echo (int) $ho['item_count']; ?> item<?php echo (int) $ho['item_count'] === 1 ? '' : 's'; ?></div>
+                      </div>
+                    </div>
+                    <div class="text-muted small mb-2">
+                      <i class="far fa-clock me-1"></i><?php echo date('g:i a', strtotime($ho['created_at'])); ?>
+                      <?php if (!empty($ho['staff_name'])): ?> · by <?php echo htmlspecialchars($ho['staff_name']); ?><?php endif; ?>
+                    </div>
+                    <?php if (!empty($ho['items'])): ?>
+                      <div class="bg-light rounded p-2 mb-3 small flex-grow-1" style="max-height:85px; overflow-y:auto;">
+                        <ul class="list-unstyled mb-0 text-secondary">
+                          <?php foreach ($ho['items'] as $it): ?>
+                            <li class="d-flex justify-content-between py-1 border-bottom border-light">
+                              <span class="text-truncate me-2"><strong><?php echo (float) $it['quantity']; ?>×</strong> <?php echo htmlspecialchars($it['product_name']); ?></span>
+                              <span class="text-nowrap fw-semibold">KES <?php echo number_format((float) ($it['unit_price'] * $it['quantity']), 0); ?></span>
+                            </li>
+                          <?php endforeach; ?>
+                        </ul>
+                      </div>
+                    <?php else: ?>
+                      <div class="flex-grow-1"></div>
+                    <?php endif; ?>
+                    <div class="d-flex gap-2 pt-2 border-top">
+                      <button type="button" class="btn btn-sm btn-success flex-fill fw-bold js-resume-held" data-id="<?php echo (int) $ho['id']; ?>" data-name="<?php echo htmlspecialchars($ho['customer_name'] ?: 'Held #' . $ho['id'], ENT_QUOTES); ?>">
+                        <i class="fas fa-play me-1"></i>Resume
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-danger js-discard-held" data-id="<?php echo (int) $ho['id']; ?>" title="Discard this hold">
+                        <i class="fas fa-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+      <div class="modal-footer border-top py-2">
+        <a href="<?php echo public_url('staff/orders/held.php'); ?>" class="btn btn-sm btn-outline-secondary me-auto">
+          <i class="fas fa-list me-1"></i>Open full held sales page
+        </a>
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Confirm Hold Sale -->
+<div class="modal fade" id="holdSaleModal" tabindex="-1" aria-labelledby="holdSaleModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content border-0 shadow" style="border-radius:14px;">
+      <div class="modal-header border-bottom py-2">
+        <h6 class="modal-title fw-bold" id="holdSaleModalLabel"><i class="fas fa-pause-circle text-warning me-1"></i>Hold Current Sale</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-3">
+        <p class="small text-muted mb-2">Pause this sale and clear the cart to serve another customer. You can resume it anytime.</p>
+        <div class="mb-3">
+          <label class="form-label small fw-bold mb-1">Customer / Reference Note</label>
+          <input type="text" id="holdReferenceInput" class="form-control form-control-sm" placeholder="e.g. Table 4, Red shirt, or customer name">
+        </div>
+        <button type="button" class="btn btn-warning w-100 fw-bold py-2 text-dark" id="btnConfirmHold">
+          <i class="fas fa-pause me-1"></i>Hold and Start New Sale
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden Form for Discarding Held Sale -->
+<form method="post" id="discardHeldForm" style="display:none;">
+  <input type="hidden" name="action" value="discard_held">
+  <input type="hidden" name="held_id" id="discardHeldId" value="">
+</form>
+
 <datalist id="kenyaBanks">
   <?php foreach ($banks as $bank): ?><option value="<?php echo htmlspecialchars($bank); ?>"></option><?php endforeach; ?>
 </datalist>
@@ -517,113 +711,435 @@ ob_start();
 <?php endif; ?>
 
 <style>
-.pos-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start;padding-right:min(380px,38vw);}
-.pos-main{min-width:0;}
-.pos-search{position:relative;margin-bottom:14px;}
-.pos-search i{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#b7bac3;}
-.pos-search input{width:100%;padding:12px 14px 12px 40px;border:1px solid #eef0f4;border-radius:12px;background:#fff;font-size:.92rem;}
-.pos-search input:focus{outline:none;border-color:var(--pos-green);box-shadow:0 0 0 .2rem rgba(75,0,110,.14);}
-.pos-scan input{border-color:var(--pos-green-light);background:var(--pos-green-light);}
-.pos-scan i{color:var(--pos-green);}
-.pos-dim-tabs{display:flex;gap:8px;margin-bottom:12px;}
-.pos-dim{border:1px solid #eef0f4;background:#fff;color:#5b6070;border-radius:999px;padding:6px 14px;font-size:.8rem;font-weight:600;}
-.pos-dim.active{border-color:var(--pos-green);color:var(--pos-green);background:var(--pos-green-light);}
-.pos-cats{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;}
-.pos-mode-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px;}
-.pos-mode{border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:10px;padding:9px 10px;font-size:.82rem;font-weight:700;white-space:nowrap;}
-.pos-mode.active{border-color:var(--pos-green);background:var(--pos-green-light);color:var(--pos-green);}
-.pos-card.is-mode-unavailable .pos-add,.pos-card.is-mode-unavailable .pos-add-half{opacity:.45;pointer-events:none;}
-.pos-cat{flex:0 0 auto;width:88px;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid #eef0f4;background:#fff;border-radius:14px;padding:12px 8px;font-size:.78rem;font-weight:600;color:#5b6070;white-space:nowrap;}
-.pos-cat-img{width:44px;height:44px;border-radius:12px;background:#f7f7fb;display:flex;align-items:center;justify-content:center;overflow:hidden;color:#b7bac3;font-size:1.1rem;}
-.pos-cat-img img{width:100%;height:100%;object-fit:cover;}
-.pos-cat.active{border-color:var(--pos-green);color:var(--pos-green);background:var(--pos-green-light);}
-.pos-cat.active .pos-cat-img, .pos-cat.active .pos-cat-all{background:#fff;color:var(--pos-green);}
-.pos-prod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
-@media (min-width:520px){ .pos-prod-grid{grid-template-columns:repeat(3,1fr);} }
-@media (min-width:900px){ .pos-prod-grid{grid-template-columns:repeat(4,1fr);} }
-@media (min-width:1300px){ .pos-prod-grid{grid-template-columns:repeat(5,1fr);} }
-.pos-card{background:#fff;border:1px solid #eef0f4;border-radius:14px;padding:14px;text-align:center;transition:box-shadow .15s;}
-.pos-card:hover{box-shadow:0 4px 16px rgba(16,24,40,.08);}
-.pos-card-img{height:64px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;}
-.pos-card-img img{max-height:64px;max-width:100%;object-fit:contain;}
-.pos-card-img i{font-size:1.8rem;color:#d7d9df;}
-.pos-card-name{font-weight:600;font-size:.85rem;color:#1f2330;margin-bottom:4px;min-height:2.2em;}
-.pos-card-name small{color:#9aa0ac;font-weight:400;}
-.pos-card-price{color:var(--pos-green);font-weight:700;font-size:.85rem;margin-bottom:10px;}
-.pos-card{position:relative;}
-.pos-card-regprice{color:#9aa0ac;font-weight:400;text-decoration:line-through;margin-right:5px;font-size:.8em;}
-.pos-ribbon{position:absolute;top:8px;left:8px;background:#f59e0b;color:#fff;font-size:.62rem;font-weight:800;letter-spacing:.03em;padding:2px 7px;border-radius:999px;z-index:2;}
-.pos-ribbon-archive{left:auto;right:8px;background:#475569;}
-.pos-card-archived{opacity:.9;}
-.pos-offer-banner{display:block;width:100%;text-align:left;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:12px;padding:10px 14px;font-size:.85rem;font-weight:600;margin-bottom:14px;cursor:pointer;}
-.pos-offer-banner:hover{background:#fef3c7;}
-.pos-add{flex:1;border:0;border-radius:10px;background:var(--pos-green);color:#fff;padding:8px 0;font-weight:600;font-size:.82rem;}
-.pos-add:hover{background:var(--pos-green-dark);}
-.pos-add-row{display:flex;gap:6px;align-items:stretch;}
-.pos-add-half{width:44px;border:1px solid var(--pos-green);border-radius:10px;background:#fff;color:var(--pos-green);font-weight:700;font-size:.95rem;line-height:1;}
-.pos-add-half:hover{background:var(--pos-green-light, #e8f8ef);}
-
-/* Fixed Sale Details rail — stays visible like the left navbar. */
-.pos-side{
-  position:fixed; top:0; right:0; bottom:0;
-  width:min(360px,38vw); z-index:40;
-  background:#fff; border-left:1px solid #eef0f4;
-  padding:16px 16px 12px; border-radius:0;
-  display:flex; flex-direction:column; gap:0;
-  overflow:hidden; box-shadow:-6px 0 24px rgba(16,24,40,.06);
+/* ============================================================
+   RESPONSIVE POS LAYOUT (DESKTOP & MOBILE)
+   ============================================================ */
+.pos-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 22px;
+  align-items: start;
 }
-.pos-side-head{flex:0 0 auto; padding-bottom:8px;}
-.pos-side-title{font-size:1.05rem;font-weight:800;margin:0 0 12px;}
-.pos-customer{display:flex;align-items:center;gap:10px;background:#f7f7fb;border-radius:12px;padding:10px 12px;margin-bottom:0;position:relative;}
-.pos-customer-icon{width:34px;height:34px;border-radius:50%;background:var(--pos-green-light);color:var(--pos-green);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.pos-customer-input{border:0;background:transparent;flex:1;font-weight:600;font-size:.9rem;}
-.pos-customer-input:focus{outline:none;}
-.customer-suggest-menu{position:absolute;left:12px;right:12px;top:calc(100% + 4px);z-index:70;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(15,23,42,.14);display:none;max-height:240px;overflow:auto;}
-.customer-suggest-menu.show{display:block;}
-.customer-suggest-menu button{display:block;width:100%;border:0;background:#fff;text-align:left;padding:.55rem .7rem;font-size:.85rem;}
-.customer-suggest-menu button:hover{background:#f8fafc;}
-.customer-suggest-menu .meta{display:block;color:#64748b;font-size:.75rem;margin-top:1px;}
-.pos-cart-wrap{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;margin:10px 0 8px;border-top:1px solid #f1f5f9;border-bottom:1px solid #f1f5f9;}
-.pos-cart{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:6px 2px 8px;-webkit-overflow-scrolling:touch;}
-.pos-cart-more{flex:0 0 auto;border:0;background:#f8fafc;color:var(--pos-green);font-weight:700;font-size:.82rem;padding:8px 10px;border-radius:10px;margin:0 0 8px;text-align:left;}
-.pos-cart-more:hover{background:var(--pos-green-light);}
-.pos-cart-line{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f3f4f7;}
-.pos-cart-line img, .pos-cart-line .ph{width:38px;height:38px;border-radius:8px;object-fit:cover;background:#f3f4f7;display:flex;align-items:center;justify-content:center;color:#d7d9df;flex-shrink:0;margin-top:2px;}
-.pos-cart-name{font-weight:600;font-size:.85rem;color:#1f2330;}
-.pos-cart-price{color:#9aa0ac;font-size:.76rem;}
-.pos-qty{display:flex;align-items:center;gap:6px;}
-.pos-qty button{width:24px;height:24px;border-radius:6px;border:1px solid #eef0f4;background:#fff;font-weight:700;line-height:1;}
-.pos-qty .pos-half-btn{width:auto;min-width:28px;padding:0 6px;font-size:.78rem;color:var(--pos-green);}
-.pos-qty-input{width:72px;height:28px;border:1px solid #eef0f4;border-radius:7px;text-align:center;font-weight:700;font-size:.82rem;}
-.pos-dual-qty{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
-.pos-dual-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;}
-.pos-dual-label{font-size:.72rem;font-weight:600;color:#5b6070;min-width:0;flex:1;}
-.pos-cart-del{color:#64748b;background:none;border:0;font-size:.85rem;margin-top:4px;}
-.pos-side-foot{flex:0 0 auto;max-height:52vh;overflow-y:auto;padding-top:4px;-webkit-overflow-scrolling:touch;}
-.pos-side.pay-open .pos-side-foot{max-height:62vh;}
-.pos-side.pay-open .pos-cart-wrap{flex:0 1 28%;}
-.pos-totals{border-top:0;padding-top:4px;font-size:.9rem;color:#5b6070;}
-.pos-total-line{font-weight:800;font-size:1.05rem;color:#1f2330;margin-top:6px;}
-.pos-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;position:sticky;bottom:0;background:#fff;padding-top:8px;padding-bottom:4px;z-index:2;}
-.pos-btn{border-radius:12px;padding:12px 0;font-weight:700;font-size:.9rem;border:1px solid #eef0f4;}
-.pos-btn-outline{background:#fff;color:#5b6070;}
-.pos-btn-primary{background:var(--pos-green);border-color:var(--pos-green);color:#fff;}
-.pos-btn:disabled{opacity:.5;}
-@media (max-width:900px){
-  .pos-grid{padding-right:0;padding-bottom:min(48vh,420px);}
-  .pos-side{
-    top:auto; left:0; right:0; bottom:0;
-    width:100%; height:auto; max-height:min(58vh,520px);
-    border-left:0; border-top:1px solid #eef0f4;
-    border-radius:16px 16px 0 0; z-index:1050;
-    box-shadow:0 -8px 28px rgba(16,24,40,.14);
+.pos-main {
+  min-width: 0;
+}
+
+/* Search and Scan inputs */
+.pos-search { position: relative; margin-bottom: 12px; }
+.pos-search i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.95rem; }
+.pos-search input {
+  width: 100%;
+  padding: 12px 14px 12px 42px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 0.95rem;
+  color: #0f172a;
+  transition: border-color .15s, box-shadow .15s;
+}
+.pos-search input:focus { outline: none; border-color: var(--pos-green); box-shadow: 0 0 0 .2rem rgba(75,0,110,.12); }
+.pos-scan input { border-color: var(--pos-green-light); background: var(--pos-green-light); }
+.pos-scan i { color: var(--pos-green); }
+
+/* Dim & Mode Tabs */
+.pos-dim-tabs { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; padding-bottom: 4px; }
+.pos-dim {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: all .15s;
+}
+.pos-dim.active { border-color: var(--pos-green); color: var(--pos-green); background: var(--pos-green-light); }
+.pos-cats { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; }
+.pos-cat {
+  flex: 0 0 auto;
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 14px;
+  padding: 12px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+  transition: all .15s;
+}
+.pos-cat-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 1.1rem;
+}
+.pos-cat-img img { width: 100%; height: 100%; object-fit: cover; }
+.pos-cat.active { border-color: var(--pos-green); color: var(--pos-green); background: var(--pos-green-light); }
+.pos-cat.active .pos-cat-img, .pos-cat.active .pos-cat-all { background: #fff; color: var(--pos-green); }
+
+.pos-mode-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
+.pos-mode {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: 10px;
+  padding: 10px 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: center;
+  transition: all .15s;
+}
+.pos-mode.active { border-color: var(--pos-green); background: var(--pos-green-light); color: var(--pos-green); }
+
+/* Product Grid & Cards */
+.pos-prod-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+@media (min-width: 540px) { .pos-prod-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; } }
+@media (min-width: 992px) { .pos-prod-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; } }
+@media (min-width: 1280px) { .pos-prod-grid { grid-template-columns: repeat(4, 1fr); gap: 14px; } }
+@media (min-width: 1540px) { .pos-prod-grid { grid-template-columns: repeat(5, 1fr); gap: 16px; } }
+
+.pos-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  position: relative;
+  transition: transform .12s ease, box-shadow .15s ease;
+}
+.pos-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+}
+.pos-card-img { height: 64px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+.pos-card-img img { max-height: 64px; max-width: 100%; object-fit: contain; }
+.pos-card-img i { font-size: 1.8rem; color: #cbd5e1; }
+.pos-card-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0f172a;
+  margin-bottom: 4px;
+  line-height: 1.3;
+  min-height: 2.4em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pos-card-name small { color: #475569; font-weight: 500; font-size: 0.78rem; display: block; margin-top: 2px; }
+.pos-card-price { color: var(--pos-green); font-weight: 800; font-size: 0.92rem; margin-bottom: 8px; }
+.pos-card-regprice { color: #94a3b8; font-weight: 400; text-decoration: line-through; margin-right: 5px; font-size: 0.8em; }
+.pos-ribbon {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  z-index: 2;
+}
+.pos-ribbon-archive { left: auto; right: 8px; background: #475569; }
+.pos-card-archived { opacity: .9; }
+.pos-offer-banner {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+  cursor: pointer;
+}
+.pos-add-row { display: flex; gap: 6px; align-items: stretch; margin-top: auto; }
+.pos-add {
+  flex: 1;
+  border: 0;
+  border-radius: 10px;
+  background: var(--pos-green);
+  color: #fff;
+  padding: 9px 0;
+  font-weight: 700;
+  font-size: 0.88rem;
+  transition: background .15s;
+}
+.pos-add:hover { background: var(--pos-green-dark); }
+.pos-add-half {
+  width: 44px;
+  border: 1px solid var(--pos-green);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--pos-green);
+  font-weight: 800;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.pos-add-half:hover { background: var(--pos-green-light); }
+.pos-card.is-mode-unavailable .pos-add, .pos-card.is-mode-unavailable .pos-add-half { opacity: .45; pointer-events: none; }
+
+/* ============================================================
+   ORDER DETAILS (CART SIDE PANEL)
+   ============================================================ */
+.pos-side {
+  position: sticky;
+  top: 16px;
+  width: 100%;
+  height: calc(100vh - 32px);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+  z-index: 30;
+}
+.pos-side-head { flex: 0 0 auto; }
+.pos-side-title { font-size: 1.1rem; font-weight: 800; color: #0f172a; }
+.pos-customer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  position: relative;
+}
+.pos-customer-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--pos-green-light);
+  color: var(--pos-green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.pos-customer-input { border: 0; background: transparent; flex: 1; font-weight: 600; font-size: 0.92rem; color: #0f172a; }
+.pos-customer-input:focus { outline: none; }
+.customer-suggest-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 70;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15,23,42,.14);
+  display: none;
+  max-height: 240px;
+  overflow: auto;
+}
+.customer-suggest-menu.show { display: block; }
+.customer-suggest-menu button { display: block; width: 100%; border: 0; background: #fff; text-align: left; padding: .55rem .7rem; font-size: .85rem; }
+.customer-suggest-menu button:hover { background: #f8fafc; }
+.customer-suggest-menu .meta { display: block; color: #64748b; font-size: .75rem; margin-top: 1px; }
+
+/* In-Cart Search Box */
+.pos-cart-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 2px 10px;
+  transition: all .15s;
+}
+.pos-cart-search-box:focus-within {
+  border-color: var(--pos-green);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(75,0,110,.1);
+}
+.pos-cart-search-icon { color: #94a3b8; font-size: 0.85rem; margin-right: 8px; flex-shrink: 0; }
+.pos-cart-search-input { border: 0; background: transparent; width: 100%; font-size: 0.88rem; padding: 7px 0; color: #0f172a; }
+.pos-cart-search-input:focus { outline: none; }
+.pos-cart-search-clear { border: 0; background: transparent; color: #94a3b8; font-size: 0.85rem; padding: 0 4px; cursor: pointer; }
+.pos-cart-search-clear:hover { color: #0f172a; }
+
+/* Cart Rows Container */
+.pos-cart-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0;
+  border-top: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+}
+.pos-cart { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: 6px 2px 8px; -webkit-overflow-scrolling: touch; }
+.pos-cart-line { display: flex; gap: 8px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+.pos-cart-idx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pos-cart-line img, .pos-cart-line .ph {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pos-cart-name { font-weight: 700; font-size: 0.88rem; color: #0f172a; line-height: 1.3; }
+.pos-cart-price { color: #64748b; font-size: 0.78rem; font-weight: 500; }
+.pos-qty { display: flex; align-items: center; gap: 5px; }
+.pos-qty button { width: 26px; height: 26px; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; font-weight: 700; line-height: 1; color: #334155; }
+.pos-qty .pos-half-btn { width: auto; min-width: 28px; padding: 0 6px; font-size: 0.78rem; color: var(--pos-green); }
+.pos-qty-input { width: 68px; height: 28px; border: 1px solid #e2e8f0; border-radius: 7px; text-align: center; font-weight: 700; font-size: 0.84rem; color: #0f172a; }
+.pos-dual-qty { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.pos-dual-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; }
+.pos-dual-label { font-size: 0.74rem; font-weight: 600; color: #475569; min-width: 0; flex: 1; }
+.pos-cart-del { color: #94a3b8; background: none; border: 0; font-size: 0.95rem; margin-top: 2px; padding: 4px; transition: color .15s; }
+.pos-cart-del:hover { color: #ef4444; }
+
+/* Totals & Actions */
+.pos-side-foot { flex: 0 0 auto; max-height: 48vh; overflow-y: auto; padding-top: 4px; -webkit-overflow-scrolling: touch; }
+.pos-side.pay-open .pos-side-foot { max-height: 60vh; }
+.pos-totals { border-top: 0; padding-top: 4px; font-size: 0.88rem; color: #475569; }
+.pos-total-line { font-weight: 800; font-size: 1.15rem; color: #0f172a; margin-top: 6px; }
+.pos-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  padding-top: 8px;
+  padding-bottom: 4px;
+  z-index: 2;
+}
+.pos-btn { border-radius: 12px; padding: 12px 0; font-weight: 700; font-size: 0.92rem; border: 1px solid #e2e8f0; text-align: center; }
+.pos-btn-outline { background: #fff; color: #334155; }
+.pos-btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
+.pos-btn-primary { background: var(--pos-green); border-color: var(--pos-green); color: #fff; }
+.pos-btn-primary:hover { background: var(--pos-green-dark); }
+.pos-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ============================================================
+   STICKY MOBILE BAR & MOBILE DRAWER (< 992px)
+   ============================================================ */
+.pos-mobile-bar { display: none; }
+@media (max-width: 991.98px) {
+  .pos-grid {
+    display: block;
+    padding-bottom: 76px;
   }
-  .pos-side-foot{max-height:none;}
-  .pos-side.pay-open{max-height:min(78vh,680px);}
-  .pos-side.pay-open .pos-side-foot{max-height:none;flex:1 1 auto;min-height:0;}
-  .pos-actions{grid-template-columns:1fr;}
-  #payPanel .btn-group{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
-  #payPanel .btn-group>.btn{border-radius:8px!important;margin:0!important;}
+  .pos-side {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    z-index: 1060;
+    background: #fff;
+    transform: translateY(100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    box-shadow: none;
+    padding: 16px 16px 20px;
+  }
+  .pos-side.mobile-open {
+    transform: translateY(0);
+  }
+  .pos-mobile-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    z-index: 1040;
+    background: #ffffff;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.08);
+  }
+  .pos-mobile-bar-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+  }
+  .pos-mobile-cart-icon {
+    position: relative;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--pos-green-light);
+    color: var(--pos-green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+  }
+  .pos-mobile-badge {
+    position: absolute;
+    top: -4px;
+    right: -6px;
+    background: var(--pos-green);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 800;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 2px solid #fff;
+  }
+  .pos-actions { grid-template-columns: 1fr 1fr; }
+  #payPanel .btn-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #payPanel .btn-group > .btn { border-radius: 8px !important; margin: 0 !important; }
 }
 </style>
 
@@ -643,16 +1159,25 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         packUnit: el.dataset.packUnit || '',
         packPrice: parseFloat(el.dataset.packPrice) || 0,
         retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
+        barcode: el.dataset.barcode || '',
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
 });
+
 var cart = {};
-var cartExpanded = false;
-var CART_PREVIEW_LIMIT = 3;
+var cartOrder = []; // STRICT CHRONOLOGICAL INSERTION ORDER
 try {
-    (JSON.parse(<?php echo json_encode($cartJson); ?>) || []).forEach(function (c) { PC.applyLine(cart, c, PRODUCTS[String(c.product_id)]); });
+    var initialItems = JSON.parse(<?php echo json_encode($cartJson); ?>) || [];
+    initialItems.forEach(function (c) {
+        var id = String(c.product_id);
+        PC.applyLine(cart, c, PRODUCTS[id]);
+        if (cartOrder.indexOf(id) === -1) {
+            cartOrder.push(id);
+        }
+    });
 } catch (e) {}
+
 function money(n) { return 'KES ' + n.toLocaleString('en-KE', {maximumFractionDigits: 0}); }
 function activeModeLabel(type) {
     if (type === 'retail_pack') return 'Retail carton';
@@ -699,50 +1224,71 @@ function formatHalfQty(n) {
 }
 function defaultSaleType() { return document.getElementById('saleType').value; }
 function ensureCart(id) {
-    if (!cart[id]) cart[id] = PC.buckets();
-    return cart[id];
+    var strId = String(id);
+    if (!cart[strId]) cart[strId] = PC.buckets();
+    if (cartOrder.indexOf(strId) === -1) {
+        cartOrder.push(strId);
+    }
+    return cart[strId];
 }
 function cartHasItems() {
     return Object.keys(cart).some(function (id) { return !PC.isEmpty(cart[id]); });
 }
-function serializeCart() { return PC.serialize(cart, PRODUCTS); }
+function serializeCart() {
+    return PC.serialize(cart, PRODUCTS, cartOrder);
+}
 function pruneCart(id) {
-    if (!cart[id]) return;
-    if (PC.isEmpty(cart[id])) delete cart[id];
+    var strId = String(id);
+    if (!cart[strId]) return;
+    if (PC.isEmpty(cart[strId])) {
+        delete cart[strId];
+        cartOrder = cartOrder.filter(function(x) { return x !== strId; });
+    }
 }
 function setFieldQty(id, field, val) {
-    var p = PRODUCTS[id]; if (!p) return;
-    var c = ensureCart(id);
+    var strId = String(id);
+    var p = PRODUCTS[strId]; if (!p) return;
+    var c = ensureCart(strId);
     c[field] = PC.clampField(p, c, field, val);
-    pruneCart(id);
+    pruneCart(strId);
     render();
 }
 function bump(id, field, delta) {
-    var c = ensureCart(id);
-    setFieldQty(id, field, (c[field] || 0) + delta);
+    var strId = String(id);
+    var c = ensureCart(strId);
+    setFieldQty(strId, field, (c[field] || 0) + delta);
 }
 function add(id) {
+    var strId = String(id);
     var type = defaultSaleType();
-    if (!modeAvailable(PRODUCTS[id], type)) return;
-    if (type === 'wholesale') bump(id, 'wholesale', 1);
-    else if (type === 'retail_pack') bump(id, 'retailPack', 1);
-    else bump(id, 'retail', 1);
+    if (!modeAvailable(PRODUCTS[strId], type)) return;
+    if (cartOrder.indexOf(strId) === -1) {
+        cartOrder.push(strId);
+    }
+    if (type === 'wholesale') bump(strId, 'wholesale', 1);
+    else if (type === 'retail_pack') bump(strId, 'retailPack', 1);
+    else bump(strId, 'retail', 1);
 }
 function addHalf(id) {
+    var strId = String(id);
     var type = defaultSaleType();
-    if (!modeAvailable(PRODUCTS[id], type)) return;
-    if (type === 'wholesale') bump(id, 'wholesale', 0.5);
-    else if (type === 'retail_pack') bump(id, 'retailPack', 0.5);
-    else bump(id, 'retail', 0.5);
+    if (!modeAvailable(PRODUCTS[strId], type)) return;
+    if (cartOrder.indexOf(strId) === -1) {
+        cartOrder.push(strId);
+    }
+    if (type === 'wholesale') bump(strId, 'wholesale', 0.5);
+    else if (type === 'retail_pack') bump(strId, 'retailPack', 0.5);
+    else bump(strId, 'retail', 0.5);
 }
 function subtotal() {
     var t = 0;
-    Object.keys(cart).forEach(function (id) {
+    cartOrder.forEach(function (id) {
         var p = PRODUCTS[id], c = cart[id];
         if (p && c) t += PC.lineTotal(p, c);
     });
     return t;
 }
+
 var CUSTOMER_SEARCH_URL = <?php echo json_encode($customerSearchUrl); ?>;
 function attachCustomerLookup() {
     var input = document.getElementById('customerName');
@@ -751,7 +1297,7 @@ function attachCustomerLookup() {
     if (!input || !menu || !hidden) return;
     var timer = null, pickedName = '';
     function hide(){ menu.classList.remove('show'); }
-    function render(items) {
+    function renderSuggest(items) {
         menu.innerHTML = '';
         if (!items.length) { hide(); return; }
         items.forEach(function(c){
@@ -780,7 +1326,7 @@ function attachCustomerLookup() {
         timer = setTimeout(function(){
             fetch(CUSTOMER_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=8')
                 .then(function(r){ return r.json(); })
-                .then(function(data){ render(data.items || []); })
+                .then(function(data){ renderSuggest(data.items || []); })
                 .catch(function(){});
         }, 180);
     });
@@ -812,67 +1358,139 @@ function updateTotals() {
     if (vatOut) vatOut.textContent = money(t.vat);
     document.getElementById('totalOut').textContent = money(t.total);
     document.getElementById('payableOut').textContent = money(t.total);
+    var mobileBarTotal = document.getElementById('mobileBarTotal');
+    if (mobileBarTotal) mobileBarTotal.textContent = money(t.total);
     updatePayFields();
 }
 
-function render() {
-    var wrap = document.getElementById('cartRows'), ids = Object.keys(cart);
-    var moreBtn = document.getElementById('cartViewAll');
-    wrap.innerHTML = ids.length ? '' : '<div class="text-muted small text-center py-4">Tap a product to add it. Type qty for retail items, retail boxes, and/or wholesale packs.</div>';
-    var visibleIds = ids;
-    if (ids.length > CART_PREVIEW_LIMIT && !cartExpanded) {
-        visibleIds = ids.slice(0, CART_PREVIEW_LIMIT);
-    }
-    visibleIds.forEach(function (id) {
-        var p = PRODUCTS[id], c = cart[id];
-        if (!p || !c) return;
-        var retailMax = Math.max(c.retail || 0, PC.maxRetail(p, c));
-        var retailPackMax = Math.max(c.retailPack || 0, PC.maxRetailPack(p, c));
-        var wholesaleMax = Math.max(c.wholesale || 0, PC.maxWholesale(p, c));
-        var wLabel = PC.hasWholesalePack(p) ? PC.packLabel(p) : 'item';
-        var lineTotal = PC.lineTotal(p, c);
-        var rows = '';
-        if ((c.retail || 0) > 0) {
-            rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
-        }
-        if ((c.retailPack || 0) > 0 && PC.hasRetailPack(p)) {
-            rows += PC.qtyRow(id, 'Retail box', money(PC.productPrice(p, 'retail_pack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
-        }
-        if ((c.wholesale || 0) > 0) {
-            rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
-        }
-        var line = document.createElement('div');
-        line.className = 'pos-cart-line pos-cart-line-dual';
-        line.innerHTML = (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
-          + '<div class="flex-grow-1">'
-          +   '<div class="pos-cart-name">' + p.name + '</div>'
-          +   '<div class="pos-dual-qty">' + rows + '</div>'
-          +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal)
-          +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
-          +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · retail box ' + formatHalfQty(c.retailPack) : '')
-          +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
-          +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + ' items</span>' : '') + '</div>'
-          + '</div>'
-          + '<button type="button" class="pos-cart-del" data-del="' + id + '"><i class="fas fa-trash"></i></button>';
-        wrap.appendChild(line);
+/* In-Cart Search */
+var cartSearchQuery = '';
+var cartSearchInput = document.getElementById('cartSearchInput');
+var cartSearchClear = document.getElementById('cartSearchClear');
+var cartSearchCount = document.getElementById('cartSearchCount');
+if (cartSearchInput) {
+    cartSearchInput.addEventListener('input', function () {
+        cartSearchQuery = cartSearchInput.value.toLowerCase().trim();
+        if (cartSearchClear) cartSearchClear.style.display = cartSearchQuery ? 'block' : 'none';
+        render();
     });
-    if (moreBtn) {
-        if (ids.length > CART_PREVIEW_LIMIT) {
-            moreBtn.style.display = 'block';
-            moreBtn.textContent = cartExpanded
-                ? 'Show fewer items'
-                : ('View all details (' + ids.length + ' items)');
+}
+if (cartSearchClear) {
+    cartSearchClear.addEventListener('click', function () {
+        if (cartSearchInput) { cartSearchInput.value = ''; }
+        cartSearchQuery = '';
+        cartSearchClear.style.display = 'none';
+        render();
+        if (cartSearchInput) { cartSearchInput.focus(); }
+    });
+}
+
+function render() {
+    var wrap = document.getElementById('cartRows');
+    var cartSearchWrap = document.getElementById('cartSearchWrap');
+    
+    // Prune and keep strict insertion order
+    cartOrder = cartOrder.filter(function (id) { return cart[id] && !PC.isEmpty(cart[id]); });
+    Object.keys(cart).forEach(function (id) {
+        if (!PC.isEmpty(cart[id]) && cartOrder.indexOf(String(id)) === -1) {
+            cartOrder.push(String(id));
+        }
+    });
+
+    var ids = cartOrder; // Chronological order
+    var totalItems = ids.length;
+
+    var badgeEl = document.getElementById('cartTotalItemsBadge');
+    if (badgeEl) badgeEl.textContent = totalItems + ' ' + (totalItems === 1 ? 'item' : 'items');
+    var mobileBadge = document.getElementById('mobileCartCountBadge');
+    if (mobileBadge) mobileBadge.textContent = totalItems;
+
+    if (cartSearchWrap) {
+        cartSearchWrap.style.display = totalItems > 0 ? 'block' : 'none';
+    }
+
+    var query = cartSearchQuery;
+    var visibleIds = ids;
+    if (query) {
+        visibleIds = ids.filter(function (id) {
+            var p = PRODUCTS[id];
+            if (!p) return false;
+            var nameMatch = p.name && p.name.toLowerCase().indexOf(query) !== -1;
+            var barcodeMatch = BARCODES && Object.keys(BARCODES).some(function (code) {
+                return BARCODES[code] === id && code.indexOf(query) !== -1;
+            });
+            return nameMatch || barcodeMatch;
+        });
+    }
+
+    if (cartSearchCount) {
+        if (query && totalItems > 0) {
+            cartSearchCount.style.display = 'block';
+            cartSearchCount.textContent = 'Showing ' + visibleIds.length + ' of ' + totalItems + ' items in order';
         } else {
-            moreBtn.style.display = 'none';
-            cartExpanded = false;
+            cartSearchCount.style.display = 'none';
         }
     }
+
+    if (!totalItems) {
+        wrap.innerHTML = '<div class="text-muted small text-center py-5"><i class="fas fa-basket-shopping fa-2x mb-2 d-block" style="opacity:.25;"></i>Tap a product to add it.<br>Products will be arranged in order.</div>';
+    } else if (query && !visibleIds.length) {
+        wrap.innerHTML = '<div class="text-muted small text-center py-4"><i class="fas fa-magnifying-glass fa-2x mb-2 d-block" style="opacity:.25;"></i>No item matches "<strong>' + query.replace(/[&<>'"]/g, '') + '</strong>" in order.<br><button type="button" class="btn btn-sm btn-link p-0 mt-1" id="resetCartSearchFilter">Clear search</button></div>';
+        var resetBtn = document.getElementById('resetCartSearchFilter');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', function () {
+                if (cartSearchInput) { cartSearchInput.value = ''; }
+                cartSearchQuery = '';
+                if (cartSearchClear) { cartSearchClear.style.display = 'none'; }
+                render();
+            });
+        }
+    } else {
+        wrap.innerHTML = '';
+        visibleIds.forEach(function (id) {
+            var p = PRODUCTS[id], c = cart[id];
+            if (!p || !c) return;
+            var seqIndex = ids.indexOf(id) + 1;
+            var retailMax = Math.max(c.retail || 0, PC.maxRetail(p, c));
+            var retailPackMax = Math.max(c.retailPack || 0, PC.maxRetailPack(p, c));
+            var wholesaleMax = Math.max(c.wholesale || 0, PC.maxWholesale(p, c));
+            var wLabel = PC.hasWholesalePack(p) ? PC.packLabel(p) : 'item';
+            var lineTotal = PC.lineTotal(p, c);
+            var rows = '';
+            if ((c.retail || 0) > 0) {
+                rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
+            }
+            if ((c.retailPack || 0) > 0 && PC.hasRetailPack(p)) {
+                rows += PC.qtyRow(id, 'Retail box', money(PC.productPrice(p, 'retail_pack')) + '/' + PC.packLabel(p), 'retailPack', c.retailPack || 0, retailPackMax);
+            }
+            if ((c.wholesale || 0) > 0) {
+                rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
+            }
+            var line = document.createElement('div');
+            line.className = 'pos-cart-line pos-cart-line-dual';
+            line.innerHTML = '<span class="pos-cart-idx">#' + seqIndex + '</span>'
+              + (p.img ? '<img src="' + p.img + '">' : '<div class="ph"><i class="fas fa-box"></i></div>')
+              + '<div class="flex-grow-1 min-w-0">'
+              +   '<div class="pos-cart-name">' + p.name + '</div>'
+              +   '<div class="pos-dual-qty">' + rows + '</div>'
+              +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal)
+              +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
+              +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · box ' + formatHalfQty(c.retailPack) : '')
+              +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
+              +     ((PC.hasRetailPack(p) || PC.hasWholesalePack(p)) ? ' <span class="text-muted small">· stock used ' + PC.stockUsed(p, c) + '</span>' : '') + '</div>'
+              + '</div>'
+              + '<button type="button" class="pos-cart-del" data-del="' + id + '" title="Remove item"><i class="fas fa-trash"></i></button>';
+            wrap.appendChild(line);
+        });
+    }
+
     var empty = !cartHasItems();
     document.getElementById('holdBtn').disabled = empty;
     document.getElementById('checkoutBtn').disabled = empty;
     document.getElementById('cartInput').value = JSON.stringify(serializeCart());
     updateTotals();
 }
+
 function qtyInputField(input) {
     if (input.dataset.retailPackQty) return { id: input.dataset.retailPackQty, field: 'retailPack' };
     if (input.dataset.retailQty) return { id: input.dataset.retailQty, field: 'retail' };
@@ -914,7 +1532,12 @@ document.getElementById('cartRows').addEventListener('click', function (e) {
     else if (t.dataset.incWholesale) bump(t.dataset.incWholesale, 'wholesale', 0.5);
     else if (t.dataset.decWholesale) bump(t.dataset.decWholesale, 'wholesale', -0.5);
     else if (t.dataset.halfWholesale) bump(t.dataset.halfWholesale, 'wholesale', 0.5);
-    else if (t.dataset.del) { delete cart[t.dataset.del]; render(); }
+    else if (t.dataset.del) {
+        var delId = String(t.dataset.del);
+        delete cart[delId];
+        cartOrder = cartOrder.filter(function(x) { return x !== delId; });
+        render();
+    }
 });
 document.getElementById('cartRows').addEventListener('change', function (e) {
     var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
@@ -998,18 +1621,104 @@ document.getElementById('dimTabs').addEventListener('click', function (e) {
 var offerBanner = document.getElementById('offerBanner');
 if (offerBanner) { offerBanner.addEventListener('click', function () { selectDim('offers'); }); }
 
-document.getElementById('holdBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'hold'; document.getElementById('orderForm').submit(); });
-var cartViewAll = document.getElementById('cartViewAll');
-if (cartViewAll) {
-    cartViewAll.addEventListener('click', function () {
-        cartExpanded = !cartExpanded;
-        render();
-        if (cartExpanded) {
-            var cartEl = document.getElementById('cartRows');
-            if (cartEl) cartEl.scrollTop = 0;
+/* Holding Sale Handling */
+var holdBtn = document.getElementById('holdBtn');
+var holdSaleModal = document.getElementById('holdSaleModal');
+var holdReferenceInput = document.getElementById('holdReferenceInput');
+var btnConfirmHold = document.getElementById('btnConfirmHold');
+
+if (holdBtn) {
+    holdBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var custInput = document.getElementById('customerName');
+        var custVal = custInput ? custInput.value.trim() : '';
+        if (holdSaleModal && window.bootstrap) {
+            if (holdReferenceInput) {
+                holdReferenceInput.value = custVal;
+            }
+            new bootstrap.Modal(holdSaleModal).show();
+            setTimeout(function () {
+                if (holdReferenceInput) { holdReferenceInput.focus(); }
+            }, 300);
+        } else {
+            document.getElementById('formAction').value = 'hold';
+            document.getElementById('orderForm').submit();
         }
     });
 }
+
+if (btnConfirmHold) {
+    btnConfirmHold.addEventListener('click', function () {
+        var note = holdReferenceInput ? holdReferenceInput.value.trim() : '';
+        var custInput = document.getElementById('customerName');
+        if (custInput && note) {
+            custInput.value = note;
+        }
+        document.getElementById('formAction').value = 'hold';
+        document.getElementById('orderForm').submit();
+    });
+}
+
+/* Resume & Discard from Held Sales Modal */
+document.querySelectorAll('.js-resume-held').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var id = btn.dataset.id;
+        var shopUrl = <?php echo json_encode($shopUrl); ?>;
+        if (cartHasItems()) {
+            if (confirm('You already have items in the current order.\n\nWould you like to put the current order on hold before resuming this one?\n\n- Click OK to HOLD current sale & resume\n- Click Cancel to discard current cart and switch')) {
+                document.getElementById('formAction').value = 'hold';
+                var afterInput = document.createElement('input');
+                afterInput.type = 'hidden';
+                afterInput.name = 'resume_after';
+                afterInput.value = id;
+                document.getElementById('orderForm').appendChild(afterInput);
+                document.getElementById('orderForm').submit();
+                return;
+            }
+        }
+        window.location.href = shopUrl + '?resume=' + id;
+    });
+});
+
+document.querySelectorAll('.js-discard-held').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var id = btn.dataset.id;
+        if (confirm('Permanently discard held sale #' + id + '?')) {
+            document.getElementById('discardHeldId').value = id;
+            document.getElementById('discardHeldForm').submit();
+        }
+    });
+});
+
+/* Clear Sale Button */
+var clearSaleBtn = document.getElementById('clearSaleBtn');
+if (clearSaleBtn) {
+    clearSaleBtn.addEventListener('click', function () {
+        if (cartHasItems()) {
+            if (!confirm('Start a new sale? Any unsaved items in this order will be cleared.')) {
+                return;
+            }
+        }
+        window.location.href = <?php echo json_encode($shopUrl); ?>;
+    });
+}
+
+/* Mobile Offcanvas Drawer Handlers */
+var posSide = document.getElementById('posSide');
+var mobileOpenCartBtn = document.getElementById('mobileOpenCartBtn');
+var openMobileCartFromBar = document.getElementById('openMobileCartFromBar');
+var closeMobileCartBtn = document.getElementById('closeMobileCartBtn');
+
+function openMobileDrawer() {
+    if (posSide) { posSide.classList.add('mobile-open'); }
+}
+function closeMobileDrawer() {
+    if (posSide) { posSide.classList.remove('mobile-open'); }
+}
+if (mobileOpenCartBtn) mobileOpenCartBtn.addEventListener('click', openMobileDrawer);
+if (openMobileCartFromBar) openMobileCartFromBar.addEventListener('click', openMobileDrawer);
+if (closeMobileCartBtn) closeMobileCartBtn.addEventListener('click', closeMobileDrawer);
+
 document.getElementById('checkoutBtn').addEventListener('click', function () {
     document.getElementById('formAction').value = 'pay';
     document.getElementById('cartButtons').style.display = 'none';
@@ -1115,10 +1824,8 @@ if (barcodeScan) {
         add(id);
         flashScan((p ? p.name : 'Product') + ' added.', true);
     });
-    // Keep the scanner's keystrokes landing here even after other clicks,
-    // as long as no other field is being typed into.
     document.addEventListener('click', function (e) {
-        if (e.target === barcodeScan || e.target.closest('input, textarea, select, option, label, button, .btn-group')) { return; }
+        if (e.target === barcodeScan || e.target.closest('input, textarea, select, option, label, button, .btn-group, .modal')) { return; }
         barcodeScan.focus();
     });
 }

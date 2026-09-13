@@ -84,30 +84,40 @@ function single_product_package_fields(array $row, array $units): array
 
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $destination = in_array($_POST['destination'] ?? '', ['store', 'shop'], true) ? $_POST['destination'] : 'store';
     $name = trim($_POST['name'] ?? '');
     $pkg = single_product_package_fields($_POST, $units);
-    $qty = (float) $pkg['quantity'];
-    $faulty = (float) $pkg['faulty_quantity'];
-    $unit = $pkg['unit'];
-    $supplierId = trim($_POST['supplier'] ?? '') !== '' ? (int) $SUP->findOrCreate($_POST['supplier']) : 0;
+    $packageQty = max(0, (float) ($_POST['package_quantity'] ?? 0));
+    $inside = max(0, (float) ($_POST['units_per_package'] ?? 0));
+    $directQty = max(0, (float) ($_POST['quantity'] ?? 0));
+    $effectiveInside = $inside > 0 ? $inside : 1.0;
+    $qty = $directQty > 0 ? $directQty : ($packageQty > 0 ? round($packageQty * $effectiveInside, 2) : 0.0);
+    $faulty = max(0, (float) ($_POST['faulty_quantity'] ?? 0));
+    $sellingPrice = max(0, (float) ($_POST['selling_price'] ?? 0));
+    $buyingPrice = max(0, (float) ($_POST['buying_price'] ?? 0));
+    $wholesalePrice = max(0, (float) ($_POST['wholesale_price'] ?? 0));
+    $retailPackPrice = max(0, (float) ($_POST['retail_pack_price'] ?? 0));
+    $barcode = trim((string) ($_POST['barcode'] ?? ''));
 
-    if ($name === '') {
-        $error = 'Product name is required.';
-    } elseif ((float) ($_POST['package_quantity'] ?? 0) <= 0) {
-        $error = 'Enter how many packages (cartons/bales/etc.) you received.';
-    } elseif ((float) ($_POST['units_per_package'] ?? 0) <= 0) {
-        $error = 'Enter how many items are inside each package.';
-    } elseif (($pkg['package_buying_price'] ?? 0) <= 0 && (float) ($_POST['buying_price'] ?? 0) <= 0) {
-        $error = 'Enter the buying price of each package (carton/bale).';
-    } elseif (($pkg['package_price'] ?? 0) <= 0 && (float) ($_POST['wholesale_price'] ?? 0) <= 0) {
-        $error = 'Enter the wholesale selling price of each package.';
-    } elseif (($pkg['retail_pack_price'] ?? 0) <= 0 && (float) ($_POST['retail_pack_price'] ?? 0) <= 0) {
-        $error = 'Enter the retail selling price of each package.';
-    } elseif ((float) ($_POST['selling_price'] ?? 0) <= 0) {
-        $error = 'Enter the retail price of a single item inside the package.';
-    } elseif ($qty <= 0) {
-        $error = 'Packages × items inside must be greater than zero.';
+    $hasContent = $name !== '' || (int) ($_POST['product_choice'] ?? 0) > 0
+        || $packageQty > 0 || $directQty > 0 || $buyingPrice > 0
+        || $wholesalePrice > 0 || $retailPackPrice > 0 || $sellingPrice > 0
+        || $barcode !== '';
+
+    if (!$hasContent) {
+        $error = 'Please fill in at least one field (e.g. product name or price) to record.';
     } else {
+        if ($name === '' && (int) ($_POST['product_choice'] ?? 0) <= 0) {
+            $p = $sellingPrice > 0 ? $sellingPrice : ($retailPackPrice > 0 ? $retailPackPrice : ($buyingPrice > 0 ? $buyingPrice : 0));
+            $name = $p > 0 ? ('Product KES ' . number_format($p, 0)) : ('Item ' . date('j M H:i'));
+        }
+
+        $unit = in_array($_POST['inner_unit'] ?? '', $units, true) ? $_POST['inner_unit'] : 'piece';
+        $receiveUnit = in_array($_POST['unit'] ?? '', $units, true) ? $_POST['unit'] : 'carton';
+        $supplierId = trim($_POST['supplier'] ?? '') !== '' ? (int) $SUP->findOrCreate($_POST['supplier']) : 0;
+        $unitBuying = ($buyingPrice > 0 && $effectiveInside > 0) ? round($buyingPrice / $effectiveInside, 2) : 0.0;
+        $unitWholesale = ($wholesalePrice > 0 && $effectiveInside > 0) ? round($wholesalePrice / $effectiveInside, 2) : 0.0;
+
         $img = single_product_handle_image($_FILES['image'] ?? []);
         if (!$img['ok']) {
             $error = $img['error'];
@@ -120,187 +130,250 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $batchNotes = trim((string) ($_POST['notes'] ?? ''));
             $lineNotes = trim((string) ($_POST['remark'] ?? '')) ?: $batchNotes;
-            if ($existing) {
-                $items = [[
-                    'product_id' => (int) $existing['id'],
-                    'name' => $existing['name'],
-                    'category_id' => (int) ($existing['category_id'] ?? 0),
-                    'brand_id' => (int) ($existing['brand_id'] ?? 0),
-                    'supplier_id' => $supplierId,
-                    'barcode' => $existing['barcode'] ?? '',
-                    'unit' => $unit,
-                    'package_unit' => $pkg['package_unit'],
-                    'package_quantity' => $pkg['package_quantity'],
-                    'units_per_package' => $pkg['units_per_package'],
-                    'package_price' => $pkg['package_price'],
-                    'retail_pack_price' => ($pkg['retail_pack_price'] ?? 0) > 0 ? $pkg['retail_pack_price'] : ($existing['retail_pack_price'] ?? null),
-                    'package_buying_price' => $pkg['package_buying_price'],
-                    'colors' => '',
-                    'quantity' => $qty,
-                    'faulty_quantity' => $faulty,
-                    'buying_price' => $pkg['buying_price'],
-                    'retail_price' => ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
-                    'wholesale_price' => $pkg['wholesale_price'] !== '' ? $pkg['wholesale_price'] : ($existing['wholesale_price'] ?? 0),
-                    'offer_price' => '',
-                    'offer_starts_at' => '',
-                    'offer_ends_at' => '',
-                    'image_path' => '',
-                    'notes' => $lineNotes,
-                ]];
-            } else {
-                $items = [[
-                    'product_id' => 0,
-                    'name' => $name,
-                    'category_id' => (int) $C->findOrCreate($_POST['category'] ?? '', 'product'),
-                    'brand_id' => (int) $BA->findOrCreate('brand', $_POST['brand'] ?? ''),
-                    'supplier_id' => $supplierId,
-                    'barcode' => trim($_POST['barcode'] ?? ''),
-                    'unit' => $unit,
-                    'package_unit' => $pkg['package_unit'],
-                    'package_quantity' => $pkg['package_quantity'],
-                    'units_per_package' => $pkg['units_per_package'],
-                    'package_price' => $pkg['package_price'],
-                    'retail_pack_price' => $pkg['retail_pack_price'],
-                    'package_buying_price' => $pkg['package_buying_price'],
-                    'colors' => '',
-                    'quantity' => $qty,
-                    'faulty_quantity' => $faulty,
-                    'buying_price' => $pkg['buying_price'],
-                    'retail_price' => $_POST['selling_price'] ?? 0,
-                    'wholesale_price' => $pkg['wholesale_price'],
-                    'offer_price' => $_POST['offer_price'] ?? '',
-                    'offer_starts_at' => $_POST['offer_starts_at'] ?? '',
-                    'offer_ends_at' => $_POST['offer_ends_at'] ?? '',
-                    'image_path' => $img['path'] ?? '',
-                    'notes' => $lineNotes,
-                ]];
-            }
-            $res = $SP->createMany($items, TenantContext::userId());
-            if ($res['ok']) {
-                $_SESSION['flash']['success'] = 'Product saved to Store (warehouse). Generate an internal transfer invoice when you want it in shop Inventory.';
-                header('Location: ' . public_url('super/store/'));
+
+            if ($destination === 'shop') {
+                if ($existing) {
+                    $newQty = (float) $existing['quantity'] + $qty;
+                    $P->edit((int) $existing['id'], array_merge($existing, [
+                        'quantity' => $newQty,
+                        'buying_price' => $unitBuying > 0 ? $unitBuying : ($existing['buying_price'] ?? 0),
+                        'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
+                        'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
+                        'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : ($existing['wholesale_price'] ?? 0),
+                    ]));
+                } else {
+                    $P->create([
+                        'name' => $name,
+                        'category_id' => !empty($_POST['category']) ? (int) $C->findOrCreate($_POST['category'], 'product') : null,
+                        'brand_id' => !empty($_POST['brand']) ? (int) $BA->findOrCreate('brand', $_POST['brand']) : null,
+                        'supplier_id' => $supplierId ?: null,
+                        'barcode' => $barcode ?: null,
+                        'unit' => $unit,
+                        'pack_unit' => $receiveUnit,
+                        'pack_price' => $wholesalePrice > 0 ? $wholesalePrice : null,
+                        'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : null,
+                        'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : null,
+                        'units_per_pack' => $effectiveInside,
+                        'quantity' => $qty,
+                        'faulty_quantity' => $faulty,
+                        'buying_price' => $unitBuying,
+                        'wholesale_price' => $unitWholesale,
+                        'retail_price' => $sellingPrice,
+                        'offer_price' => $_POST['offer_price'] ?? null,
+                        'offer_starts_at' => $_POST['offer_starts_at'] ?? null,
+                        'offer_ends_at' => $_POST['offer_ends_at'] ?? null,
+                        'image_path' => $img['path'] ?? null,
+                        'description' => $lineNotes ?: null,
+                    ]);
+                }
+                $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
+                header('Location: ' . public_url('super/inventory/'));
                 exit;
+            } else {
+                if ($existing) {
+                    $items = [[
+                        'product_id' => (int) $existing['id'],
+                        'name' => $existing['name'],
+                        'category_id' => (int) ($existing['category_id'] ?? 0),
+                        'brand_id' => (int) ($existing['brand_id'] ?? 0),
+                        'supplier_id' => $supplierId,
+                        'barcode' => $existing['barcode'] ?? '',
+                        'unit' => $unit,
+                        'package_unit' => $receiveUnit,
+                        'package_quantity' => $packageQty > 0 ? $packageQty : null,
+                        'units_per_package' => $effectiveInside,
+                        'package_price' => $wholesalePrice > 0 ? $wholesalePrice : null,
+                        'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : ($existing['retail_pack_price'] ?? null),
+                        'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : null,
+                        'colors' => '',
+                        'quantity' => $qty,
+                        'faulty_quantity' => $faulty,
+                        'buying_price' => $unitBuying > 0 ? $unitBuying : (float) ($existing['buying_price'] ?? 0),
+                        'retail_price' => $sellingPrice > 0 ? $sellingPrice : (float) ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
+                        'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : (float) ($existing['wholesale_price'] ?? 0),
+                        'offer_price' => '',
+                        'offer_starts_at' => '',
+                        'offer_ends_at' => '',
+                        'image_path' => '',
+                        'notes' => $lineNotes,
+                    ]];
+                } else {
+                    $items = [[
+                        'product_id' => 0,
+                        'name' => $name,
+                        'category_id' => !empty($_POST['category']) ? (int) $C->findOrCreate($_POST['category'], 'product') : 0,
+                        'brand_id' => !empty($_POST['brand']) ? (int) $BA->findOrCreate('brand', $_POST['brand']) : 0,
+                        'supplier_id' => $supplierId,
+                        'barcode' => $barcode,
+                        'unit' => $unit,
+                        'package_unit' => $receiveUnit,
+                        'package_quantity' => $packageQty > 0 ? $packageQty : null,
+                        'units_per_package' => $effectiveInside,
+                        'package_price' => $wholesalePrice > 0 ? $wholesalePrice : null,
+                        'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : null,
+                        'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : null,
+                        'colors' => '',
+                        'quantity' => $qty,
+                        'faulty_quantity' => $faulty,
+                        'buying_price' => $unitBuying,
+                        'retail_price' => $sellingPrice,
+                        'wholesale_price' => $unitWholesale,
+                        'offer_price' => $_POST['offer_price'] ?? '',
+                        'offer_starts_at' => $_POST['offer_starts_at'] ?? '',
+                        'offer_ends_at' => $_POST['offer_ends_at'] ?? '',
+                        'image_path' => $img['path'] ?? '',
+                        'notes' => $lineNotes,
+                    ]];
+                }
+                $res = $SP->createMany($items, TenantContext::userId());
+                if ($res['ok']) {
+                    $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved to Store (warehouse). Generate an internal transfer invoice when you want it in shop Inventory.';
+                    header('Location: ' . public_url('super/store/'));
+                    exit;
+                }
+                $error = $res['error'] ?? 'Could not record this product to Store.';
             }
-            $error = $res['error'] ?? 'Could not record this product to Store.';
         }
     }
 }
 
-$page_title = 'Record product to Store';
+$page_title = 'Record Single Product';
 ob_start();
 ?>
 <?php if ($error): ?><div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-  <p class="text-muted small mb-0">Records into the <strong>Store warehouse</strong> (not shop Inventory). Transfer later from <a href="<?php echo public_url('super/store/'); ?>">Store</a>. Need many lines? <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products in bulk</a>.</p>
+  <p class="text-muted small mb-0">Record a single product into <strong>Store warehouse</strong> or directly into <strong>Shop Inventory</strong>. Need to record multiple items? <a href="<?php echo public_url('super/stock/new.php'); ?>">Record products in bulk</a>.</p>
 </div>
 
-<form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm" style="border-radius:12px;">
+<form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm" style="border-radius:12px;" novalidate>
   <div class="card-body p-4">
+    <div class="mb-4">
+      <label class="form-label fw-semibold">Destination</label>
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <label class="d-flex align-items-start p-3 border rounded cursor-pointer h-100" style="cursor:pointer;border-radius:10px;">
+            <input type="radio" name="destination" value="store" class="form-check-input me-3 mt-1 dest-radio" checked id="destStore">
+            <div>
+              <div class="fw-bold text-dark"><i class="fas fa-box-archive text-primary me-2"></i>Store (Warehouse)</div>
+              <div class="small text-muted mt-1">Product lands in the Store warehouse awaiting transfer to shop via invoice.</div>
+            </div>
+          </label>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="d-flex align-items-start p-3 border rounded cursor-pointer h-100" style="cursor:pointer;border-radius:10px;">
+            <input type="radio" name="destination" value="shop" class="form-check-input me-3 mt-1 dest-radio" id="destShop">
+            <div>
+              <div class="fw-bold text-dark"><i class="fas fa-store text-success me-2"></i>Shop (Active Inventory)</div>
+              <div class="small text-muted mt-1">Product appears directly in shop Inventory, available immediately for cashier counter sales.</div>
+            </div>
+      </div>
+    </div>
+
     <div class="row g-3">
       <div class="col-12 col-md-6">
-        <label class="form-label fw-semibold">Product name</label>
+        <label class="form-label fw-semibold">Product name <span class="text-muted fw-normal small">(optional)</span></label>
         <div class="ta-wrap">
-          <input type="text" name="name" id="prodName" class="form-control ta-input" data-field="title" required placeholder="e.g. Yellow beans, Cooking oil 5L" value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>" autocomplete="off">
+          <input type="text" name="name" id="prodName" class="form-control ta-input" data-field="title" placeholder="e.g. Yellow beans, Cooking oil 5L" value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
         <input type="hidden" name="product_choice" id="productChoice" value="">
         <div id="matchNote" class="small text-primary mt-1" style="display:none;"></div>
       </div>
       <div class="col-12 col-md-6">
-        <label class="form-label fw-semibold"><i class="fas fa-barcode me-1"></i>Barcode</label>
+        <label class="form-label fw-semibold"><i class="fas fa-barcode me-1"></i>Barcode <span class="text-muted fw-normal small">(optional)</span></label>
         <input type="text" name="barcode" id="barcodeField" class="form-control" placeholder="Scan or type" value="<?php echo htmlspecialchars($_POST['barcode'] ?? ''); ?>" autocomplete="off">
         <div id="barcodeNote" class="small mt-1" style="display:none;"></div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold">Category</label>
+        <label class="form-label fw-semibold">Category <span class="text-muted fw-normal small">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="category" class="form-control ta-input" data-field="category" placeholder="e.g. Cereals" value="<?php echo htmlspecialchars($_POST['category'] ?? ''); ?>" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold">Brand</label>
+        <label class="form-label fw-semibold">Brand <span class="text-muted fw-normal small">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="brand" class="form-control ta-input" data-field="brand" placeholder="optional" value="<?php echo htmlspecialchars($_POST['brand'] ?? ''); ?>" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
-      <div class="col-md-3">
-        <label class="form-label fw-semibold">Received as <span class="text-danger">*</span></label>
-        <select name="unit" id="unitSelect" class="form-select" required>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Packaging unit <span class="text-muted fw-normal small">(optional)</span></label>
+        <select name="unit" id="unitSelect" class="form-select">
           <?php
             $packageUnits = array_values(array_filter($units, fn($u) => $u !== 'piece'));
             $selectedUnit = $_POST['unit'] ?? 'carton';
             if ($selectedUnit === 'piece') { $selectedUnit = 'carton'; }
             foreach ($packageUnits as $u):
           ?>
-            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $selectedUnit === $u ? 'selected' : ''; ?>><?php echo htmlspecialchars($u); ?></option>
+            <option value="<?php echo htmlspecialchars($u); ?>" <?php echo $selectedUnit === $u ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($u)); ?></option>
           <?php endforeach; ?>
         </select>
-        <div class="form-text">Carton, bale, pack, dozen, box…</div>
+        <div class="form-text">Carton, bale, parcel, sack, pack, dozen, box…</div>
       </div>
       <div class="col-12" id="packageFields">
-        <div class="border rounded p-3" style="border-color:#e2e8f0!important;">
-          <div class="small fw-semibold mb-2 text-danger">Package details (all required)</div>
+        <div class="border rounded p-3" style="border-color:#e2e8f0!important;background:#fafbfc;">
+          <div class="small fw-semibold mb-2 text-secondary"><i class="fas fa-boxes-stacked me-1"></i>Package &amp; Unit details <span class="text-muted fw-normal">(optional)</span></div>
           <div class="row g-2">
             <div class="col-md-3">
-              <label class="form-label small mb-1" id="packageQtyLabel">Number of packages <span class="text-danger">*</span></label>
-              <input type="number" step="0.01" min="0.01" name="package_quantity" id="packageQty" class="form-control form-control-sm" required value="<?php echo htmlspecialchars($_POST['package_quantity'] ?? ''); ?>" placeholder="e.g. 20">
+              <label class="form-label small mb-1" id="packageQtyLabel">Number of packages <span class="text-muted">(optional)</span></label>
+              <input type="number" step="0.01" min="0" name="package_quantity" id="packageQty" class="form-control form-control-sm" value="<?php echo htmlspecialchars($_POST['package_quantity'] ?? ''); ?>" placeholder="e.g. 20">
             </div>
             <div class="col-md-3">
-              <label class="form-label small mb-1" id="unitsPerPackageLabel">Items inside each package <span class="text-danger">*</span></label>
-              <input type="number" step="0.01" min="0.01" name="units_per_package" id="unitsPerPackage" class="form-control form-control-sm" required value="<?php echo htmlspecialchars($_POST['units_per_package'] ?? ''); ?>" placeholder="e.g. 12">
+              <label class="form-label small mb-1" id="unitsPerPackageLabel">Items inside each package <span class="text-muted">(optional)</span></label>
+              <input type="number" step="0.01" min="0" name="units_per_package" id="unitsPerPackage" class="form-control form-control-sm" value="<?php echo htmlspecialchars($_POST['units_per_package'] ?? ''); ?>" placeholder="e.g. 12">
             </div>
             <div class="col-md-3">
               <label class="form-label small mb-1">Inside item unit</label>
               <select name="inner_unit" class="form-select form-select-sm">
                 <?php foreach ($units as $u): ?>
-                  <option value="<?php echo htmlspecialchars($u); ?>" <?php echo (($_POST['inner_unit'] ?? 'piece') === $u) ? 'selected' : ''; ?>><?php echo htmlspecialchars($u); ?></option>
+                  <option value="<?php echo htmlspecialchars($u); ?>" <?php echo (($_POST['inner_unit'] ?? 'piece') === $u) ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($u)); ?></option>
                 <?php endforeach; ?>
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label small mb-1">Total sellable items</label>
+              <label class="form-label small mb-1">Calculated pack items</label>
               <div class="form-control form-control-sm bg-light" id="totalItems">0</div>
             </div>
           </div>
         </div>
       </div>
       <div class="col-md-3">
-        <label class="form-label fw-semibold" id="qtyLabel">Total sellable items</label>
-        <input type="number" step="0.01" min="0" name="quantity" id="quantityInput" class="form-control" readonly value="<?php echo htmlspecialchars($_POST['quantity'] ?? ''); ?>">
+        <label class="form-label fw-semibold" id="qtyLabel">Total sellable items <span class="text-muted fw-normal small">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="quantity" id="quantityInput" class="form-control" placeholder="Auto or enter directly" value="<?php echo htmlspecialchars($_POST['quantity'] ?? ''); ?>">
       </div>
       <div class="col-md-3">
-        <label class="form-label fw-semibold">Faulty / broken packages</label>
+        <label class="form-label fw-semibold">Faulty / broken items <span class="text-muted fw-normal small">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="faulty_quantity" class="form-control" value="<?php echo htmlspecialchars($_POST['faulty_quantity'] ?? '0'); ?>">
       </div>
       <div class="col-md-3">
-        <label class="form-label fw-semibold">Supplier</label>
+        <label class="form-label fw-semibold">Supplier <span class="text-muted fw-normal small">(optional)</span></label>
         <div class="ta-wrap">
           <input type="text" name="supplier" class="form-control ta-input" data-field="supplier" placeholder="optional" value="<?php echo htmlspecialchars($_POST['supplier'] ?? ''); ?>" autocomplete="off">
           <div class="ta-menu"></div>
         </div>
       </div>
-      <div class="col-md-4">
-        <label class="form-label fw-semibold" id="buyingLabel">Buying price per package (KES) <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="buying_price" id="buyingPrice" class="form-control" required value="<?php echo htmlspecialchars($_POST['buying_price'] ?? ''); ?>">
-        <div class="form-text" id="buyingHint">Cost of one carton/bale/package.</div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold" id="buyingLabel">Buying price per package <span class="text-muted fw-normal small">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="buying_price" id="buyingPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['buying_price'] ?? ''); ?>" placeholder="0">
+        <div class="form-text" id="buyingHint">Cost per package.</div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold" id="wholesaleLabel">Wholesale price per package <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="wholesale_price" id="wholesalePrice" class="form-control" required value="<?php echo htmlspecialchars($_POST['wholesale_price'] ?? ''); ?>">
-        <div class="form-text" id="wholesaleHint">Selling price when selling a whole package (wholesale).</div>
+        <label class="form-label fw-semibold" id="wholesaleLabel">Wholesale price per package <span class="text-muted fw-normal small">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="wholesale_price" id="wholesalePrice" class="form-control" value="<?php echo htmlspecialchars($_POST['wholesale_price'] ?? ''); ?>" placeholder="0">
+        <div class="form-text" id="wholesaleHint">Selling price per whole package (wholesale).</div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold" id="retailPackLabel">Retail price per package <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="retail_pack_price" id="retailPackPrice" class="form-control" required value="<?php echo htmlspecialchars($_POST['retail_pack_price'] ?? ''); ?>">
-        <div class="form-text" id="retailPackHint">Selling price when selling a whole package at retail.</div>
+        <label class="form-label fw-semibold" id="retailPackLabel">Retail price per package <span class="text-muted fw-normal small">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="retail_pack_price" id="retailPackPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['retail_pack_price'] ?? ''); ?>" placeholder="0">
+        <div class="form-text" id="retailPackHint">Selling price per whole package at retail.</div>
       </div>
       <div class="col-md-4">
-        <label class="form-label fw-semibold" id="retailLabel">Retail price (single item) <span class="text-danger">*</span></label>
-        <input type="number" step="0.01" min="0.01" name="selling_price" id="retailPrice" class="form-control" required value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>">
-        <div class="form-text">Price when selling one item from inside the package.</div>
+        <label class="form-label fw-semibold" id="retailLabel">Retail price (single item) <span class="text-muted fw-normal small">(optional)</span></label>
+        <input type="number" step="0.01" min="0" name="selling_price" id="retailPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>" placeholder="0">
+        <div class="form-text">Price when selling one item individually.</div>
       </div>
       <div class="col-12">
         <div id="profitSummary" class="alert alert-light border small mb-0" style="display:none;"></div>
@@ -329,16 +402,16 @@ ob_start();
         </div>
       </div>
       <div class="col-md-6">
-        <label class="form-label fw-semibold">Photo</label>
+        <label class="form-label fw-semibold">Photo <span class="text-muted fw-normal small">(optional)</span></label>
         <input type="file" name="image" accept="image/*" class="form-control">
       </div>
       <div class="col-md-6">
-        <label class="form-label fw-semibold">Remark</label>
-        <input type="text" name="remark" class="form-control" placeholder="e.g. damaged carton" value="<?php echo htmlspecialchars($_POST['remark'] ?? ''); ?>">
+        <label class="form-label fw-semibold">Remark <span class="text-muted fw-normal small">(optional)</span></label>
+        <input type="text" name="remark" class="form-control" placeholder="e.g. damaged package, note" value="<?php echo htmlspecialchars($_POST['remark'] ?? ''); ?>">
       </div>
     </div>
     <div class="mt-4">
-      <button class="btn btn-primary"><i class="fas fa-box-open me-1"></i>Save to Store warehouse</button>
+      <button class="btn btn-primary btn-lg" id="singleSubmitBtn"><i class="fas fa-box-open me-1"></i><span id="singleSubmitBtnText">Save to Store warehouse</span></button>
     </div>
   </div>
 </form>
@@ -374,10 +447,16 @@ ob_start();
   var unitsPerPackage = document.getElementById('unitsPerPackage');
   function money(n) { return 'KES ' + (Math.round(n * 100) / 100).toLocaleString(); }
   function recalcPackage() {
-    var unit = unitSelect ? unitSelect.value : 'carton';
+    var unit = unitSelect ? unitSelect.value : 'package';
     var pkgQty = parseFloat(packageQty ? packageQty.value : 0) || 0;
     var inside = parseFloat(unitsPerPackage ? unitsPerPackage.value : 0) || 0;
-    var total = pkgQty > 0 && inside > 0 ? Math.round(pkgQty * inside * 100) / 100 : 0;
+    var total = 0;
+    if (pkgQty > 0 && inside > 0) {
+      total = Math.round(pkgQty * inside * 100) / 100;
+      quantityInput.value = total;
+    } else {
+      total = parseFloat(quantityInput.value) || 0;
+    }
     var buy = parseFloat(document.getElementById('buyingPrice').value) || 0;
     var retail = parseFloat(document.getElementById('retailPrice').value) || 0;
     var wholesale = parseFloat(document.getElementById('wholesalePrice').value) || 0;
@@ -386,43 +465,39 @@ ob_start();
     if (packageFields) packageFields.style.display = 'block';
     var packageQtyLabel = document.getElementById('packageQtyLabel');
     var unitsPerPackageLabel = document.getElementById('unitsPerPackageLabel');
-    if (packageQtyLabel) packageQtyLabel.innerHTML = 'Number of ' + unit + 's <span class="text-danger">*</span>';
-    if (unitsPerPackageLabel) unitsPerPackageLabel.innerHTML = 'Items inside each ' + unit + ' <span class="text-danger">*</span>';
-    if (document.getElementById('totalItems')) document.getElementById('totalItems').textContent = total;
-    quantityInput.value = total;
-    quantityInput.readOnly = true;
+    if (packageQtyLabel) packageQtyLabel.innerHTML = 'Number of ' + unit + 's <span class="text-muted">(optional)</span>';
+    if (unitsPerPackageLabel) unitsPerPackageLabel.innerHTML = 'Items inside each ' + unit + ' <span class="text-muted">(optional)</span>';
+    if (document.getElementById('totalItems')) document.getElementById('totalItems').textContent = (pkgQty > 0 && inside > 0 ? total : 0);
     document.getElementById('qtyLabel').textContent = 'Total sellable items';
-    document.getElementById('buyingLabel').innerHTML = 'Buying price per ' + unit + ' (KES) <span class="text-danger">*</span>';
-    document.getElementById('buyingHint').textContent = 'Cost of one ' + unit + '. Total cost = this × number of ' + unit + 's.';
-    document.getElementById('retailLabel').innerHTML = 'Retail price (single item inside) <span class="text-danger">*</span>';
-    document.getElementById('wholesaleLabel').innerHTML = 'Wholesale price per ' + unit + ' <span class="text-danger">*</span>';
-    document.getElementById('wholesaleHint').textContent = 'Selling price when the customer buys a whole ' + unit + ' wholesale.';
+    document.getElementById('buyingLabel').innerHTML = 'Buying price per ' + unit + ' <span class="text-muted">(optional)</span>';
+    document.getElementById('buyingHint').textContent = 'Cost of one ' + unit + '.';
+    document.getElementById('retailLabel').innerHTML = 'Retail price (single item) <span class="text-muted">(optional)</span>';
+    document.getElementById('wholesaleLabel').innerHTML = 'Wholesale price per ' + unit + ' <span class="text-muted">(optional)</span>';
+    document.getElementById('wholesaleHint').textContent = 'Selling price when customer buys a whole ' + unit + ' wholesale.';
     var retailPackLabel = document.getElementById('retailPackLabel');
     var retailPackHint = document.getElementById('retailPackHint');
-    if (retailPackLabel) retailPackLabel.innerHTML = 'Retail price per ' + unit + ' <span class="text-danger">*</span>';
-    if (retailPackHint) retailPackHint.textContent = 'Selling price when the customer buys a whole ' + unit + ' at retail.';
+    if (retailPackLabel) retailPackLabel.innerHTML = 'Retail price per ' + unit + ' <span class="text-muted">(optional)</span>';
+    if (retailPackHint) retailPackHint.textContent = 'Selling price when customer buys a whole ' + unit + ' at retail.';
     var summary = document.getElementById('profitSummary');
     if (!summary) return;
-    if (total <= 0 || buy <= 0 || wholesale <= 0 || retail <= 0 || retailPack <= 0) {
+    var cost = pkgQty > 0 ? (pkgQty * buy) : (total * buy);
+    var wholesaleReturn = pkgQty > 0 && wholesale > 0 ? (pkgQty * wholesale) : (total * wholesale);
+    var retailReturn = pkgQty > 0 && retailPack > 0 ? (pkgQty * retailPack) : (total * retail);
+    if (cost <= 0 && wholesaleReturn <= 0 && retailReturn <= 0) {
       summary.style.display = 'none';
       return;
     }
-    var cost = pkgQty * buy;
-    var wholesaleReturn = pkgQty * wholesale;
-    var retailReturn = pkgQty * retailPack;
     var wholesaleProfit = wholesaleReturn - cost;
     var retailProfit = retailReturn - cost;
     var wholesaleMargin = wholesaleReturn > 0 ? (wholesaleProfit / wholesaleReturn * 100) : 0;
     var retailMargin = retailReturn > 0 ? (retailProfit / retailReturn * 100) : 0;
     summary.style.display = 'block';
-    summary.innerHTML = '<strong>Expected profit for this delivery</strong>'
+    summary.innerHTML = '<strong>Expected return / profit for this product</strong>'
       + '<br>Cost: <strong>' + money(cost) + '</strong>'
-      + ' <span class="text-muted">(' + pkgQty + ' × ' + money(buy) + ')</span>'
-      + '<br>Wholesale profit (sell by ' + unit + '): <strong class="' + (wholesaleProfit < 0 ? 'text-danger' : 'text-success') + '">' + money(wholesaleProfit) + '</strong>'
-      + ' · ' + wholesaleMargin.toFixed(1) + '%'
-      + '<br>Retail profit (sell by ' + unit + '): <strong class="' + (retailProfit < 0 ? 'text-danger' : 'text-success') + '">' + money(retailProfit) + '</strong>'
-      + ' · ' + retailMargin.toFixed(1) + '%'
-      + '<br><span class="text-muted">Single-item retail still recorded: ' + money(retail) + ' each.</span>';
+      + '<br>Wholesale return: <strong>' + money(wholesaleReturn) + '</strong>'
+      + ' <span class="' + (wholesaleProfit < 0 ? 'text-danger' : 'text-success') + '">Profit ' + money(wholesaleProfit) + ' · ' + wholesaleMargin.toFixed(1) + '%</span>'
+      + '<br>Retail return: <strong>' + money(retailReturn) + '</strong>'
+      + ' <span class="' + (retailProfit < 0 ? 'text-danger' : 'text-success') + '">Profit ' + money(retailProfit) + ' · ' + retailMargin.toFixed(1) + '%</span>';
   }
   [unitSelect, packageQty, unitsPerPackage, quantityInput,
     document.getElementById('buyingPrice'),
@@ -436,6 +511,20 @@ ob_start();
     }
   });
   recalcPackage();
+
+  function updateDestUI() {
+    var isShop = document.getElementById('destShop').checked;
+    var btnText = document.getElementById('singleSubmitBtnText');
+    if (isShop) {
+      if (btnText) btnText.textContent = 'Save directly to Shop Inventory (Sell immediately)';
+    } else {
+      if (btnText) btnText.textContent = 'Save to Store warehouse';
+    }
+  }
+  document.querySelectorAll('.dest-radio').forEach(function (r) {
+    r.addEventListener('change', updateDestUI);
+  });
+  updateDestUI();
   if (offerToggle) {
     offerToggle.addEventListener('change', function () {
       offerFields.style.display = offerToggle.checked ? 'flex' : 'none';

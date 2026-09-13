@@ -12,7 +12,7 @@ class ProductModel extends Model
         $this->ensureSchema();
     }
 
-    public const UNITS = ['piece', 'kg', 'g', 'bale', 'carton', 'pack', 'dozen', 'box', 'ml', 'litre', 'tonne'];
+    public const UNITS = ['carton', 'bale', 'parcel', 'sack', 'bag', 'box', 'pack', 'piece', 'dozen', 'bundle', 'roll', 'set', 'pair', 'kg', 'g', 'ml', 'litre', 'tonne'];
     public const SIZE_UNITS = ['ml', 'l'];
     public const PRODUCT_TYPES = ['product', 'book', 'stationery']; // legacy book/stationery kept for old rows
 
@@ -23,6 +23,7 @@ class ProductModel extends Model
      */
     public function create(array $in): array
     {
+        $this->normalizeInputs($in);
         $errors = $this->validate($in);
         if ($errors) {
             return ['ok' => false, 'id' => null, 'errors' => $errors];
@@ -36,6 +37,7 @@ class ProductModel extends Model
         if (!$this->find($id)) {
             return ['ok' => false, 'errors' => ['_' => 'Product not found.']];
         }
+        $this->normalizeInputs($in, false);
         $errors = $this->validate($in + ['id' => $id]);
         if ($errors) {
             return ['ok' => false, 'errors' => $errors];
@@ -480,12 +482,36 @@ class ProductModel extends Model
         } catch (\PDOException $ignored) {}
     }
 
+    public function normalizeInputs(array &$in, bool $isNew = true): void
+    {
+        $name = trim((string) ($in['name'] ?? ''));
+        if ($name === '') {
+            $p = (float) ($in['retail_price'] ?? $in['pack_price'] ?? $in['buying_price'] ?? $in['package_buying_price'] ?? 0);
+            $in['name'] = $p > 0 ? ('Product KES ' . number_format($p, 0)) : ('Item ' . date('j M H:i'));
+        }
+        if (!isset($in['quantity']) || $in['quantity'] === '') {
+            $in['quantity'] = 0.0;
+        }
+        if (!isset($in['buying_price']) || $in['buying_price'] === '') {
+            $in['buying_price'] = 0.0;
+        }
+        if (!isset($in['retail_price']) || $in['retail_price'] === '') {
+            $in['retail_price'] = 0.0;
+        }
+        if (!isset($in['wholesale_price']) || $in['wholesale_price'] === '') {
+            $in['wholesale_price'] = 0.0;
+        }
+        if (!isset($in['units_per_pack']) || (float) $in['units_per_pack'] <= 0) {
+            $in['units_per_pack'] = 1.0;
+        }
+        if (empty($in['unit'])) {
+            $in['unit'] = 'piece';
+        }
+    }
+
     private function validate(array $in): array
     {
         $errors = [];
-        if (trim($in['name'] ?? '') === '') {
-            $errors['name'] = 'Product name is required.';
-        }
         $barcode = trim((string) ($in['barcode'] ?? ''));
         if ($barcode !== '') {
             if (strlen($barcode) > 64) {
@@ -507,7 +533,7 @@ class ProductModel extends Model
             }
         }
         $unit = $in['unit'] ?? 'piece';
-        if (!in_array($unit, self::UNITS, true)) {
+        if (!empty($unit) && !in_array($unit, self::UNITS, true)) {
             $errors['unit'] = 'Choose a valid unit.';
         }
         $supplierId = (int) ($in['supplier_id'] ?? 0);
@@ -542,45 +568,22 @@ class ProductModel extends Model
         if ($sizeValue !== '' && !in_array($sizeUnit, self::SIZE_UNITS, true)) {
             $errors['size_unit'] = 'Choose ML or L.';
         }
-        $hasBuying = ($in['buying_price'] ?? '') !== '';
-        $hasPackageBuying = ($in['package_buying_price'] ?? '') !== '';
-        $unitsPerPackIn = (float) ($in['units_per_pack'] ?? 1);
-        $hasPack = trim((string) ($in['pack_unit'] ?? '')) !== '' && $unitsPerPackIn > 1;
-        if ((!$hasBuying && !$hasPackageBuying) || ($hasBuying && (!is_numeric($in['buying_price']) || (float) $in['buying_price'] < 0))) {
+        if (isset($in['buying_price']) && $in['buying_price'] !== '' && (!is_numeric($in['buying_price']) || (float) $in['buying_price'] < 0)) {
             $errors['buying_price'] = 'Enter a valid buying price.';
         }
-        if ($hasPackageBuying && (!is_numeric($in['package_buying_price']) || (float) $in['package_buying_price'] < 0)) {
+        if (isset($in['package_buying_price']) && $in['package_buying_price'] !== '' && (!is_numeric($in['package_buying_price']) || (float) $in['package_buying_price'] < 0)) {
             $errors['package_buying_price'] = 'Enter a valid package buying price.';
         }
-        $wholesaleIn = $in['wholesale_price'] ?? '';
-        if ($wholesaleIn !== '' && (!is_numeric($wholesaleIn) || (float) $wholesaleIn < 0)) {
+        if (isset($in['wholesale_price']) && $in['wholesale_price'] !== '' && (!is_numeric($in['wholesale_price']) || (float) $in['wholesale_price'] < 0)) {
             $errors['wholesale_price'] = 'Enter a valid wholesale price.';
         }
-        if ($hasPack) {
-            if (!$hasPackageBuying || (float) ($in['package_buying_price'] ?? 0) <= 0) {
-                $errors['package_buying_price'] = 'Buying price of the package is required.';
-            }
-            if (($in['pack_price'] ?? '') === '' || !is_numeric($in['pack_price']) || (float) $in['pack_price'] <= 0) {
-                $errors['pack_price'] = 'Selling price of the package (wholesale price) is required.';
-            }
-            if (($in['units_per_pack'] ?? '') === '' || !is_numeric($in['units_per_pack']) || (float) $in['units_per_pack'] <= 1) {
-                $errors['units_per_pack'] = 'Enter how many items are inside each package.';
-            }
-        } elseif ((int) ($in['id'] ?? 0) <= 0) {
-            // New products must be recorded as packages (carton/bale/pack…).
-            $errors['pack_unit'] = 'Choose a package type (carton, bale, pack, dozen, box…).';
-            $errors['units_per_pack'] = 'Enter how many items are inside each package.';
-            $errors['package_buying_price'] = 'Buying price of the package is required.';
-            $errors['pack_price'] = 'Wholesale package selling price is required.';
+        if (isset($in['pack_price']) && $in['pack_price'] !== '' && (!is_numeric($in['pack_price']) || (float) $in['pack_price'] < 0)) {
+            $errors['pack_price'] = 'Enter a valid package price.';
         }
-        $isNew = (int) ($in['id'] ?? 0) <= 0;
-        if (!is_numeric($in['retail_price'] ?? null) || (float) ($in['retail_price'] ?? -1) < 0
-            || ($isNew && (float) ($in['retail_price'] ?? 0) <= 0)) {
-            $errors['retail_price'] = $isNew
-                ? 'Enter the retail price of a single item inside the package.'
-                : 'Enter a valid retail price.';
+        if (isset($in['retail_price']) && $in['retail_price'] !== '' && (!is_numeric($in['retail_price']) || (float) $in['retail_price'] < 0)) {
+            $errors['retail_price'] = 'Enter a valid retail price.';
         }
-        if (!is_numeric($in['quantity'] ?? null) || (float) $in['quantity'] < 0) {
+        if (isset($in['quantity']) && $in['quantity'] !== '' && (!is_numeric($in['quantity']) || (float) $in['quantity'] < 0)) {
             $errors['quantity'] = 'Enter a valid quantity.';
         }
         $offerPriceIn = $in['offer_price'] ?? '';

@@ -48,8 +48,8 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
     <?php if ($poBox): ?><div style="font-size:15px;"><?php echo htmlspecialchars($poBox); ?></div><?php endif; ?>
     <?php if ($location): ?><div style="font-size:15px;"><?php echo htmlspecialchars($location); ?></div><?php endif; ?>
     <?php if ($phone): ?><div style="font-size:16px;">TEL: <?php echo htmlspecialchars($phone); ?></div><?php endif; ?>
-    <div style="font-size:16px;margin-top:5px;">Internal transfer <?php echo htmlspecialchars($invoice['invoice_number']); ?></div>
-    <div style="font-size:14px;">Store warehouse → shop Inventory</div>
+    <div style="font-size:16px;margin-top:5px;"><?php echo ($invoice['invoice_type'] ?? '') === 'return' ? 'Warehouse Return Note ' : 'Internal transfer '; ?><?php echo htmlspecialchars($invoice['invoice_number']); ?></div>
+    <div style="font-size:14px;"><?php echo htmlspecialchars(!empty($invoice['source']) && !empty($invoice['destination']) ? ($invoice['source'] . ' → ' . $invoice['destination']) : ((($invoice['invoice_type'] ?? '') === 'return') ? 'Shop Inventory → Store warehouse' : 'Store warehouse → shop Inventory')); ?></div>
     <div style="font-size:15px;"><?php echo date('j M Y, g:i a', strtotime($invoice['created_at'])); ?></div>
     <?php if (!empty($invoice['invoice_to'])): ?><div style="font-size:15px;">To: <?php echo htmlspecialchars($invoice['invoice_to']); ?></div><?php endif; ?>
   </div>
@@ -78,8 +78,19 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
     <?php endforeach; ?>
   </table>
   <table style="width:100%;border-collapse:collapse;font-size:18px;border-top:2px dashed #000;margin-top:8px;">
-    <tr><td style="padding-top:8px;font-size:20px;">Total</td><td style="padding-top:8px;text-align:right;font-size:20px;"><?php echo $money($invoice['total']); ?></td></tr>
+    <tr><td style="padding-top:8px;font-size:20px;">Total Value</td><td style="padding-top:8px;text-align:right;font-size:20px;"><?php echo $money($invoice['total']); ?></td></tr>
+    <?php if (($invoice['invoice_type'] ?? '') === 'return' && !empty($invoice['profit_impact'])): ?>
+    <tr>
+      <td style="padding-top:4px;font-size:15px;color:#b91c1c!important;">Estimated Profit Reduction</td>
+      <td style="padding-top:4px;text-align:right;font-size:15px;color:#b91c1c!important;">-<?php echo $money(abs((float)$invoice['profit_impact'])); ?></td>
+    </tr>
+    <?php endif; ?>
   </table>
+  <?php if (($invoice['invoice_type'] ?? '') === 'return'): ?>
+    <div style="font-size:12px;color:#475569!important;text-align:center;margin-top:6px;font-weight:normal!important;">
+      Items returned from shop floor back to warehouse. Shop inventory decreased; expected profit reduced.
+    </div>
+  <?php endif; ?>
   <?php if (!empty($invoice['notes'])): ?><div style="border-top:2px dashed #000;margin-top:10px;padding-top:8px;text-align:center;"><?php echo htmlspecialchars($invoice['notes']); ?></div><?php endif; ?>
 </div>
 <div class="actions">

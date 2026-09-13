@@ -61,9 +61,10 @@
             + (c.retailPack || 0) * productPrice(p, 'retail_pack')
             + (c.wholesale || 0) * productPrice(p, 'wholesale');
     }
-    function serialize(cart, products) {
+    function serialize(cart, products, order) {
         var out = [];
-        Object.keys(cart).forEach(function (id) {
+        var keys = (Array.isArray(order) && order.length) ? order : Object.keys(cart);
+        keys.forEach(function (id) {
             var p = products[id], c = cart[id];
             if (!p || !c) return;
             if ((c.retail || 0) > 0) {
