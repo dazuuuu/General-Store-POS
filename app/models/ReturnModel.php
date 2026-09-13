@@ -227,6 +227,10 @@ class ReturnModel extends Model
             if ($restocked > 0 && !empty($item['product_id'])) {
                 $this->db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?')
                     ->execute([$restocked, (int) $item['product_id'], $tid]);
+                try {
+                    $limit=(int)floor($restocked);
+                    if($limit>0)$this->db->exec("UPDATE product_serials SET status='in_stock',order_item_id=NULL,sold_at=NULL WHERE tenant_id=".(int)$tid." AND order_item_id=".(int)$itemId." AND status='sold' LIMIT ".$limit);
+                } catch (\PDOException $ignored) {}
             }
             if ($used > 0 && !empty($item['product_id'])) {
                 try {

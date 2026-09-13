@@ -223,7 +223,7 @@ class ProductModel extends Model
         $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at, p.buying_price, p.package_buying_price,
                        p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
-                       p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
+                       p.credit_limit, p.status, p.barcode, p.serial_tracking, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,
                        p.category_id, c.name AS category_name,
                        p.publisher_id, pu.name AS publisher_name,
@@ -241,7 +241,7 @@ class ProductModel extends Model
             $stmt = $this->db->prepare(
                 "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
                         p.offer_price, p.offer_starts_at, p.offer_ends_at,
-                        p.quantity, p.unit, p.status, p.barcode, p.colors, p.sizes,
+                        p.quantity, p.unit, p.status, p.barcode, p.serial_tracking, p.colors, p.sizes,
                         p.image_path, p.size_value, p.size_unit,
                         p.category_id, c.name AS category_name,
                         p.publisher_id, pu.name AS publisher_name,
@@ -332,7 +332,7 @@ class ProductModel extends Model
             $stmt = $this->db->prepare(
                 'SELECT p.id, p.name, p.product_type, p.quantity, p.faulty_quantity, p.unit, p.buying_price,
                         p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
-                        p.package_buying_price, p.image_path, p.barcode,
+                        p.package_buying_price, p.image_path, p.barcode, p.serial_tracking,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
@@ -345,7 +345,7 @@ class ProductModel extends Model
             $stmt->execute([$tid, $barcode, 'archived']);
         } catch (\PDOException $e) {
             $stmt = $this->db->prepare(
-                'SELECT p.id, p.name, p.product_type, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                'SELECT p.id, p.name, p.product_type, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode, p.serial_tracking,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
@@ -472,6 +472,8 @@ class ProductModel extends Model
             'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `retail_pack_price`",
             'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
             'tax_rate' => "ALTER TABLE `products` ADD COLUMN `tax_rate` DECIMAL(5,2) NULL AFTER `retail_price`",
+            'is_menu_item' => "ALTER TABLE `products` ADD COLUMN `is_menu_item` TINYINT(1) NOT NULL DEFAULT 0 AFTER `product_type`",
+            'serial_tracking' => "ALTER TABLE `products` ADD COLUMN `serial_tracking` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_menu_item`",
         ];
 
         foreach ($checks as $column => $sql) {

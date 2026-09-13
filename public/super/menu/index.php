@@ -1,0 +1,20 @@
+<?php
+require_once __DIR__.'/../../../app/app.php';PageGuard::capability(Capabilities::INVENTORY_EDIT);
+$db=Database::pdo();$P=new Models\ProductModel($db);$C=new Models\CategoryModel($db);$error='';
+if($_SERVER['REQUEST_METHOD']==='POST'){
+  if(($_POST['action']??'')==='availability'){
+    $db->prepare("UPDATE products SET status=? WHERE id=? AND tenant_id=? AND is_menu_item=1")->execute([!empty($_POST['available'])?'active':'archived',(int)$_POST['id'],TenantContext::tenantId()]);
+    header('Location: '.public_url('super/menu/'));exit;
+  }
+  $category=trim((string)($_POST['category']??''));$catId=$category!==''?(int)$C->findOrCreate($category,'product'):0;
+  $res=$P->create(['product_type'=>'product','name'=>$_POST['name']??'','category_id'=>$catId,'unit'=>'piece','quantity'=>max(0,(float)($_POST['available_quantity']??999999)),'buying_price'=>max(0,(float)($_POST['cost']??0)),'retail_price'=>max(0,(float)($_POST['price']??0)),'wholesale_price'=>max(0,(float)($_POST['price']??0)),'status'=>'active']);
+  if($res['ok']){$db->prepare('UPDATE products SET is_menu_item=1 WHERE id=? AND tenant_id=?')->execute([$res['id'],TenantContext::tenantId()]);header('Location: '.public_url('super/menu/'));exit;}
+  $error=$res['errors']['_']??'Could not create menu item.';
+}
+$st=$db->prepare("SELECT p.*,c.name category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.tenant_id=? AND p.is_menu_item=1 ORDER BY c.name,p.name");$st->execute([TenantContext::tenantId()]);$items=$st->fetchAll();
+$page_title='Restaurant Menu';ob_start();?>
+<div class="mb-3"><h1 class="h5 fw-bold">Food & Drink Menu</h1><p class="small text-muted">Menu items are sellable stock items, so restaurant orders, held orders and payments appear in the same global Sales ledger.</p></div>
+<?php if($error):?><div class="alert alert-danger"><?php echo htmlspecialchars($error);?></div><?php endif;?>
+<div class="row g-4"><div class="col-lg-4"><form method="post" class="card"><div class="card-body"><h2 class="h6 fw-bold">Add menu item</h2><label class="form-label small">Food / drink name</label><input name="name" required class="form-control mb-2"><label class="form-label small">Menu section</label><input name="category" class="form-control mb-2" placeholder="Breakfast, Main meals, Drinks"><div class="row g-2"><div class="col"><label class="form-label small">Selling price</label><input name="price" type="number" min="0" step=".01" required class="form-control"></div><div class="col"><label class="form-label small">Cost</label><input name="cost" type="number" min="0" step=".01" class="form-control"></div></div><label class="form-label small mt-2">Available portions</label><input name="available_quantity" type="number" min="0" step="1" value="999999" class="form-control"><button class="btn btn-primary w-100 mt-3">Add to menu</button></div></form></div>
+<div class="col-lg-8"><div class="card"><div class="table-responsive"><table class="table table-bordered mb-0"><thead><tr><th>Menu item</th><th>Section</th><th class="text-end">Price</th><th class="text-end">Available</th><th>Status</th></tr></thead><tbody><?php if(!$items):?><tr><td colspan="5" class="text-center text-muted py-4">No menu items yet.</td></tr><?php else:foreach($items as $i):?><tr><td class="fw-semibold"><?php echo htmlspecialchars($i['name']);?></td><td><?php echo htmlspecialchars($i['category_name']?:'Menu');?></td><td class="text-end">KES <?php echo number_format((float)$i['retail_price'],2);?></td><td class="text-end"><?php echo number_format((float)$i['quantity'],0);?></td><td><form method="post"><input type="hidden" name="action" value="availability"><input type="hidden" name="id" value="<?php echo (int)$i['id'];?>"><button name="available" value="<?php echo $i['status']==='active'?'0':'1';?>" class="btn btn-sm <?php echo $i['status']==='active'?'btn-success':'btn-outline-secondary';?>"><?php echo $i['status']==='active'?'Available':'Unavailable';?></button></form></td></tr><?php endforeach;endif;?></tbody></table></div></div></div></div>
+<?php $content=ob_get_clean();include __DIR__.'/../../templates/tenants/layout.php';

@@ -124,6 +124,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'product_id' => (int) ($c['product_id'] ?? 0),
             'quantity' => (float) ($c['quantity'] ?? 0),
             'price_type' => $normalizePriceType($c['price_type'] ?? 'retail'),
+            'unit_price' => ($c['unit_price'] ?? '') !== '' ? (float)$c['unit_price'] : '',
+            'serial_numbers' => array_values(array_filter(array_map('trim',(array)($c['serial_numbers']??[])))),
         ];
     }
 
@@ -381,7 +383,8 @@ ob_start();
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
              data-on-offer="<?php echo !empty($p['on_offer']) ? '1' : '0'; ?>"
              data-archived="<?php echo !empty($p['is_archived']) ? '1' : '0'; ?>"
-             data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? '', ENT_QUOTES); ?>">
+             data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? '', ENT_QUOTES); ?>"
+             data-serial-tracking="<?php echo !empty($p['serial_tracking'])?'1':'0';?>">
           <?php if (!empty($p['on_offer'])): ?><span class="pos-ribbon">OFFER</span><?php endif; ?>
           <?php if (!empty($p['is_archived'])): ?><span class="pos-ribbon pos-ribbon-archive">ARCHIVE</span><?php endif; ?>
           <div class="pos-card-img">
@@ -1174,6 +1177,7 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         packPrice: parseFloat(el.dataset.packPrice) || 0,
         retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
         barcode: el.dataset.barcode || '',
+        serialTracking: el.dataset.serialTracking === '1',
         tiers: tiers,
         img: img ? img.getAttribute('src') : null
     };
@@ -1271,7 +1275,19 @@ function setFieldQty(id, field, val) {
 function bump(id, field, delta) {
     var strId = String(id);
     var c = ensureCart(strId);
+    if(PRODUCTS[strId]&&PRODUCTS[strId].serialTracking&&field==='retail'){
+        if(delta>0&&!confirmSerial(strId))return;
+        if(delta<0&&c.serialNumbers&&c.serialNumbers.length)c.serialNumbers.pop();
+    }
     setFieldQty(strId, field, (c[field] || 0) + delta);
+}
+function confirmSerial(id) {
+    var p=PRODUCTS[String(id)];if(!p||!p.serialTracking)return true;
+    var serial=window.prompt('Scan or enter the serial number / IMEI for '+p.name);
+    if(!serial)return false;serial=serial.trim();if(!serial)return false;
+    var c=ensureCart(id);c.serialNumbers=c.serialNumbers||[];
+    if(c.serialNumbers.indexOf(serial)!==-1){alert('That serial is already in this order.');return false;}
+    c.serialNumbers.push(serial);return true;
 }
 function add(id) {
     var strId = String(id);
@@ -1287,6 +1303,7 @@ function add(id) {
 function addHalf(id) {
     var strId = String(id);
     var type = defaultSaleType();
+    if(PRODUCTS[strId]&&PRODUCTS[strId].serialTracking){alert('Serialized products must be sold as whole units.');return;}
     if (!modeAvailable(PRODUCTS[strId], type)) return;
     if (cartOrder.indexOf(strId) === -1) {
         cartOrder.push(strId);
@@ -1526,6 +1543,9 @@ function render() {
                   + ' <span class="text-muted">(minimum ' + money(p.price) + ')</span></span>'
                   + '<input type="number" step="0.01" min="' + p.price + '" class="form-control form-control-sm"'
                   + ' style="max-width:130px;" data-commission-price="' + id + '" value="' + (c.customUnitPrice || p.price) + '"></label>';
+            }
+            if (p.serialTracking && c.serialNumbers && c.serialNumbers.length) {
+                rows += '<div class="small text-primary mt-1"><i class="fas fa-fingerprint me-1"></i>Serials: '+c.serialNumbers.join(', ')+'</div>';
             }
             var line = document.createElement('div');
             line.className = 'pos-cart-line pos-cart-line-dual';
@@ -1854,6 +1874,12 @@ document.getElementById('orderForm').addEventListener('submit', function (e) {
         if (m === 'split') {
             var cp = parseFloat(document.getElementById('cashPortionInput').value) || 0, mp = parseFloat(document.getElementById('mpesaPortionInput').value) || 0;
             if (Math.abs(cp + mp - t) > 0.01) { e.preventDefault(); alert('Cash and M-Pesa portions must add up to the total.'); return; }
+        }
+        if(!navigator.onLine&&window.OfflinePOS){
+            e.preventDefault();
+            var payload={items:serializeCart(),customer_name:document.querySelector('[name=table_name]').value||'Offline customer',sale_type:document.getElementById('saleType').value,payment_method:payMethod(),vat_rate:parseFloat(document.getElementById('vatRateInput').value)||0,vat_inclusive:document.getElementById('vatInclusiveInput').value==='1'};
+            OfflinePOS.queueSale(payload).then(function(){alert('Sale saved offline. It will sync automatically when internet returns.');location.reload();});
+            return;
         }
     }
     this.dataset.submitting = '1';

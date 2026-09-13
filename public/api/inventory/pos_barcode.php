@@ -13,5 +13,6 @@ echo json_encode(['item'=>[
   'stock'=>(float)$row['quantity'],'unitsPerPack'=>(float)($row['units_per_pack']??1),
   'packUnit'=>$row['pack_unit']??'pack','packPrice'=>(float)($row['pack_price']??0),
   'retailPackPrice'=>(float)($row['retail_pack_price']??0),'barcode'=>$row['barcode'],'tiers'=>[],
+  'serialTracking'=>!empty($row['serial_tracking']),
   'img'=>$row['image_path']??null,
 ]]);

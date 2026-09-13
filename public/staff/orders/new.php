@@ -87,6 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'product_id' => (int) ($c['product_id'] ?? 0),
             'quantity' => (float) ($c['quantity'] ?? 0),
             'price_type' => $normalizePriceType($c['price_type'] ?? 'retail'),
+            'unit_price' => ($c['unit_price'] ?? '') !== '' ? (float)$c['unit_price'] : '',
+            'serial_numbers' => array_values(array_filter(array_map('trim',(array)($c['serial_numbers']??[])))),
         ];
     }
 
@@ -273,7 +275,8 @@ ob_start();
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
              data-on-offer="<?php echo !empty($p['on_offer']) ? '1' : '0'; ?>"
              data-archived="<?php echo !empty($p['is_archived']) ? '1' : '0'; ?>"
-             data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? '', ENT_QUOTES); ?>">
+             data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? '', ENT_QUOTES); ?>"
+             data-serial-tracking="<?php echo !empty($p['serial_tracking'])?'1':'0';?>">
           <?php if (!empty($p['on_offer'])): ?><span class="pos-ribbon">OFFER</span><?php endif; ?>
           <?php if (!empty($p['is_archived'])): ?><span class="pos-ribbon pos-ribbon-archive">ARCHIVE</span><?php endif; ?>
           <div class="pos-card-img">
@@ -497,6 +500,7 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         packUnit: el.dataset.packUnit || '',
         packPrice: parseFloat(el.dataset.packPrice) || 0,
         retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
+        serialTracking: el.dataset.serialTracking === '1',
         tiers: tiers,
         img: img ? img.getAttribute('src') : null
     };
@@ -572,7 +576,18 @@ function setFieldQty(id, field, val) {
 }
 function bump(id, field, delta) {
     var c = ensureCart(id);
+    if(PRODUCTS[String(id)]&&PRODUCTS[String(id)].serialTracking&&field==='retail'){
+        if(delta>0&&!confirmSerial(id))return;
+        if(delta<0&&c.serialNumbers&&c.serialNumbers.length)c.serialNumbers.pop();
+    }
     setFieldQty(id, field, (c[field] || 0) + delta);
+}
+function confirmSerial(id) {
+    var p=PRODUCTS[String(id)];if(!p||!p.serialTracking)return true;
+    var serial=window.prompt('Scan or enter the serial number / IMEI for '+p.name);
+    if(!serial)return false;serial=serial.trim();var c=ensureCart(id);c.serialNumbers=c.serialNumbers||[];
+    if(c.serialNumbers.indexOf(serial)!==-1){alert('That serial is already in this order.');return false;}
+    c.serialNumbers.push(serial);return true;
 }
 function add(id) {
     var type = defaultSaleType();
@@ -583,6 +598,7 @@ function add(id) {
 }
 function addHalf(id) {
     var type = defaultSaleType();
+    if(PRODUCTS[id]&&PRODUCTS[id].serialTracking){alert('Serialized products must be sold as whole units.');return;}
     if (!modeAvailable(PRODUCTS[id], type)) return;
     if (type === 'wholesale') bump(id, 'wholesale', 0.5);
     else if (type === 'retail_pack') bump(id, 'retailPack', 0.5);
@@ -701,6 +717,7 @@ function render() {
               + '<input type="number" step="0.01" min="' + p.price + '" class="form-control form-control-sm"'
               + ' style="max-width:130px;" data-commission-price="' + id + '" value="' + (c.customUnitPrice || p.price) + '"></label>';
         }
+        if(p.serialTracking&&c.serialNumbers&&c.serialNumbers.length)rows+='<div class="small text-primary mt-1"><i class="fas fa-fingerprint me-1"></i>Serials: '+c.serialNumbers.join(', ')+'</div>';
         var line = document.createElement('div');
         line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML =

@@ -61,10 +61,11 @@ class OrderModel extends Model
             $db->beginTransaction();
 
             $ins = $db->prepare(
-                "INSERT INTO orders (tenant_id, table_name, channel, opened_by, receipt_number, status, subtotal, total)
-                 VALUES (?,?,?,?,'PENDING','open',0,0)"
+                "INSERT INTO orders (tenant_id, table_name, channel, opened_by, client_uuid, receipt_number, status, subtotal, total)
+                 VALUES (?,?,?,?,?,'PENDING','open',0,0)"
             );
-            $ins->execute([$tid, $tableName, $channel, $openedBy]);
+            $clientUuid=trim((string)($in['client_uuid']??''))?:null;
+            $ins->execute([$tid, $tableName, $channel, $openedBy,$clientUuid]);
             $orderId = (int) $db->lastInsertId();
             $prefix  = $channel === 'walkin' ? 'RCP-' : 'ORD-';
             $receipt = $prefix . str_pad((string) $orderId, 6, '0', STR_PAD_LEFT);
@@ -396,7 +397,7 @@ class OrderModel extends Model
     private function insertItems(\PDO $db, int $tid, int $orderId, array $items, int $staffId, string $saleType = 'retail', bool $enforceCreditLimit = false, float $creditOverride = 0.0): array
     {
         $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
+                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price, serial_tracking
                      FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE";
         try {
             $sel = $db->prepare($selSql);
@@ -409,12 +410,17 @@ class OrderModel extends Model
         );
         $dec = $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
         $commissionEnabled = false;
+        $agentRate = 0.0;
         try {
             $setting = $db->prepare('SELECT product_commission_enabled FROM tenants WHERE id = ? LIMIT 1');
             $setting->execute([$tid]);
             $commissionEnabled = (bool) $setting->fetchColumn();
         } catch (\Throwable $ignored) {
         }
+        try {
+            $rate=$db->prepare('SELECT MAX(commission_rate) FROM employees WHERE tenant_id=? AND user_id=? AND is_active=1');
+            $rate->execute([$tid,$staffId]);$agentRate=max(0,min(100,(float)$rate->fetchColumn()));
+        } catch (\Throwable $ignored) {}
 
         foreach ($items as $it) {
             $pid = (int) $it['product_id'];
@@ -426,6 +432,14 @@ class OrderModel extends Model
             }
             if ($qty > (float) $p['quantity']) {
                 return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' left.']];
+            }
+            $serials=array_values(array_unique(array_filter(array_map('trim',(array)($it['serial_numbers']??[])))));
+            if(!empty($p['serial_tracking'])){
+                if(abs($qty-round($qty))>.0001||count($serials)!==(int)round($qty))return ['ok'=>false,'errors'=>['_'=>"Confirm one serial number / IMEI for every {$p['name']} unit."]];
+                $serialIn=implode(',',array_fill(0,count($serials),'?'));
+                $serialSt=$db->prepare("SELECT serial_number FROM product_serials WHERE tenant_id=? AND product_id=? AND status='in_stock' AND serial_number IN ($serialIn) FOR UPDATE");
+                $serialSt->execute(array_merge([$tid,$pid],$serials));
+                if(count($serialSt->fetchAll())!==count($serials))return ['ok'=>false,'errors'=>['_'=>"One {$p['name']} serial is invalid or already sold."]];
             }
             // Offer-aware: charges the live offer price when one is running,
             // the regular price otherwise — same rule everywhere (ProductModel::effectivePrice).
@@ -450,6 +464,7 @@ class OrderModel extends Model
                 $commission = round(($unitPrice - $baseUnitPrice) * $qty, 2);
                 $lineTotal = round($unitPrice * $qty, 2);
             }
+            if($agentRate>0)$commission=round($commission+($lineTotal*$agentRate/100),2);
             if ($enforceCreditLimit && isset($p['credit_limit']) && $p['credit_limit'] !== null && $p['credit_limit'] !== '') {
                 $limit = max((float) $p['credit_limit'], $creditOverride);
                 if ($limit > 0 && $lineTotal > $limit + 0.0001) {
@@ -458,6 +473,11 @@ class OrderModel extends Model
             }
 
             $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
+            $orderItemId=(int)$db->lastInsertId();
+            if($serials){
+                $markSerial=$db->prepare("UPDATE product_serials SET status='sold',order_item_id=?,sold_at=NOW() WHERE tenant_id=? AND product_id=? AND serial_number=? AND status='in_stock'");
+                foreach($serials as $serial)$markSerial->execute([$orderItemId,$tid,$pid,$serial]);
+            }
             $dec->execute([$qty, $pid, $tid, $qty]);
             if ($dec->rowCount() !== 1) {
                 return ['ok' => false, 'errors' => ['_' => "Stock changed for {$p['name']} while saving. Please try again."]];
@@ -1169,7 +1189,11 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'credit_duration_days', "ALTER TABLE orders ADD COLUMN credit_duration_days INT NULL AFTER amount_due");
         $this->ensureColumn('orders', 'credit_due_at', "ALTER TABLE orders ADD COLUMN credit_due_at DATETIME NULL AFTER credit_duration_days");
         $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
+        $this->ensureColumn('products', 'serial_tracking', "ALTER TABLE `products` ADD COLUMN `serial_tracking` TINYINT(1) NOT NULL DEFAULT 0 AFTER `product_type`");
+        try{$this->db->exec("CREATE TABLE IF NOT EXISTS product_serials(id INT AUTO_INCREMENT PRIMARY KEY,tenant_id INT NOT NULL,product_id INT NOT NULL,serial_number VARCHAR(190) NOT NULL,status ENUM('in_stock','sold','returned') NOT NULL DEFAULT 'in_stock',order_item_id INT NULL,sold_at DATETIME NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY uq_tenant_serial(tenant_id,serial_number),KEY idx_serial_product(tenant_id,product_id,status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");}catch(\PDOException $ignored){}
         $this->ensureColumn('orders', 'thank_you_sent_at', "ALTER TABLE orders ADD COLUMN thank_you_sent_at DATETIME NULL AFTER delivery_note_sent_at");
+        $this->ensureColumn('orders', 'client_uuid', "ALTER TABLE orders ADD COLUMN client_uuid CHAR(36) NULL AFTER opened_by");
+        try{$idx=$this->db->query("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='orders' AND index_name='uq_orders_client_uuid'");if(!(int)$idx->fetchColumn())$this->db->exec('CREATE UNIQUE INDEX uq_orders_client_uuid ON orders(tenant_id,client_uuid)');}catch(\PDOException $ignored){}
         $this->ensureColumn('orders', 'remembrance_sent_at', "ALTER TABLE orders ADD COLUMN remembrance_sent_at DATETIME NULL AFTER thank_you_sent_at");
         $this->ensureColumn('orders', 'invoice_deleted_at', "ALTER TABLE orders ADD COLUMN invoice_deleted_at DATETIME NULL");
         $this->ensureColumn('orders', 'invoice_deleted_by', "ALTER TABLE orders ADD COLUMN invoice_deleted_by INT NULL");

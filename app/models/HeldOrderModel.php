@@ -41,7 +41,7 @@ class HeldOrderModel extends Model
 
             $sel = $db->prepare('SELECT id, name, selling_price, wholesale_price, retail_price, units_per_pack, pack_price, retail_pack_price FROM products WHERE id = ? AND tenant_id = ?');
             $insItem = $db->prepare(
-                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, price_type, quantity) VALUES (?,?,?,?,?,?,?)'
+                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, price_type, quantity, serials_json) VALUES (?,?,?,?,?,?,?,?)'
             );
             foreach ($items as $it) {
                 $pid = (int) $it['product_id'];
@@ -60,7 +60,8 @@ class HeldOrderModel extends Model
                 } else {
                     $price = (float) ($p['retail_price'] ?: $p['selling_price']);
                 }
-                $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, $priceType, (float) $it['quantity']]);
+                if(($it['unit_price']??'')!==''&&(float)$it['unit_price']>=$price)$price=(float)$it['unit_price'];
+                $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, $priceType, (float) $it['quantity'],json_encode(array_values((array)($it['serial_numbers']??[])))]);
             }
 
             $db->commit();
@@ -144,6 +145,7 @@ class HeldOrderModel extends Model
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $this->ensureColumn('held_order_items', 'price_type', "ALTER TABLE held_order_items ADD COLUMN price_type VARCHAR(20) NOT NULL DEFAULT 'retail' AFTER unit_price");
+        $this->ensureColumn('held_order_items', 'serials_json', "ALTER TABLE held_order_items ADD COLUMN serials_json TEXT NULL AFTER quantity");
         $this->widenPriceTypeColumn('held_order_items');
     }
 
