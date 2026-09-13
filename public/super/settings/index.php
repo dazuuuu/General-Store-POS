@@ -51,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'loyalty_kes_per_point'   => max(0, round((float) ($_POST['loyalty_kes_per_point'] ?? 0.01), 4)),
         'low_stock_alert_enabled' => !empty($_POST['low_stock_alert_enabled']) ? 1 : 0,
         'product_commission_enabled' => !empty($_POST['product_commission_enabled']) ? 1 : 0,
+        'enabled_modules' => json_encode(array_values(array_intersect(array_keys(TenantFeatures::MODULES),(array)($_POST['enabled_modules']??[])))),
     ];
 
     if (!empty($_FILES['logo']['tmp_name']) && is_uploaded_file($_FILES['logo']['tmp_name'])) {
@@ -217,6 +218,13 @@ ob_start();
                    <?php echo !empty($__tenant['product_commission_enabled']) ? 'checked' : ''; ?>>
             <label class="form-check-label fw-semibold" for="productCommission">Allow inventory sales with staff commission</label>
             <div class="form-text">At POS, staff may raise a product's selling price but can never go below the calculated/current price. The extra amount is recorded as their commission.</div>
+          </div>
+          <div class="mb-4 border rounded p-3">
+            <label class="form-label fw-semibold">Business features</label>
+            <div class="form-text mb-2">Enable only the modules this business uses. POS, Inventory, Sales and Payments remain core.</div>
+            <?php $enabledModules=json_decode((string)($__tenant['enabled_modules']??''),true);if(!is_array($enabledModules))$enabledModules=array_keys(TenantFeatures::MODULES);?>
+            <div class="row g-2"><?php foreach(TenantFeatures::MODULES as $key=>$label):?><div class="col-md-6"><label class="form-check border rounded p-2 d-block"><input class="form-check-input me-1" type="checkbox" name="enabled_modules[]" value="<?php echo $key;?>" <?php echo in_array($key,$enabledModules,true)?'checked':'';?>><?php echo htmlspecialchars($label);?></label></div><?php endforeach;?></div>
+            <div class="mt-2 small"><strong>Offline mode:</strong> <?php echo !empty($__tenant['offline_enabled'])?'<span class="text-success">Enabled by platform administrator</span>':'<span class="text-muted">Online only</span>';?></div>
           </div>
           <div class="mb-4">
             <label class="form-label fw-semibold">Logo</label>

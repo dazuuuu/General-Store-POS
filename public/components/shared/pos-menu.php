@@ -52,7 +52,7 @@ try {
     <?php endif; ?>
     <?php if ($menuOwner || TenantContext::can(Capabilities::SALES_RECORD)): ?>
       <a class="t-sublink <?php echo $menuOn('/orders'); ?>" href="<?php echo $menuRoute('super/orders/', 'staff/orders/'); ?>">Credit Sales</a>
-      <a class="t-sublink <?php echo $menuOn('/returns'); ?>" href="<?php echo $menuRoute('super/returns/', 'staff/returns/'); ?>">Returns</a>
+      <?php if(TenantFeatures::enabled('returns')):?><a class="t-sublink <?php echo $menuOn('/returns'); ?>" href="<?php echo $menuRoute('super/returns/', 'staff/returns/'); ?>">Returns</a><?php endif;?>
     <?php endif; ?>
     <?php if ($menuOwner || TenantContext::can(Capabilities::CUSTOMERS_MANAGE)): ?>
       <a class="t-sublink <?php echo $menuOn('/customers'); ?>" href="<?php echo public_url('super/customers/'); ?>">Customers / Loyalty</a>
@@ -63,6 +63,7 @@ try {
     <?php endif; ?>
     <a class="t-sublink <?php echo $menuOn('/documents'); ?>" href="<?php echo $menuRoute('super/documents/', 'staff/documents/'); ?>">Documents</a>
 
+    <?php if(TenantFeatures::enabled('services')):?>
     <div class="t-subsection"><i class="fas fa-concierge-bell me-1"></i>Services</div>
     <a class="t-sublink t-subsub <?php echo $menuOn('/services/sell'); ?>" href="<?php echo public_url('super/services/sell.php'); ?>">Sell services</a>
     <a class="t-sublink t-subsub <?php echo $menuOn('/services/appointments'); ?>" href="<?php echo public_url('super/services/appointments.php'); ?>">Appointments</a>
@@ -70,6 +71,14 @@ try {
       <a class="t-sublink t-subsub <?php echo $menuOn('/services/new'); ?>" href="<?php echo public_url('super/services/new.php'); ?>">Create services</a>
     <?php endif; ?>
     <a class="t-sublink t-subsub <?php echo strpos($menuUri, '/services/') !== false && strpos($menuUri, '/services/sell') === false && strpos($menuUri, '/services/appointments') === false && strpos($menuUri, '/services/new') === false ? 'active' : ''; ?>" href="<?php echo public_url('super/services/'); ?>">View services</a>
+    <?php endif;?>
+    <?php if(TenantFeatures::enabled('restaurant_menu')):?>
+      <div class="t-subsection"><i class="fas fa-utensils me-1"></i>Restaurant</div>
+      <a class="t-sublink t-subsub" href="<?php echo public_url('super/menu/');?>">Food menu</a>
+      <a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/orders/','staff/orders/');?>">Orders</a>
+      <a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/orders/held.php','staff/orders/held.php');?>">Hold order</a>
+      <?php if($menuOwner||TenantContext::can(Capabilities::PAYMENTS_PROCESS)):?><a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/payments/','staff/payments/');?>">Process payment</a><?php endif;?>
+    <?php endif;?>
   </div>
 </div>
 
@@ -80,12 +89,16 @@ try {
   </button>
   <div class="t-subnav">
     <a class="t-sublink <?php echo $menuOn('/inventory'); ?>" href="<?php echo public_url('super/inventory/'); ?>">Shop Inventory</a>
-    <a class="t-sublink <?php echo $menuOn('/store'); ?>" href="<?php echo public_url('super/store/'); ?>">Store Warehouse</a>
+    <?php if(TenantFeatures::enabled('store')):?><a class="t-sublink <?php echo $menuOn('/store'); ?>" href="<?php echo public_url('super/store/'); ?>">Store Warehouse</a><?php endif;?>
+    <?php if(TenantFeatures::enabled('restaurant_menu')):?><a class="t-sublink <?php echo $menuOn('/menu'); ?>" href="<?php echo public_url('super/menu/'); ?>">Restaurant Menu</a><?php endif;?>
+    <?php if(TenantFeatures::enabled('serials')):?><a class="t-sublink <?php echo $menuOn('/serials'); ?>" href="<?php echo public_url('super/serials/'); ?>">Serial Numbers</a><?php endif;?>
+    <?php if(TenantFeatures::enabled('purchases')):?>
     <div class="t-subsection"><i class="fas fa-cart-shopping me-1"></i>Purchases</div>
     <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/new'); ?>" href="<?php echo public_url('super/purchases/new.php'); ?>">Record purchase</a>
     <a class="t-sublink t-subsub <?php echo strpos($menuUri, '/purchases/') !== false && strpos($menuUri, '/purchases/new') === false && strpos($menuUri, '/purchases/track') === false && strpos($menuUri, '/purchases/transfer') === false ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/'); ?>">View purchases</a>
     <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/track'); ?>" href="<?php echo public_url('super/purchases/track.php'); ?>">Track purchases</a>
     <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/transfer'); ?>" href="<?php echo public_url('super/purchases/transfer.php'); ?>">Transfer purchases</a>
+    <?php endif;?>
     <a class="t-sublink <?php echo $menuOn('/suppliers'); ?>" href="<?php echo public_url('super/suppliers/'); ?>">Suppliers</a>
     <a class="t-sublink <?php echo $menuOn('/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">Record Stock</a>
     <a class="t-sublink <?php echo $menuOn('/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">Bulk Stock</a>
@@ -104,8 +117,8 @@ try {
   <div class="t-subnav">
     <a class="t-sublink <?php echo $menuOn('/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">Finances</a>
     <a class="t-sublink <?php echo $menuOn('/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">Expenses</a>
-    <a class="t-sublink <?php echo $menuOn('/payroll'); ?>" href="<?php echo public_url('super/payroll/'); ?>">Salary & Payroll</a>
-    <a class="t-sublink <?php echo $menuOn('/commissions'); ?>" href="<?php echo public_url('super/commissions/'); ?>">Commission</a>
+    <?php if(TenantFeatures::enabled('payroll')):?><a class="t-sublink <?php echo $menuOn('/payroll'); ?>" href="<?php echo public_url('super/payroll/'); ?>">Salary & Payroll</a><?php endif;?>
+    <?php if(TenantFeatures::enabled('commissions')):?><a class="t-sublink <?php echo $menuOn('/commissions'); ?>" href="<?php echo public_url('super/commissions/'); ?>">Commission</a><?php endif;?>
     <a class="t-sublink <?php echo $menuOn('/taxes'); ?>" href="<?php echo public_url('super/taxes/'); ?>">Taxes</a>
   </div>
 </div>

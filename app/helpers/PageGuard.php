@@ -84,6 +84,11 @@ class PageGuard
             header('Location: ' . public_url(ltrim(self::LOGIN_URL, '/')));
             exit;
         }
+        $path=strtolower((string)(parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)??''));
+        $moduleRoutes=['/purchases/'=>'purchases','/store/'=>'store','/returns/'=>'returns','/services/'=>'services','/payroll/'=>'payroll','/salary/'=>'payroll','/commissions/'=>'commissions','/menu/'=>'restaurant_menu','/serials/'=>'serials'];
+        foreach($moduleRoutes as $fragment=>$module){
+            if(strpos($path,$fragment)!==false&&!TenantFeatures::enabled($module)){http_response_code(404);exit('This feature is not enabled for this business.');}
+        }
     }
 
     /** Kept as a no-op so any remaining callers are harmless in the single-tenant build. */
