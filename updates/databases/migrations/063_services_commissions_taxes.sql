@@ -1,14 +1,32 @@
 -- Sellable services, appointment invoices, product commissions and product taxes.
 
-ALTER TABLE tenants
-    ADD COLUMN IF NOT EXISTS product_commission_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER low_stock_alert_enabled;
+SET @sql = IF(
+    EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tenants' AND COLUMN_NAME='product_commission_enabled'),
+    'SELECT 1',
+    'ALTER TABLE tenants ADD COLUMN product_commission_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER low_stock_alert_enabled'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE products
-    ADD COLUMN IF NOT EXISTS tax_rate DECIMAL(5,2) NULL AFTER retail_price;
+SET @sql = IF(
+    EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME='tax_rate'),
+    'SELECT 1',
+    'ALTER TABLE products ADD COLUMN tax_rate DECIMAL(5,2) NULL AFTER retail_price'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE order_items
-    ADD COLUMN IF NOT EXISTS base_unit_price DECIMAL(12,2) NULL AFTER unit_price,
-    ADD COLUMN IF NOT EXISTS commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER base_unit_price;
+SET @sql = IF(
+    EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='order_items' AND COLUMN_NAME='base_unit_price'),
+    'SELECT 1',
+    'ALTER TABLE order_items ADD COLUMN base_unit_price DECIMAL(12,2) NULL AFTER unit_price'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF(
+    EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='order_items' AND COLUMN_NAME='commission_amount'),
+    'SELECT 1',
+    'ALTER TABLE order_items ADD COLUMN commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER base_unit_price'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS business_services (
     id INT AUTO_INCREMENT PRIMARY KEY,
