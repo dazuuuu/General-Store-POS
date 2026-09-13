@@ -88,14 +88,7 @@ $isOn = function (string $needle) use ($uri): string {
             <i class="fas fa-box-archive"></i><span>Store (Warehouse)</span>
         </a>
         <?php endif; ?>
-        <?php if ($isOwner): ?>
-        <a class="t-link <?php echo $isOn('/super/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">
-            <i class="fas fa-money-bill-wave"></i><span>Expenses</span>
-        </a>
-        <a class="t-link <?php echo $isOn('/super/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">
-            <i class="fas fa-chart-pie"></i><span>Finances</span>
-        </a>
-        <?php endif; ?>
+
         <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_EDIT) || TenantContext::can(Capabilities::STOCK_ENTER)):
             $onPurchases = strpos($uri, '/super/purchases') !== false;
             $onPurchaseNew = strpos($uri, '/super/purchases/new') !== false;
@@ -116,6 +109,15 @@ $isOn = function (string $needle) use ($uri): string {
                 <a class="t-sublink <?php echo $onPurchaseTransfer ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/transfer.php'); ?>">Transfer purchases</a>
             </div>
         </div>
+        <?php endif; ?>
+
+        <?php if ($isOwner): ?>
+        <a class="t-link <?php echo $isOn('/super/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">
+            <i class="fas fa-money-bill-wave"></i><span>Expenses</span>
+        </a>
+        <a class="t-link <?php echo $isOn('/super/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">
+            <i class="fas fa-chart-pie"></i><span>Finances</span>
+        </a>
         <?php endif; ?>
 
         <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
