@@ -316,18 +316,15 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 </div>
 
 <style>
-.t-sidebar,.t-sidebar-toggle,.t-sidebar-overlay{display:none!important;}
-.t-main{margin-left:0!important;width:100%!important;max-width:none!important;padding:0!important;background:#e9e9ea;min-height:100vh;}
-.t-topbar{display:none;}
-.fin-shell{display:grid;grid-template-columns:72px minmax(0,1fr);gap:0;width:100%;max-width:none;min-height:100vh;margin:0;background:#f3f3f4;border:0;border-radius:0;padding:0;box-shadow:none;}
-.fin-rail{background:#fff;border-radius:0;border-right:1px solid #ece8ef;padding:16px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:100vh;position:sticky;top:0;}
+.fin-shell{display:block;width:100%;margin:0;}
+.fin-rail,.fin-head{display:none!important;}
 .rail-mark,.rail-pill{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#625b69;text-decoration:none;}
 .rail-mark{background:var(--pos-violet);color:#fff;}
 .rail-pill.active{background:#17151d;color:#fff;}
 .rail-pill:hover{background:var(--pos-violet-light);color:var(--pos-violet);}
 .rail-spacer{flex:1;}
 .nav-svg{display:block;flex-shrink:0;}
-.fin-board{min-width:0;padding:20px 24px 28px;width:100%;}
+.fin-board{min-width:0;padding:0;width:100%;}
 .fin-head{height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;}
 .fin-tabs{background:#fff;border-radius:20px;padding:7px;display:flex;gap:8px;align-items:center;}
 .tab{border-radius:16px;padding:9px 18px;color:#4f4856;text-decoration:none;font-size:.84rem;}
@@ -413,7 +410,7 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 .status{display:flex;align-items:center;gap:5px;}.status i{width:6px;height:6px;border-radius:50%;background:#36a67c;display:inline-block;}.status.pending i{background:#d8bd2d;}.dots{color:#8c8491;letter-spacing:2px;}
 .empty-state{text-align:center;color:#746d7a;padding:40px 0;}
 @media (max-width:1180px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
-@media (max-width:760px){.t-main{padding:0!important;}.fin-shell{grid-template-columns:1fr;}.fin-rail{display:none;}.fin-board{padding:12px;}.fin-head{height:auto;align-items:flex-start;}.fin-tabs{overflow:auto;max-width:100%;}.head-actions{display:none;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
+@media (max-width:760px){.fin-shell{grid-template-columns:1fr;}.fin-rail{display:none;}.fin-board{padding:0;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
 </style>
 <?php
 $content = ob_get_clean();
