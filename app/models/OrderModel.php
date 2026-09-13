@@ -1838,6 +1838,7 @@ class OrderModel extends Model
                ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
               WHERE o.tenant_id = :tid
                 AND o.status IN ('paid', 'open')
+                AND (o.channel <> 'restaurant' OR o.status = 'paid')
                 AND COALESCE(o.total, 0) > 0
                 AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
                 {$activitySql} {$staffSql}
@@ -1933,6 +1934,7 @@ class OrderModel extends Model
                ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
               WHERE o.tenant_id = ?
                 AND o.status IN ('paid', 'open')
+                AND (o.channel <> 'restaurant' OR o.status = 'paid')
                 AND COALESCE(o.total, 0) > 0
                 AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
                 AND (DATE(o.created_at) = ? OR COALESCE(pa.period_paid, 0) > 0)
