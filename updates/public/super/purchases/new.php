@@ -207,6 +207,19 @@ ob_start();
     <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn"><i class="fas fa-plus me-1"></i>Add item</button>
   </div>
 
+  <div class="card border-0 shadow-sm mb-3" style="border-radius:12px;background:linear-gradient(135deg,#f8fafc,#eef2ff);">
+    <div class="card-body p-3">
+      <label class="form-label fw-semibold mb-1" for="purchaseBarcodeScan"><i class="fas fa-barcode me-1"></i>Scan barcode with scanner</label>
+      <div class="input-group">
+        <span class="input-group-text bg-white"><i class="fas fa-barcode text-primary"></i></span>
+        <input type="text" id="purchaseBarcodeScan" class="form-control form-control-lg" placeholder="Click here, then scan with your barcode scanner…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="none">
+        <button type="button" class="btn btn-outline-primary" id="focusScanBtn" title="Ready scanner"><i class="fas fa-crosshairs me-1"></i>Ready</button>
+      </div>
+      <div class="form-text">Hardware scanners type the code and press Enter. Keep this box focused while scanning — each scan fills the next item line.</div>
+      <div id="purchaseScanMsg" class="small mt-2" style="display:none;"></div>
+    </div>
+  </div>
+
   <div id="purchaseItems"></div>
 
   <div class="mt-3 mb-5 d-flex gap-2 flex-wrap">
@@ -232,8 +245,9 @@ ob_start();
           <input type="text" name="items[__i__][variant_label]" class="form-control form-control-sm" placeholder="e.g. 2kg or 1kg">
         </div>
         <div class="col-md-4">
-          <label class="form-label small mb-1">Barcode</label>
-          <input type="text" name="items[__i__][barcode]" class="form-control form-control-sm" placeholder="optional">
+          <label class="form-label small mb-1"><i class="fas fa-barcode me-1"></i>Barcode</label>
+          <input type="text" name="items[__i__][barcode]" class="form-control form-control-sm barcode-input" placeholder="Scan or type, then Enter" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="none">
+          <div class="barcode-note small mt-1" style="display:none;"></div>
         </div>
         <div class="col-md-4">
           <label class="form-label small mb-1">Category</label>
@@ -315,15 +329,34 @@ ob_start();
     padding: .45rem .7rem; font-size: .9rem; cursor: pointer;
   }
   .ta-menu button:hover { background: #f1f5f9; }
+  #purchaseBarcodeScan:focus {
+    border-color: #4b006e;
+    box-shadow: 0 0 0 .2rem rgba(75,0,110,.15);
+    background: #fff;
+  }
+  .barcode-input.scan-ok { border-color: #16a34a; }
+  .barcode-input.scan-new { border-color: #2563eb; }
 </style>
 <script>
 (function () {
   var API = <?php echo json_encode($apiBase); ?>;
   var wrap = document.getElementById('purchaseItems');
   var tpl = document.getElementById('itemTemplate');
+  var scanInput = document.getElementById('purchaseBarcodeScan');
+  var scanMsg = document.getElementById('purchaseScanMsg');
   var idx = 0;
+  var scanBuffer = '';
+  var scanTimer = null;
 
   function money(n) { return 'KES ' + (Math.round(n * 100) / 100).toLocaleString(); }
+
+  function flashScan(text, ok) {
+    if (!scanMsg) return;
+    scanMsg.textContent = text;
+    scanMsg.style.display = 'block';
+    scanMsg.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger');
+    setTimeout(function () { scanMsg.style.display = 'none'; }, 2600);
+  }
 
   function bindTypeahead(root) {
     (root || document).querySelectorAll('.ta-input').forEach(function (input) {
@@ -387,6 +420,132 @@ ob_start();
     }
   }
 
+  function applyProductToCard(card, item, code) {
+    var nameEl = card.querySelector('input[name*="[name]"]');
+    var barcodeEl = card.querySelector('.barcode-input');
+    var categoryEl = card.querySelector('input[name*="[category]"]');
+    var brandEl = card.querySelector('input[name*="[brand]"]');
+    var pkgUnit = card.querySelector('.pkg-unit');
+    var insideQty = card.querySelector('.inside-qty');
+    var buyPrice = card.querySelector('.buy-price');
+    var innerUnit = card.querySelector('select[name*="[inner_unit]"]');
+    var note = card.querySelector('.barcode-note');
+
+    if (barcodeEl) {
+      barcodeEl.value = code || (item && item.barcode) || barcodeEl.value;
+      barcodeEl.classList.remove('scan-ok', 'scan-new');
+      barcodeEl.classList.add(item ? 'scan-ok' : 'scan-new');
+    }
+    if (!item) {
+      if (note) {
+        note.style.display = 'block';
+        note.className = 'barcode-note small mt-1 text-muted';
+        note.innerHTML = '<i class="fas fa-circle-plus me-1"></i>New barcode — will be saved with this purchase item.';
+      }
+      return;
+    }
+    if (nameEl && !nameEl.value.trim()) nameEl.value = item.name || '';
+    if (categoryEl && item.category_name) categoryEl.value = item.category_name;
+    if (brandEl && item.brand_name) brandEl.value = item.brand_name;
+    if (innerUnit && item.unit) innerUnit.value = item.unit;
+    if (pkgUnit && item.pack_unit) pkgUnit.value = item.pack_unit;
+    if (insideQty && (!insideQty.value || parseFloat(insideQty.value) <= 0) && item.units_per_pack > 0) {
+      insideQty.value = item.units_per_pack;
+    }
+    if (buyPrice && (!buyPrice.value || parseFloat(buyPrice.value) <= 0)) {
+      if (item.package_buying_price > 0) buyPrice.value = item.package_buying_price;
+      else if (item.buying_price > 0 && item.units_per_pack > 1) buyPrice.value = Math.round(item.buying_price * item.units_per_pack * 100) / 100;
+      else if (item.buying_price > 0) buyPrice.value = item.buying_price;
+    }
+    if (note) {
+      note.style.display = 'block';
+      note.className = 'barcode-note small mt-1 text-success';
+      note.innerHTML = '<i class="fas fa-check me-1"></i>Matched existing product' + (item.balance != null ? (' · stock ' + item.balance) : '') + '.';
+    }
+    recalc(card);
+  }
+
+  function findCardByBarcode(code) {
+    var cards = wrap.querySelectorAll('.purchase-item');
+    for (var i = 0; i < cards.length; i++) {
+      var el = cards[i].querySelector('.barcode-input');
+      if (el && el.value.trim() === code) return cards[i];
+    }
+    return null;
+  }
+
+  function nextEmptyCard() {
+    var cards = wrap.querySelectorAll('.purchase-item');
+    for (var i = 0; i < cards.length; i++) {
+      var nameEl = cards[i].querySelector('input[name*="[name]"]');
+      var barcodeEl = cards[i].querySelector('.barcode-input');
+      var nameEmpty = !nameEl || !nameEl.value.trim();
+      var barcodeEmpty = !barcodeEl || !barcodeEl.value.trim();
+      if (nameEmpty && barcodeEmpty) return cards[i];
+    }
+    return null;
+  }
+
+  function lookupBarcode(code, card) {
+    code = String(code || '').trim();
+    if (!code) return Promise.resolve(null);
+    return fetch(API + 'find_barcode.php?code=' + encodeURIComponent(code))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        applyProductToCard(card, data.item || null, code);
+        return data.item || null;
+      })
+      .catch(function () {
+        applyProductToCard(card, null, code);
+        return null;
+      });
+  }
+
+  function handleScannedCode(code) {
+    code = String(code || '').trim();
+    if (!code) return;
+    var existing = findCardByBarcode(code);
+    if (existing) {
+      existing.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      flashScan('Barcode already on this purchase — focused that line.', true);
+      var focusEl = existing.querySelector('.pkg-qty') || existing.querySelector('.barcode-input');
+      if (focusEl) focusEl.focus();
+      setTimeout(function () { if (scanInput) scanInput.focus(); }, 50);
+      return;
+    }
+    var card = nextEmptyCard() || addItem();
+    lookupBarcode(code, card).then(function (item) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      flashScan(item ? ('Scanned: ' + (item.name || code)) : ('New barcode captured: ' + code), true);
+      if (scanInput) {
+        scanInput.value = '';
+        scanInput.focus();
+      }
+    });
+  }
+
+  function wireBarcodeField(card) {
+    var input = card.querySelector('.barcode-input');
+    if (!input || input.dataset.wired) return;
+    input.dataset.wired = '1';
+    input.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      e.stopPropagation();
+      var code = input.value.trim();
+      if (!code) return;
+      lookupBarcode(code, card).then(function (item) {
+        flashScan(item ? ('Matched: ' + (item.name || code)) : ('Barcode saved on this line: ' + code), true);
+        if (scanInput) scanInput.focus();
+      });
+    });
+    input.addEventListener('input', function () {
+      input.classList.remove('scan-ok', 'scan-new');
+      var note = card.querySelector('.barcode-note');
+      if (note) note.style.display = 'none';
+    });
+  }
+
   function addItem() {
     var html = tpl.innerHTML.replace(/__i__/g, String(idx++));
     var div = document.createElement('div');
@@ -395,6 +554,7 @@ ob_start();
     wrap.appendChild(card);
     renumber();
     bindTypeahead(card);
+    wireBarcodeField(card);
     card.querySelectorAll('.pkg-unit, .pkg-qty, .inside-qty, .buy-price').forEach(function (el) {
       el.addEventListener('input', function () { recalc(card); });
       el.addEventListener('change', function () { recalc(card); });
@@ -405,6 +565,7 @@ ob_start();
       renumber();
     });
     recalc(card);
+    return card;
   }
 
   function renumber() {
@@ -414,7 +575,10 @@ ob_start();
     });
   }
 
-  document.getElementById('addItemBtn').addEventListener('click', addItem);
+  document.getElementById('addItemBtn').addEventListener('click', function () {
+    addItem();
+    if (scanInput) scanInput.focus();
+  });
   var supplierInput = document.querySelector('input[name="supplier"]');
   if (supplierInput) {
     supplierInput.addEventListener('input', function () {
@@ -423,6 +587,55 @@ ob_start();
   }
   bindTypeahead(document);
   addItem();
+
+  if (scanInput) {
+    scanInput.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var code = scanInput.value.trim();
+      scanInput.value = '';
+      handleScannedCode(code);
+    });
+    var focusBtn = document.getElementById('focusScanBtn');
+    if (focusBtn) {
+      focusBtn.addEventListener('click', function () {
+        scanInput.focus();
+        flashScan('Scanner ready — scan a barcode now.', true);
+      });
+    }
+    // Keep scanner box ready unless the user is editing another field.
+    document.addEventListener('click', function (e) {
+      if (!scanInput) return;
+      if (e.target === scanInput) return;
+      if (e.target.closest('input, textarea, select, button, a, label, .ta-menu')) return;
+      scanInput.focus();
+    });
+    // Catch wedge-scanner keystrokes that land outside inputs (common with USB scanners).
+    document.addEventListener('keydown', function (e) {
+      if (!scanInput) return;
+      var tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+      var typingElsewhere = tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable);
+      if (typingElsewhere && e.target !== scanInput) return;
+      if (e.key === 'Enter') {
+        if (scanBuffer.length >= 3) {
+          e.preventDefault();
+          var code = scanBuffer;
+          scanBuffer = '';
+          clearTimeout(scanTimer);
+          handleScannedCode(code);
+        }
+        return;
+      }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.target !== scanInput) {
+          scanBuffer += e.key;
+          clearTimeout(scanTimer);
+          scanTimer = setTimeout(function () { scanBuffer = ''; }, 80);
+        }
+      }
+    });
+    setTimeout(function () { scanInput.focus(); }, 200);
+  }
 })();
 </script>
 <?php
