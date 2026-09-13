@@ -6,7 +6,7 @@ $S = new Models\BusinessServiceModel($pdo);
 $services = $S->allActive();
 $staffSt = $pdo->prepare(
     "SELECT u.id, u.username FROM users u JOIN roles r ON r.id = u.role_id
-      WHERE u.tenant_id = ? AND u.is_active = 1 AND r.name IN ('staff','tenant_owner') ORDER BY u.username"
+      WHERE u.tenant_id = ? AND u.is_active = 1 AND r.role_name IN ('staff','tenant_owner') ORDER BY u.username"
 );
 $staffSt->execute([TenantContext::tenantId()]);
 $staff = $staffSt->fetchAll();
