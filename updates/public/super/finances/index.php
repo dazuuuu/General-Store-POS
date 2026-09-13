@@ -70,7 +70,9 @@ $revenues = $F->forTenant('revenue', $period, 100);
 
 // Deposits / payments collected in period (cash movement into the shop).
 $tid = (int) TenantContext::tenantId();
-$paySql = 'SELECT COALESCE(SUM(amount),0) FROM order_payments WHERE tenant_id = ? AND ' . fin_period_sql($period, 'created_at');
+$paySql = "SELECT COALESCE(SUM(op.amount),0) FROM order_payments op
+           JOIN orders o ON o.id=op.order_id AND o.tenant_id=op.tenant_id
+           WHERE op.tenant_id = ? AND o.status <> 'void' AND " . fin_period_sql($period, 'op.created_at');
 $stPay = $pdo->prepare($paySql);
 $stPay->execute([$tid]);
 $depositsCollected = round((float) $stPay->fetchColumn(), 2);
