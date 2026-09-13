@@ -1892,12 +1892,14 @@ if (barcodeScan) {
         var code = barcodeScan.value.trim();
         barcodeScan.value = '';
         if (!code) { return; }
-        var id = BARCODES[code];
-        if (!id) { flashScan('No product with that barcode.', false); return; }
-        var p = PRODUCTS[id];
-        if (p && stockUsed(id) >= p.stock) { flashScan(p.name + ' — no more in stock.', false); return; }
-        add(id);
-        flashScan((p ? p.name : 'Product') + ' added.', true);
+        fetch(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code))
+          .then(function(r){return r.json();})
+          .then(function(data){
+            var p=data.item;if(!p){flashScan('No in-stock product with that barcode.',false);return;}
+            var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
+            if(stockUsed(id)>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
+            add(id);flashScan(p.name+' added.',true);
+          }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
     });
     document.addEventListener('click', function (e) {
         if (e.target === barcodeScan || e.target.closest('input, textarea, select, option, label, button, .btn-group, .modal')) { return; }
