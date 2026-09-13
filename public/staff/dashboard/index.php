@@ -1877,7 +1877,7 @@ document.getElementById('orderForm').addEventListener('submit', function (e) {
         }
         if(!navigator.onLine&&window.OfflinePOS){
             e.preventDefault();
-            var payload={items:serializeCart(),customer_name:document.querySelector('[name=table_name]').value||'Offline customer',sale_type:document.getElementById('saleType').value,payment_method:payMethod(),vat_rate:parseFloat(document.getElementById('vatRateInput').value)||0,vat_inclusive:document.getElementById('vatInclusiveInput').value==='1'};
+            var payload={items:serializeCart(),customer_name:document.querySelector('[name=table_name]').value||'Offline customer',sale_type:document.getElementById('saleType').value,payment_method:payMethod(),amount_tendered:document.getElementById('amountTendered').value,cash_amount:document.getElementById('cashAmount').value,mpesa_amount:document.getElementById('mpesaAmount').value,vat_rate:parseFloat(document.getElementById('vatRateInput').value)||0,vat_inclusive:document.getElementById('vatInclusiveInput').value==='1'};
             OfflinePOS.queueSale(payload).then(function(){alert('Sale saved offline. It will sync automatically when internet returns.');location.reload();});
             return;
         }

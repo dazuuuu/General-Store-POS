@@ -6,7 +6,7 @@
   function get(store,key){return db().then(function(d){return new Promise(function(ok,no){var r=d.transaction(store).objectStore(store).get(key);r.onsuccess=function(){ok(r.result)};r.onerror=function(){no(r.error)};});});}
   function all(store){return db().then(function(d){return new Promise(function(ok,no){var r=d.transaction(store).objectStore(store).getAll();r.onsuccess=function(){ok(r.result||[])};r.onerror=function(){no(r.error)};});});}
   function del(store,key){return db().then(function(d){var t=d.transaction(store,'readwrite');t.objectStore(store).delete(key);});}
-  function digest(pin,salt){return crypto.subtle.digest('SHA-256',new TextEncoder().encode(salt+':'+pin)).then(function(x){return Array.from(new Uint8Array(x)).map(function(b){return b.toString(16).padStart(2,'0')}).join('');});}
+  function digest(pin,salt){var enc=new TextEncoder();return crypto.subtle.importKey('raw',enc.encode(pin),'PBKDF2',false,['deriveBits']).then(function(key){return crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(salt),iterations:200000,hash:'SHA-256'},key,256);}).then(function(x){return Array.from(new Uint8Array(x)).map(function(b){return b.toString(16).padStart(2,'0')}).join('');});}
   function uuid(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16);});}
   var api={
     rememberCandidate:function(pin){if(!pin)return Promise.resolve();var salt=uuid();return digest(pin,salt).then(function(verifier){return put('state',{salt:salt,verifier:verifier},'candidate');});},
