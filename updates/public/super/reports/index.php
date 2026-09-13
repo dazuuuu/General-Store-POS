@@ -4,6 +4,36 @@ require_once __DIR__ . '/../../../app/app.php';
 PageGuard::auth();
 
 $pdo  = Database::pdo();
+$from = preg_replace('/[^0-9-]/','',(string)($_GET['date_from']??'')) ?: date('Y-m-d',strtotime('-30 days'));
+$to = preg_replace('/[^0-9-]/','',(string)($_GET['date_to']??'')) ?: date('Y-m-d');
+$q=trim((string)($_GET['q']??''));
+$SA=new Models\SaleModel($pdo);$OR=new Models\OrderModel($pdo);
+$reportRows=[];
+foreach($SA->forTenant(1500,'all') as $row){$row['source']='sale';$reportRows[]=$row;}
+foreach($OR->forTenant(1500,'all') as $row){$row['source']='order';$reportRows[]=$row;}
+$saleIds=array_column(array_filter($reportRows,fn($r)=>$r['source']==='sale'),'id');
+$orderIds=array_column(array_filter($reportRows,fn($r)=>$r['source']==='order'),'id');
+$saleItems=$SA->itemsForMany($saleIds);$orderItems=$OR->itemsForMany($orderIds);
+foreach($reportRows as &$row){
+  $row['items']=($row['source']==='order'?$orderItems:$saleItems)[(int)$row['id']]??[];
+  $rowDate=date('Y-m-d',strtotime($row['created_at']));
+  $search=implode(' ',array_merge([$row['receipt_number']??'',$row['customer_name']??$row['table_name']??'',$row['staff_name']??''],array_map(fn($i)=>($i['name']??$i['product_name']??'').' '.($i['category_name']??''),$row['items'])));
+  $row['_visible']=$rowDate>=$from&&$rowDate<=$to&&($q===''||stripos($search,$q)!==false);
+}
+unset($row);$reportRows=array_values(array_filter($reportRows,fn($r)=>$r['_visible']));
+usort($reportRows,fn($a,$b)=>strtotime($b['created_at'])<=>strtotime($a['created_at']));
+$page_title='Reports';ob_start();
+?>
+<style>.excel-table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px}.excel-table th,.excel-table td{border:1px solid #b7bec8!important;padding:6px 8px!important}.excel-table thead th{background:#e2f0d9;color:#111;position:sticky;top:0}.excel-date td{background:#d9eaf7!important;font-weight:700;color:#111}.excel-number{text-align:right;font-variant-numeric:tabular-nums}</style>
+<div class="mb-3"><h1 class="h5 fw-bold mb-1">Sales Reports</h1><p class="small text-muted mb-0">Simple date-separated report. Search any receipt, product, category, customer or staff name.</p></div>
+<form method="get" class="row g-2 mb-3"><div class="col-md-5"><input name="q" class="form-control" value="<?php echo htmlspecialchars($q);?>" placeholder="Search anything..."></div><div class="col-md-2"><input type="date" name="date_from" value="<?php echo htmlspecialchars($from);?>" class="form-control"></div><div class="col-md-2"><input type="date" name="date_to" value="<?php echo htmlspecialchars($to);?>" class="form-control"></div><div class="col-md-3"><button class="btn btn-primary">Search report</button> <button type="button" onclick="print()" class="btn btn-outline-secondary">Print</button></div></form>
+<div class="table-responsive border"><table class="table excel-table mb-0"><thead><tr><th>Date / Time</th><th>Receipt</th><th>Products</th><th>Customer</th><th>Staff</th><th>Payment</th><th class="excel-number">Total (KES)</th></tr></thead><tbody>
+<?php if(!$reportRows):?><tr><td colspan="7" class="text-center py-4">No matching sales.</td></tr><?php else:$last='';foreach($reportRows as $r):$d=date('Y-m-d',strtotime($r['created_at']));if($d!==$last):$last=$d;?><tr class="excel-date"><td colspan="7"><?php echo htmlspecialchars(date('l, j F Y',strtotime($d)));?></td></tr><?php endif;
+$products=[];foreach($r['items'] as $i)$products[]=($i['name']??$i['product_name']??'Product').' × '.rtrim(rtrim(number_format((float)($i['quantity']??$i['qty']??0),2),'0'),'.');?>
+<tr><td><?php echo date('g:i a',strtotime($r['created_at']));?></td><td><?php echo htmlspecialchars($r['receipt_number']??'');?></td><td><?php echo htmlspecialchars(implode(', ',$products));?></td><td><?php echo htmlspecialchars($r['customer_name']??$r['table_name']??'Walk-in');?></td><td><?php echo htmlspecialchars($r['staff_name']??'—');?></td><td><?php echo htmlspecialchars(ucfirst($r['payment_method']??'—'));?></td><td class="excel-number"><?php echo number_format((float)$r['total'],2);?></td></tr>
+<?php endforeach;endif;?></tbody></table></div>
+<?php $content=ob_get_clean();include __DIR__.'/../../templates/tenants/layout.php';return;
+
 $date = preg_replace('/[^0-9-]/', '', $_GET['date'] ?? '') ?: date('Y-m-d');
 $data = SalesReport::data($pdo, TenantContext::tenantId(), $date);
 

@@ -198,7 +198,7 @@ foreach ($transferInvoices as $inv) {
     ];
 }
 usort($flow, fn($a, $b) => strtotime($b['when'] ?? 'now') <=> strtotime($a['when'] ?? 'now'));
-$flow = array_slice($flow, 0, 80);
+$flow = array_slice($flow, 0, 500);
 
 $periodLabel = ['today' => 'Today', 'week' => 'Last 7 days', 'month' => 'Last 30 days', 'all' => 'All time'][$period];
 $page_title = 'Finances';
@@ -391,16 +391,18 @@ ob_start();
   </div>
 
   <div class="col-lg-8">
-    <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
-      <div class="px-4 py-3 border-bottom"><h2 class="h6 fw-bold mb-0">Money flow · <?php echo htmlspecialchars($periodLabel); ?></h2></div>
+    <div class="card border mb-4" style="border-radius:0;overflow:hidden;">
+      <div class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center gap-2"><h2 class="h6 fw-bold mb-0">Money flow · <?php echo htmlspecialchars($periodLabel); ?></h2><input id="financeSearch" class="form-control form-control-sm" style="max-width:300px" placeholder="Search anything in finances..."></div>
       <div class="table-responsive">
-        <table class="table align-middle mb-0">
-          <thead><tr class="text-muted small text-uppercase"><th>When</th><th>Type</th><th>Detail</th><th class="text-end">In</th><th class="text-end">Out</th><th class="text-end">Capital moved</th></tr></thead>
+        <table class="table table-bordered table-sm align-middle mb-0" id="financeLedger" style="font-family:Arial,sans-serif;font-size:13px;">
+          <thead style="background:#e2f0d9;"><tr><th>When</th><th>Type</th><th>Detail</th><th class="text-end">Money In</th><th class="text-end">Money Out</th><th class="text-end">Capital moved</th></tr></thead>
           <tbody>
             <?php if (!$flow): ?>
               <tr><td colspan="6" class="text-center text-muted py-4">No money movement in this period.</td></tr>
-            <?php else: foreach ($flow as $row): ?>
-              <tr>
+            <?php else: $flowDate=''; foreach ($flow as $row): $rowDate=date('Y-m-d',strtotime($row['when']?:'now')); if($rowDate!==$flowDate):$flowDate=$rowDate;?>
+              <tr class="finance-date" data-date="<?php echo $flowDate;?>" style="background:#d9eaf7;"><td colspan="6" class="fw-bold"><?php echo htmlspecialchars(date('l, j F Y',strtotime($flowDate)));?></td></tr>
+              <?php endif;?>
+              <tr class="finance-row" data-date="<?php echo $flowDate;?>" data-search="<?php echo htmlspecialchars(strtolower(implode(' ',[$row['when'],$row['type'],$row['detail'],$row['note']??'',$row['in'],$row['out'],$row['capital']??0])));?>">
                 <td class="small text-nowrap"><?php echo $row['when'] ? htmlspecialchars(date('j M, g:i a', strtotime($row['when']))) : '—'; ?></td>
                 <td class="small fw-semibold"><?php echo htmlspecialchars($row['type']); ?></td>
                 <td class="small"><?php echo htmlspecialchars($row['detail']); ?><?php if ($row['note']): ?><div class="text-muted"><?php echo htmlspecialchars($row['note']); ?></div><?php endif; ?></td>
@@ -413,6 +415,9 @@ ob_start();
         </table>
       </div>
     </div>
+    <script>
+    (function(){var input=document.getElementById('financeSearch'),table=document.getElementById('financeLedger');if(!input||!table)return;
+    input.addEventListener('input',function(){var q=this.value.toLowerCase(),visible={};table.querySelectorAll('.finance-row').forEach(function(r){var show=!q||r.dataset.search.indexOf(q)!==-1;r.style.display=show?'':'none';if(show)visible[r.dataset.date]=true;});table.querySelectorAll('.finance-date').forEach(function(r){r.style.display=visible[r.dataset.date]?'':'none';});});})();</script>
 
     <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
       <div class="px-4 py-3 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
