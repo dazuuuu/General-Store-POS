@@ -177,7 +177,11 @@ class StoreProductModel extends Model
         $where = $this->periodSql($period, 'si.created_at');
         $stmt = $this->db->prepare(
             "SELECT si.*, u.username AS created_by_name,
-                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count
+                    (SELECT COUNT(*) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS item_count,
+                    (SELECT GROUP_CONCAT(
+                        CONCAT(sii.product_name, ' (', TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM FORMAT(sii.quantity, 2))), ' ', COALESCE(sii.unit, ''), ')')
+                        ORDER BY sii.id SEPARATOR ', '
+                     ) FROM store_invoice_items sii WHERE sii.invoice_id = si.id) AS product_summary
                FROM store_invoices si
           LEFT JOIN users u ON u.id = si.created_by
               WHERE si.tenant_id = ? AND {$where}
