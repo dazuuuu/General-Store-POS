@@ -46,11 +46,12 @@ class OrderModel extends Model
             return ['ok' => false, 'errors' => ['_' => 'No staff in context.']];
         }
         $channelIn = $in['channel'] ?? 'tab';
-        $channel   = in_array($channelIn, ['walkin', 'tab'], true) ? $channelIn : 'tab';
+        $channel   = in_array($channelIn, ['walkin', 'tab', 'restaurant'], true) ? $channelIn : 'tab';
         $tableName = trim((string) ($in['table_name'] ?? ''));
         if ($tableName === '' && $channel === 'tab') {
             return ['ok' => false, 'errors' => ['table_name' => 'Enter the customer name.']];
         }
+        if($tableName===''&&$channel==='restaurant')$tableName='Walk-in';
         $items = array_values(array_filter($in['items'] ?? [], fn($i) => (int) ($i['product_id'] ?? 0) > 0 && (float) ($i['quantity'] ?? 0) > 0));
         if (!$items) {
             return ['ok' => false, 'errors' => ['_' => 'Add at least one item.']];
@@ -67,7 +68,7 @@ class OrderModel extends Model
             $clientUuid=trim((string)($in['client_uuid']??''))?:null;
             $ins->execute([$tid, $tableName, $channel, $openedBy,$clientUuid]);
             $orderId = (int) $db->lastInsertId();
-            $prefix  = $channel === 'walkin' ? 'RCP-' : 'ORD-';
+            $prefix  = $channel === 'walkin' ? 'RCP-' : ($channel === 'restaurant' ? 'RST-' : 'ORD-');
             $receipt = $prefix . str_pad((string) $orderId, 6, '0', STR_PAD_LEFT);
             $db->prepare('UPDATE orders SET receipt_number = ? WHERE id = ?')->execute([$receipt, $orderId]);
 
@@ -119,11 +120,11 @@ class OrderModel extends Model
                 $vals[] = $priced['additional_charges'];
                 $vals[] = $additionalNote !== '' ? $additionalNote : null;
             } catch (\PDOException $ignored) {}
-            if ($channel === 'tab') {
+            if ($channel === 'tab' || $channel === 'restaurant') {
                 $sets[] = 'payment_method = ?';
                 $sets[] = 'payment_status = ?';
-                $vals[] = 'credit';
-                $vals[] = 'credit';
+                $vals[] = $channel === 'restaurant' ? 'cash' : 'credit';
+                $vals[] = $channel === 'restaurant' ? 'unpaid' : 'credit';
             }
             if ($creditDays > 0) {
                 $sets[] = 'credit_duration_days = ?';
@@ -177,7 +178,7 @@ class OrderModel extends Model
         try {
             $db->beginTransaction();
 
-            $sel = $db->prepare("SELECT id, status, sale_type FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE");
+            $sel = $db->prepare("SELECT id, status, sale_type, channel FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE");
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -190,7 +191,7 @@ class OrderModel extends Model
             }
 
             $saleType = ($order['sale_type'] ?? 'retail') === 'wholesale' ? 'wholesale' : 'retail';
-            $added = $this->insertItems($db, $tid, $orderId, $items, $staffId, $saleType, true, max(0, round($creditOverride, 2)));
+            $added = $this->insertItems($db, $tid, $orderId, $items, $staffId, $saleType, ($order['channel']??'tab')==='tab', max(0, round($creditOverride, 2)));
             if (!$added['ok']) {
                 $db->rollBack();
                 return $added;
@@ -1225,6 +1226,10 @@ class OrderModel extends Model
         if (!self::$paymentSchemaSynced) {
             self::$paymentSchemaSynced = true;
             try {
+                $channelType=(string)$this->db->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='channel'")->fetchColumn();
+                if(stripos($channelType,"'restaurant'")===false)$this->db->exec("ALTER TABLE orders MODIFY COLUMN channel ENUM('walkin','tab','restaurant') NOT NULL DEFAULT 'tab'");
+            } catch (\PDOException $ignored) {}
+            try {
                 $this->db->exec("ALTER TABLE orders MODIFY COLUMN payment_method VARCHAR(20) DEFAULT NULL");
             } catch (\PDOException $ignored) {}
             try {
@@ -1520,7 +1525,7 @@ class OrderModel extends Model
     }
 
     /** All open tabs for the tenant, oldest first (FIFO credit queue). */
-    public function openOrders(): array
+    public function openOrders(array $opts = []): array
     {
         $tid = \TenantContext::tenantId();
         $sql = "SELECT o.*, u.username AS opened_by_name,
@@ -1533,10 +1538,13 @@ class OrderModel extends Model
              LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
                  WHERE o.tenant_id = ? AND o.status = 'open'
                    AND o.invoice_deleted_at IS NULL
-                   AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
-              ORDER BY o.created_at ASC, o.id ASC";
+                   AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001";
+        $params=[$tid];
+        $channels=array_values(array_intersect(['walkin','tab','restaurant'],(array)($opts['channels']??[])));
+        if($channels){$sql.=' AND o.channel IN ('.implode(',',array_fill(0,count($channels),'?')).')';$params=array_merge($params,$channels);}
+        $sql.=" ORDER BY o.created_at ASC, o.id ASC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([$tid]);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
 
@@ -1567,6 +1575,8 @@ class OrderModel extends Model
                  WHERE o.tenant_id = ? AND o.status <> 'void'
                    AND o.invoice_deleted_at IS NULL";
         $params = [$tid];
+        $channels=array_values(array_intersect(['walkin','tab','restaurant'],(array)($opts['channels']??[])));
+        if($channels){$sql.=' AND o.channel IN ('.implode(',',array_fill(0,count($channels),'?')).')';$params=array_merge($params,$channels);}
 
         if ($openOnly) {
             $sql .= " AND o.status = 'open'

@@ -220,7 +220,7 @@ class ProductModel extends Model
     public function sellable(): array
     {
         $tid = \TenantContext::tenantId();
-        $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
+        $sql = "SELECT p.id, p.name, p.product_type, p.is_menu_item, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at, p.buying_price, p.package_buying_price,
                        p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
                        p.credit_limit, p.status, p.barcode, p.serial_tracking, p.colors, p.sizes,
@@ -239,7 +239,7 @@ class ProductModel extends Model
             $stmt->execute([$tid]);
         } catch (\PDOException $e) {
             $stmt = $this->db->prepare(
-                "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
+                "SELECT p.id, p.name, p.product_type, p.is_menu_item, p.selling_price, p.wholesale_price, p.retail_price,
                         p.offer_price, p.offer_starts_at, p.offer_ends_at,
                         p.quantity, p.unit, p.status, p.barcode, p.serial_tracking, p.colors, p.sizes,
                         p.image_path, p.size_value, p.size_unit,
@@ -268,6 +268,12 @@ class ProductModel extends Model
             $r['sizes']           = $r['sizes'] ? (json_decode($r['sizes'], true) ?: []) : [];
         }
         return $rows;
+    }
+
+    /** Active prepared-food/drink items used only by the restaurant order screen. */
+    public function sellableMenu(): array
+    {
+        return array_values(array_filter($this->sellable(), static fn(array $row): bool => !empty($row['is_menu_item'])));
     }
 
     /** Product name type-ahead / restock lookup. */

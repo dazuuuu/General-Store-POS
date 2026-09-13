@@ -74,10 +74,10 @@ try {
     <?php endif;?>
     <?php if(TenantFeatures::enabled('restaurant_menu')):?>
       <div class="t-subsection"><i class="fas fa-utensils me-1"></i>Restaurant</div>
-      <a class="t-sublink t-subsub" href="<?php echo public_url('super/menu/');?>">Food menu</a>
-      <a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/orders/','staff/orders/');?>">Orders</a>
-      <a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/orders/held.php','staff/orders/held.php');?>">Hold order</a>
-      <?php if($menuOwner||TenantContext::can(Capabilities::PAYMENTS_PROCESS)):?><a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/payments/','staff/payments/');?>">Process payment</a><?php endif;?>
+      <?php if($menuOwner||TenantContext::can(Capabilities::INVENTORY_EDIT)):?><a class="t-sublink t-subsub" href="<?php echo public_url('super/menu/');?>">Food menu</a><a class="t-sublink t-subsub" href="<?php echo public_url('super/categories/?type=menu');?>">Menu categories</a><?php endif;?>
+      <a class="t-sublink t-subsub <?php echo $menuOn('/restaurant/');?>" href="<?php echo $menuRoute('super/restaurant/','staff/restaurant/');?>">Orders</a>
+      <a class="t-sublink t-subsub <?php echo $menuOn('/restaurant/held');?>" href="<?php echo $menuRoute('super/restaurant/held.php','staff/restaurant/held.php');?>">Hold order</a>
+      <?php if($menuOwner||TenantContext::can(Capabilities::PAYMENTS_PROCESS)):?><a class="t-sublink t-subsub" href="<?php echo $menuRoute('super/restaurant/','staff/restaurant/');?>">Process payment</a><?php endif;?>
     <?php endif;?>
   </div>
 </div>

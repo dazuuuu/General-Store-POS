@@ -9,6 +9,7 @@ $S = new Models\SubcategoryModel($pdo);
 
 $categoryId = (int) ($_GET['category_id'] ?? ($_POST['category_id'] ?? 0));
 $category = $categoryId > 0 ? $C->find($categoryId) : null;
+$categoryBase = public_url('super/categories/') . (($category['type'] ?? '') === 'menu' ? '?type=menu' : '');
 
 // No valid category selected → send back to categories.
 if (!$category) {
@@ -50,7 +51,7 @@ $page_title = 'Subcategories';
 ob_start();
 ?>
 <div class="mb-3">
-  <a href="<?php echo public_url('super/categories/'); ?>" class="text-decoration-none text-muted">&larr; Categories</a>
+  <a href="<?php echo $categoryBase; ?>" class="text-decoration-none text-muted">&larr; <?php echo ($category['type']??'')==='menu'?'Menu categories':'Categories';?></a>
   <h2 class="h4 mt-1 mb-0"><?php echo htmlspecialchars($category['name']); ?> <span class="text-muted fs-6">subcategories</span></h2>
 </div>
 <div class="row g-4">

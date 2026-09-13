@@ -17,8 +17,8 @@ $searchApi = public_url('api/orders/invoice_search.php');
 
 $q = trim((string) ($_GET['q'] ?? ''));
 $orders = $q !== ''
-    ? $O->searchInvoices($q, ['open_only' => true, 'limit' => 80])
-    : $O->openOrders();
+    ? $O->searchInvoices($q, ['open_only' => true, 'limit' => 80,'channels'=>['tab']])
+    : $O->openOrders(['channels'=>['tab']]);
 
 $page_title = 'Credit sales';
 ob_start();
