@@ -470,6 +470,7 @@ class PurchaseModel extends Model
         // Constructors may perform compatibility DDL; run them before the transaction.
         $store=new StoreProductModel($this->db);
         $products=new ProductModel($this->db);
+        $tierModel=new PriceTierModel($this->db);
         try{
             $this->db->beginTransaction();
             $in=implode(',',array_fill(0,count($ids),'?'));
@@ -483,7 +484,9 @@ class PurchaseModel extends Model
                 $id=(int)$row['id'];$over=(array)($selections[$id]??[]);$split=$this->splitTransferQuantity($row,$over);
                 if($split['transfer_qty']<=0)continue;
                 $item=$this->mergeTransferOverrides($row,$over,$split['transfer_qty'],$split['transfer_packages']);
-                $productId=$store->upsertDirectInventory($products,$item,$this->normalizeTierInput($over['tiers']??[]));
+                $productId=$store->upsertDirectInventory($products,$item);
+                $tiers=$this->normalizeTierInput($over['tiers']??[]);
+                if($tiers)$tierModel->replaceForProduct($productId,$tiers);
                 $vals=[
                     $item['wholesale_price']!==''?(float)$item['wholesale_price']:null,
                     $item['package_price']!==''?(float)$item['package_price']:null,
