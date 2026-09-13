@@ -1,4 +1,6 @@
 <?php
+header('Location: ../payroll/');
+exit;
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::tenant();
 $pdo=Database::pdo(); $F=new Models\FinanceModel($pdo); $error='';

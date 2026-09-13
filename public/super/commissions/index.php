@@ -25,8 +25,8 @@ FROM (
 $st=$pdo->prepare($sql); $st->execute([$tid,$tid]); $rows=$st->fetchAll();
 $page_title='Commissions'; ob_start();
 ?>
-<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2"><div><h1 class="h5 fw-bold mb-1">Staff commissions</h1><p class="text-muted small mb-0">Service commissions plus extra product price earned above the protected minimum.</p></div>
-<div class="btn-group"><?php foreach(['today'=>'Today','week'=>'7 days','month'=>'30 days','all'=>'All'] as $p=>$l): ?><a class="btn btn-sm <?php echo $period===$p?'btn-primary':'btn-outline-secondary'; ?>" href="?period=<?php echo $p; ?>"><?php echo $l; ?></a><?php endforeach; ?></div></div>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2"><div><h1 class="h5 fw-bold mb-1">Staff commissions</h1><p class="text-muted small mb-0">Service commissions plus extra product price earned above the protected minimum. Commission is paid together with salary through Payroll.</p></div>
+<div><a class="btn btn-success btn-sm me-2" href="<?php echo public_url('super/payroll/');?>">Pay salary + commission</a><div class="btn-group"><?php foreach(['today'=>'Today','week'=>'7 days','month'=>'30 days','all'=>'All'] as $p=>$l): ?><a class="btn btn-sm <?php echo $period===$p?'btn-primary':'btn-outline-secondary'; ?>" href="?period=<?php echo $p; ?>"><?php echo $l; ?></a><?php endforeach; ?></div></div></div>
 <div class="card border-0 shadow-sm" style="border-radius:14px;overflow:hidden;"><div class="table-responsive"><table class="table align-middle mb-0">
 <thead><tr class="small text-muted text-uppercase"><th>Staff</th><th class="text-end">Product commission</th><th class="text-end">Service commission</th><th class="text-end">Total earned</th></tr></thead><tbody>
 <?php if(!$rows): ?><tr><td colspan="4" class="text-center text-muted py-5">No commissions recorded for this period.</td></tr>

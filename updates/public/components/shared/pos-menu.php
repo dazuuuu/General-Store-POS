@@ -17,7 +17,7 @@ $menuRoute = static function (string $owner, string $staff = '') use ($menuOwner
 
 $posOpen = $menuGroupOpen(['/shop', '/orders', '/sales', '/invoices', '/returns', '/customers', '/reports', '/data', '/documents', '/services']);
 $inventoryOpen = $menuGroupOpen(['/inventory', '/store', '/purchases', '/suppliers', '/stationery', '/stock', '/publishers', '/categories']);
-$financeOpen = $menuGroupOpen(['/finances', '/expenses', '/salary', '/commissions', '/taxes']);
+$financeOpen = $menuGroupOpen(['/finances', '/expenses', '/salary', '/payroll', '/commissions', '/taxes']);
 $settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/clean_migrations']);
 $menuUpcoming = [];
 try {
@@ -104,7 +104,7 @@ try {
   <div class="t-subnav">
     <a class="t-sublink <?php echo $menuOn('/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">Finances</a>
     <a class="t-sublink <?php echo $menuOn('/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">Expenses</a>
-    <a class="t-sublink <?php echo $menuOn('/salary'); ?>" href="<?php echo public_url('super/salary/'); ?>">Staff Salary</a>
+    <a class="t-sublink <?php echo $menuOn('/payroll'); ?>" href="<?php echo public_url('super/payroll/'); ?>">Salary & Payroll</a>
     <a class="t-sublink <?php echo $menuOn('/commissions'); ?>" href="<?php echo public_url('super/commissions/'); ?>">Commission</a>
     <a class="t-sublink <?php echo $menuOn('/taxes'); ?>" href="<?php echo public_url('super/taxes/'); ?>">Taxes</a>
   </div>
