@@ -1,0 +1,131 @@
+<?php
+// Shared grouped POS navigation. Included inside the owner/staff <nav>.
+$menuUri = $_SERVER['REQUEST_URI'] ?? '';
+$menuOwner = TenantContext::role() === 'tenant_owner';
+$menuOn = static fn(string $needle): string => strpos($menuUri, $needle) !== false ? 'active' : '';
+$menuGroupOpen = static function (array $needles) use ($menuUri): bool {
+    foreach ($needles as $needle) {
+        if (strpos($menuUri, $needle) !== false) {
+            return true;
+        }
+    }
+    return false;
+};
+$menuRoute = static function (string $owner, string $staff = '') use ($menuOwner): string {
+    return public_url($menuOwner || $staff === '' ? $owner : $staff);
+};
+
+$posOpen = $menuGroupOpen(['/shop', '/orders', '/sales', '/invoices', '/returns', '/customers', '/reports', '/data', '/documents', '/services']);
+$inventoryOpen = $menuGroupOpen(['/inventory', '/store', '/purchases', '/suppliers', '/stationery', '/stock', '/publishers', '/categories']);
+$financeOpen = $menuGroupOpen(['/finances', '/expenses', '/salary', '/commissions', '/taxes']);
+$settingsOpen = $menuGroupOpen(['/admins', '/staff', '/settings', '/clean_migrations']);
+$menuUpcoming = [];
+try {
+    $menuUpcoming = (new Models\BusinessServiceModel(Database::pdo()))->upcomingForUser((int) TenantContext::userId(), 60);
+} catch (\Throwable $ignored) {
+}
+?>
+<?php if ($menuUpcoming): $nextAppointment = $menuUpcoming[0]; ?>
+<a class="t-link" href="<?php echo public_url('super/services/appointments.php?status=booked'); ?>" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;">
+  <i class="fas fa-bell" style="color:#ea580c;"></i>
+  <span>Appointment soon<small class="d-block"><?php echo htmlspecialchars(date('g:i a', strtotime($nextAppointment['scheduled_at'])) . ' · ' . $nextAppointment['customer_name']); ?></small></span>
+</a>
+<?php endif; ?>
+<a class="t-link <?php echo $menuOn('/dashboard'); ?>" href="<?php echo $menuRoute('super/dashboard/', 'staff/dashboard/'); ?>">
+  <i class="fas fa-house"></i><span>Home</span>
+</a>
+
+<div class="t-group <?php echo $posOpen ? 'open' : ''; ?>" data-nav-group>
+  <button type="button" class="t-link t-group-toggle <?php echo $posOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $posOpen ? 'true' : 'false'; ?>">
+    <i class="fas fa-cash-register"></i><span>POS</span><i class="fas fa-chevron-down t-group-caret"></i>
+  </button>
+  <div class="t-subnav">
+    <?php if ($menuOwner || TenantContext::can(Capabilities::SALES_RECORD)): ?>
+      <a class="t-sublink <?php echo $menuOn('/shop'); ?>" href="<?php echo $menuRoute('super/shop/', 'staff/dashboard/'); ?>">Shop</a>
+      <a class="t-sublink t-subsub <?php echo $menuOn('/orders/held'); ?>" href="<?php echo $menuRoute('super/orders/held.php', 'staff/orders/held.php'); ?>">Hold sales</a>
+    <?php endif; ?>
+    <?php if ($menuOwner || TenantContext::can(Capabilities::SALES_VIEW)): ?>
+      <a class="t-sublink <?php echo $menuOn('/sales'); ?>" href="<?php echo $menuRoute('super/sales/', 'staff/sales/'); ?>">Sales</a>
+    <?php endif; ?>
+    <?php if ($menuOwner): ?>
+      <a class="t-sublink <?php echo $menuOn('/invoices'); ?>" href="<?php echo public_url('super/invoices/'); ?>">Invoices</a>
+    <?php endif; ?>
+    <?php if ($menuOwner || TenantContext::can(Capabilities::SALES_RECORD)): ?>
+      <a class="t-sublink <?php echo $menuOn('/orders'); ?>" href="<?php echo $menuRoute('super/orders/', 'staff/orders/'); ?>">Credit Sales</a>
+      <a class="t-sublink <?php echo $menuOn('/returns'); ?>" href="<?php echo $menuRoute('super/returns/', 'staff/returns/'); ?>">Returns</a>
+    <?php endif; ?>
+    <?php if ($menuOwner || TenantContext::can(Capabilities::CUSTOMERS_MANAGE)): ?>
+      <a class="t-sublink <?php echo $menuOn('/customers'); ?>" href="<?php echo public_url('super/customers/'); ?>">Customers / Loyalty</a>
+    <?php endif; ?>
+    <?php if ($menuOwner || TenantContext::can(Capabilities::REPORTS_VIEW)): ?>
+      <a class="t-sublink <?php echo $menuOn('/reports'); ?>" href="<?php echo public_url('super/reports/'); ?>">Reports</a>
+      <a class="t-sublink <?php echo $menuOn('/data'); ?>" href="<?php echo public_url('super/data/'); ?>">Data export</a>
+    <?php endif; ?>
+    <a class="t-sublink <?php echo $menuOn('/documents'); ?>" href="<?php echo $menuRoute('super/documents/', 'staff/documents/'); ?>">Documents</a>
+
+    <div class="t-subsection"><i class="fas fa-concierge-bell me-1"></i>Services</div>
+    <a class="t-sublink t-subsub <?php echo $menuOn('/services/sell'); ?>" href="<?php echo public_url('super/services/sell.php'); ?>">Sell services</a>
+    <a class="t-sublink t-subsub <?php echo $menuOn('/services/appointments'); ?>" href="<?php echo public_url('super/services/appointments.php'); ?>">Appointments</a>
+    <?php if ($menuOwner): ?>
+      <a class="t-sublink t-subsub <?php echo $menuOn('/services/new'); ?>" href="<?php echo public_url('super/services/new.php'); ?>">Create services</a>
+    <?php endif; ?>
+    <a class="t-sublink t-subsub <?php echo strpos($menuUri, '/services/') !== false && strpos($menuUri, '/services/sell') === false && strpos($menuUri, '/services/appointments') === false && strpos($menuUri, '/services/new') === false ? 'active' : ''; ?>" href="<?php echo public_url('super/services/'); ?>">View services</a>
+  </div>
+</div>
+
+<?php if ($menuOwner || TenantContext::can(Capabilities::INVENTORY_VIEW) || TenantContext::can(Capabilities::INVENTORY_EDIT) || TenantContext::can(Capabilities::STOCK_ENTER)): ?>
+<div class="t-group <?php echo $inventoryOpen ? 'open' : ''; ?>" data-nav-group>
+  <button type="button" class="t-link t-group-toggle <?php echo $inventoryOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $inventoryOpen ? 'true' : 'false'; ?>">
+    <i class="fas fa-warehouse"></i><span>Inventory</span><i class="fas fa-chevron-down t-group-caret"></i>
+  </button>
+  <div class="t-subnav">
+    <a class="t-sublink <?php echo $menuOn('/inventory'); ?>" href="<?php echo public_url('super/inventory/'); ?>">Shop Inventory</a>
+    <a class="t-sublink <?php echo $menuOn('/store'); ?>" href="<?php echo public_url('super/store/'); ?>">Store Warehouse</a>
+    <div class="t-subsection"><i class="fas fa-cart-shopping me-1"></i>Purchases</div>
+    <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/new'); ?>" href="<?php echo public_url('super/purchases/new.php'); ?>">Record purchase</a>
+    <a class="t-sublink t-subsub <?php echo strpos($menuUri, '/purchases/') !== false && strpos($menuUri, '/purchases/new') === false && strpos($menuUri, '/purchases/track') === false && strpos($menuUri, '/purchases/transfer') === false ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/'); ?>">View purchases</a>
+    <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/track'); ?>" href="<?php echo public_url('super/purchases/track.php'); ?>">Track purchases</a>
+    <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/transfer'); ?>" href="<?php echo public_url('super/purchases/transfer.php'); ?>">Transfer purchases</a>
+    <a class="t-sublink <?php echo $menuOn('/suppliers'); ?>" href="<?php echo public_url('super/suppliers/'); ?>">Suppliers</a>
+    <a class="t-sublink <?php echo $menuOn('/stationery'); ?>" href="<?php echo public_url('super/stationery/new.php'); ?>">Record Stock</a>
+    <a class="t-sublink <?php echo $menuOn('/stock'); ?>" href="<?php echo public_url('super/stock/new.php'); ?>">Bulk Stock</a>
+    <a class="t-sublink <?php echo $menuOn('/inventory/low-stock'); ?>" href="<?php echo public_url('super/inventory/low-stock.php'); ?>">Low Stock Alerts</a>
+    <a class="t-sublink <?php echo $menuOn('/publishers'); ?>" href="<?php echo public_url('super/publishers/'); ?>">Brands</a>
+    <a class="t-sublink <?php echo $menuOn('/categories'); ?>" href="<?php echo public_url('super/categories/'); ?>">Categories</a>
+  </div>
+</div>
+<?php endif; ?>
+
+<?php if ($menuOwner): ?>
+<div class="t-group <?php echo $financeOpen ? 'open' : ''; ?>" data-nav-group>
+  <button type="button" class="t-link t-group-toggle <?php echo $financeOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $financeOpen ? 'true' : 'false'; ?>">
+    <i class="fas fa-coins"></i><span>Finances</span><i class="fas fa-chevron-down t-group-caret"></i>
+  </button>
+  <div class="t-subnav">
+    <a class="t-sublink <?php echo $menuOn('/finances'); ?>" href="<?php echo public_url('super/finances/'); ?>">Finances</a>
+    <a class="t-sublink <?php echo $menuOn('/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">Expenses</a>
+    <a class="t-sublink <?php echo $menuOn('/salary'); ?>" href="<?php echo public_url('super/salary/'); ?>">Staff Salary</a>
+    <a class="t-sublink <?php echo $menuOn('/commissions'); ?>" href="<?php echo public_url('super/commissions/'); ?>">Commission</a>
+    <a class="t-sublink <?php echo $menuOn('/taxes'); ?>" href="<?php echo public_url('super/taxes/'); ?>">Taxes</a>
+  </div>
+</div>
+
+<div class="t-group <?php echo $settingsOpen ? 'open' : ''; ?>" data-nav-group>
+  <button type="button" class="t-link t-group-toggle <?php echo $settingsOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $settingsOpen ? 'true' : 'false'; ?>">
+    <i class="fas fa-gears"></i><span>Settings</span><i class="fas fa-chevron-down t-group-caret"></i>
+  </button>
+  <div class="t-subnav">
+    <?php if ((int) ($__tenant['owner_user_id'] ?? 0) === (int) TenantContext::userId()): ?>
+      <a class="t-sublink <?php echo $menuOn('/admins'); ?>" href="<?php echo public_url('super/admins/'); ?>">Admins</a>
+    <?php endif; ?>
+    <a class="t-sublink <?php echo $menuOn('/staff') && !$menuOn('/permissions'); ?>" href="<?php echo public_url('super/staff/'); ?>">Staff</a>
+    <a class="t-sublink <?php echo $menuOn('/permissions'); ?>" href="<?php echo public_url('super/staff/permissions.php'); ?>">Permissions</a>
+    <a class="t-sublink <?php echo $menuOn('/clean_migrations'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>">Clean records</a>
+    <a class="t-sublink <?php echo $menuOn('/settings'); ?>" href="<?php echo public_url('super/settings/'); ?>">Settings toggles</a>
+  </div>
+</div>
+<?php else: ?>
+<a class="t-link <?php echo $menuOn('/change-pin'); ?>" href="<?php echo public_url('staff/change-pin.php'); ?>">
+  <i class="fas fa-key"></i><span>Change PIN</span>
+</a>
+<?php endif; ?>

@@ -30,6 +30,8 @@ $isOn = function (string $needle) use ($uri): string {
     </div>
 
     <nav class="t-nav">
+        <?php include __DIR__ . '/../shared/pos-menu.php'; ?>
+        <?php if (false): // Legacy flat menu retained temporarily for safe route reference. ?>
         <a class="t-link <?php echo $isOn('/dashboard'); ?>" href="<?php echo public_url('staff/dashboard/'); ?>">
             <i class="fas fa-house"></i><span>Home</span>
         </a>
@@ -89,6 +91,7 @@ $isOn = function (string $needle) use ($uri): string {
         <a class="t-link <?php echo $isOn('/staff/change-pin'); ?>" href="<?php echo public_url('staff/change-pin.php'); ?>">
             <i class="fas fa-key"></i><span>Change PIN</span>
         </a>
+        <?php endif; ?>
     </nav>
 
     <div class="t-sidebar-footer">
@@ -123,6 +126,8 @@ $isOn = function (string $needle) use ($uri): string {
 .t-sublink { display:block; padding:8px 12px; border-radius:8px; color:#6b7280; text-decoration:none; font-size:.84rem; margin-bottom:2px; }
 .t-sublink:hover { background:#f7f7fb; color:#1f2330; }
 .t-sublink.active { background:var(--t-bg2); color:var(--t-accent); font-weight:700; }
+.t-subsection { padding:9px 12px 4px; color:#374151; font-size:.76rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+.t-subsub { padding-left:24px; font-size:.8rem; }
 .t-danger { color:#64748b; }
 .t-danger:hover { background:#f1f5f9; color:#334155; }
 .t-nav hr { border:0; border-top:1px solid var(--t-line); margin:12px 0; }
