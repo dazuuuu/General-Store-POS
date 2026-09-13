@@ -41,6 +41,8 @@ class TenantResetService
                 'store_invoices',
                 'store_products',
                 'product_price_tiers',
+                'purchase_items',
+                'purchases',
                 'stock_intake_items',
                 'stock_intakes',
                 'products',

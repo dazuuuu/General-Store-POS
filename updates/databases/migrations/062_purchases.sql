@@ -1,0 +1,56 @@
+-- 062_purchases.sql
+-- Purchases holding area: record buys (with optional supplier/shop + receipt),
+-- then transfer into Store warehouse with sell prices before Inventory/POS.
+
+CREATE TABLE IF NOT EXISTS purchases (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    supplier_id INT NULL,
+    shop_name VARCHAR(160) NULL,
+    receipt_number VARCHAR(80) NULL,
+    receipt_image_path VARCHAR(255) NULL,
+    purchase_date DATE NULL,
+    notes VARCHAR(255) NULL,
+    staff_id INT NULL,
+    status ENUM('recorded','partial','transferred') NOT NULL DEFAULT 'recorded',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    transferred_at DATETIME NULL,
+    KEY idx_purchases_tenant (tenant_id, created_at),
+    KEY idx_purchases_status (tenant_id, status),
+    KEY idx_purchases_supplier (tenant_id, supplier_id),
+    KEY idx_purchases_receipt (tenant_id, receipt_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS purchase_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id INT NOT NULL,
+    purchase_id INT NOT NULL,
+    name VARCHAR(160) NULL,
+    category_id INT NULL,
+    brand_id INT NULL,
+    barcode VARCHAR(64) NULL,
+    unit VARCHAR(20) NULL DEFAULT 'piece',
+    package_unit VARCHAR(20) NULL,
+    package_quantity DECIMAL(12,2) NULL,
+    units_per_package DECIMAL(12,2) NULL,
+    variant_label VARCHAR(40) NULL,
+    colors VARCHAR(255) NULL,
+    quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    faulty_quantity DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    buying_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    package_buying_price DECIMAL(12,2) NULL,
+    wholesale_price DECIMAL(12,2) NULL,
+    package_price DECIMAL(12,2) NULL,
+    retail_price DECIMAL(12,2) NULL,
+    retail_pack_price DECIMAL(12,2) NULL,
+    image_path VARCHAR(255) NULL,
+    notes VARCHAR(255) NULL,
+    status ENUM('pending','transferred') NOT NULL DEFAULT 'pending',
+    store_product_id INT NULL,
+    product_id INT NULL,
+    transferred_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_purchase_items_purchase (tenant_id, purchase_id),
+    KEY idx_purchase_items_status (tenant_id, status),
+    KEY idx_purchase_items_name (tenant_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

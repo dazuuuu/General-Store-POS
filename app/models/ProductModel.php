@@ -214,7 +214,7 @@ class ProductModel extends Model
     {
         $tid = \TenantContext::tenantId();
         $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
-                       p.offer_price, p.offer_starts_at, p.offer_ends_at,
+                       p.offer_price, p.offer_starts_at, p.offer_ends_at, p.buying_price, p.package_buying_price,
                        p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
                        p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,

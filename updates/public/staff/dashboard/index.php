@@ -366,6 +366,8 @@ ob_start();
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
              data-price="<?php echo $price; ?>" data-wholesale="<?php echo $wholesale; ?>"
+             data-buying="<?php echo (float) ($p['buying_price'] ?? 0); ?>"
+             data-package-buying="<?php echo (float) ($p['package_buying_price'] ?? 0); ?>"
              data-stock="<?php echo (float) $p['quantity']; ?>"
              data-units-per-pack="<?php echo $unitsPerPack; ?>"
              data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
@@ -475,6 +477,10 @@ ob_start();
         <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
         <input type="hidden" name="vat_inclusive" id="vatInclusiveInput" value="1">
         <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
+        <div class="d-flex justify-content-between small mt-1" id="cartProfitRow" style="display:none !important;">
+          <span class="text-muted">Est. profit</span>
+          <span id="profitOut" class="fw-semibold text-success">KES 0</span>
+        </div>
       </div>
 
       <div class="pos-actions" id="cartButtons">
@@ -1154,6 +1160,8 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         name: el.dataset.name,
         price: parseFloat(el.dataset.price),
         wholesale: parseFloat(el.dataset.wholesale),
+        buying: parseFloat(el.dataset.buying) || 0,
+        packageBuying: parseFloat(el.dataset.packageBuying) || 0,
         stock: parseFloat(el.dataset.stock),
         unitsPerPack: parseFloat(el.dataset.unitsPerPack) || 1,
         packUnit: el.dataset.packUnit || '',
@@ -1351,6 +1359,33 @@ function total() {
     }
     return { total: Math.round((net + extra) * 100) / 100, vat: Math.round(vat * 100) / 100, extra: Math.round(extra * 100) / 100 };
 }
+function lineCost(p, c) {
+    var cost = 0;
+    var unitBuy = parseFloat(p.buying) || 0;
+    var pkgBuy = parseFloat(p.packageBuying) || 0;
+    var upp = parseFloat(p.unitsPerPack) || 1;
+    if ((c.retail || 0) > 0) cost += (c.retail || 0) * unitBuy;
+    if ((c.retailPack || 0) > 0) {
+        cost += (c.retailPack || 0) * (pkgBuy > 0 ? pkgBuy : (unitBuy * upp));
+    }
+    if ((c.wholesale || 0) > 0) {
+        if (PC.hasWholesalePack(p)) {
+            cost += (c.wholesale || 0) * (pkgBuy > 0 ? pkgBuy : (unitBuy * upp));
+        } else {
+            cost += (c.wholesale || 0) * unitBuy;
+        }
+    }
+    return Math.round(cost * 100) / 100;
+}
+function cartProfit() {
+    var profit = 0;
+    Object.keys(cart).forEach(function (id) {
+        var p = PRODUCTS[id], c = cart[id];
+        if (!p || !c || PC.isEmpty(c)) return;
+        profit += PC.lineTotal(p, c) - lineCost(p, c);
+    });
+    return Math.round(profit * 100) / 100;
+}
 function updateTotals() {
     var t = total();
     document.getElementById('subtotalOut').textContent = money(subtotal());
@@ -1360,6 +1395,18 @@ function updateTotals() {
     document.getElementById('payableOut').textContent = money(t.total);
     var mobileBarTotal = document.getElementById('mobileBarTotal');
     if (mobileBarTotal) mobileBarTotal.textContent = money(t.total);
+    var profit = cartProfit();
+    var profitRow = document.getElementById('cartProfitRow');
+    var profitOut = document.getElementById('profitOut');
+    if (profitRow && profitOut) {
+        if (cartHasItems()) {
+            profitRow.style.setProperty('display', 'flex', 'important');
+            profitOut.textContent = money(profit);
+            profitOut.className = 'fw-semibold ' + (profit < 0 ? 'text-danger' : 'text-success');
+        } else {
+            profitRow.style.setProperty('display', 'none', 'important');
+        }
+    }
     updatePayFields();
 }
 
@@ -1456,6 +1503,7 @@ function render() {
             var wholesaleMax = Math.max(c.wholesale || 0, PC.maxWholesale(p, c));
             var wLabel = PC.hasWholesalePack(p) ? PC.packLabel(p) : 'item';
             var lineTotal = PC.lineTotal(p, c);
+            var profit = Math.round((lineTotal - lineCost(p, c)) * 100) / 100;
             var rows = '';
             if ((c.retail || 0) > 0) {
                 rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
@@ -1474,6 +1522,7 @@ function render() {
               +   '<div class="pos-cart-name">' + p.name + '</div>'
               +   '<div class="pos-dual-qty">' + rows + '</div>'
               +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal)
+              +     ' · <span class="' + (profit < 0 ? 'text-danger' : 'text-success') + '">profit ' + money(profit) + '</span>'
               +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
               +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · box ' + formatHalfQty(c.retailPack) : '')
               +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')

@@ -64,6 +64,28 @@ $isOn = function (string $needle) use ($uri): string {
         </a>
         <?php endif; ?>
 
+        <?php if (TenantContext::can(Capabilities::STOCK_ENTER) || TenantContext::can(Capabilities::INVENTORY_EDIT)):
+            $onPurchases = strpos($uri, '/super/purchases') !== false;
+            $onPurchaseNew = strpos($uri, '/super/purchases/new') !== false;
+            $onPurchaseTrack = strpos($uri, '/super/purchases/track') !== false;
+            $onPurchaseTransfer = strpos($uri, '/super/purchases/transfer') !== false;
+            $onPurchaseView = strpos($uri, '/super/purchases/view') !== false;
+            $onPurchaseIndex = $onPurchases && !$onPurchaseNew && !$onPurchaseTrack && !$onPurchaseTransfer;
+        ?>
+        <div class="t-group <?php echo $onPurchases ? 'open' : ''; ?>" data-nav-group>
+            <button type="button" class="t-link t-group-toggle <?php echo $onPurchases ? 'active' : ''; ?>" aria-expanded="<?php echo $onPurchases ? 'true' : 'false'; ?>">
+                <i class="fas fa-cart-shopping"></i><span>Purchases</span>
+                <i class="fas fa-chevron-down t-group-caret"></i>
+            </button>
+            <div class="t-subnav">
+                <a class="t-sublink <?php echo $onPurchaseNew ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/new.php'); ?>">Record purchase</a>
+                <a class="t-sublink <?php echo ($onPurchaseIndex || $onPurchaseView) ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/'); ?>">View purchases</a>
+                <a class="t-sublink <?php echo $onPurchaseTrack ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/track.php'); ?>">Track purchases</a>
+                <a class="t-sublink <?php echo $onPurchaseTransfer ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/transfer.php'); ?>">Transfer purchases</a>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <a class="t-link <?php echo $isOn('/staff/change-pin'); ?>" href="<?php echo public_url('staff/change-pin.php'); ?>">
             <i class="fas fa-key"></i><span>Change PIN</span>
         </a>
@@ -92,6 +114,15 @@ $isOn = function (string $needle) use ($uri): string {
 .t-link:hover i{ color:#1f2330; }
 .t-link.active { background:var(--t-bg2); color:var(--t-accent); font-weight:700; box-shadow:inset 3px 0 0 var(--t-accent); }
 .t-link.active i { color:var(--t-accent); }
+.t-group { margin-bottom:3px; }
+.t-group-toggle { width:100%; border:0; background:transparent; cursor:pointer; text-align:left; font:inherit; }
+.t-group-caret { margin-left:auto; width:auto !important; font-size:.7rem; transition:transform .2s ease; }
+.t-group.open .t-group-caret { transform:rotate(180deg); }
+.t-subnav { display:none; padding:2px 0 6px 18px; }
+.t-group.open .t-subnav { display:block; }
+.t-sublink { display:block; padding:8px 12px; border-radius:8px; color:#6b7280; text-decoration:none; font-size:.84rem; margin-bottom:2px; }
+.t-sublink:hover { background:#f7f7fb; color:#1f2330; }
+.t-sublink.active { background:var(--t-bg2); color:var(--t-accent); font-weight:700; }
 .t-danger { color:#64748b; }
 .t-danger:hover { background:#f1f5f9; color:#334155; }
 .t-nav hr { border:0; border-top:1px solid var(--t-line); margin:12px 0; }
@@ -113,5 +144,13 @@ $isOn = function (string $needle) use ($uri): string {
   function close(){sb&&sb.classList.remove('active');ov&&ov.classList.remove('active');document.body.style.overflow='';}
   tg&&tg.addEventListener('click',open); cl&&cl.addEventListener('click',close); ov&&ov.addEventListener('click',close);
   document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});
+  document.querySelectorAll('[data-nav-group]').forEach(function(group){
+    var btn=group.querySelector('.t-group-toggle');
+    if(!btn) return;
+    btn.addEventListener('click',function(){
+      group.classList.toggle('open');
+      btn.setAttribute('aria-expanded', group.classList.contains('open') ? 'true' : 'false');
+    });
+  });
 })();
 </script>
