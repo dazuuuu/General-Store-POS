@@ -57,15 +57,18 @@ $storeUrl = public_url('super/store/');
 $groupUrl = fn(string $g) => public_url('super/inventory/') . '?group=' . $g;
 $pendingReturns = $R->pendingForInventory();
 
-$totals = ['products' => 0, 'stock_value' => 0.0, 'retail_value' => 0.0, 'faulty' => 0.0];
+$totals = ['products' => 0, 'stock_value' => 0.0, 'retail_value' => 0.0, 'faulty' => 0.0, 'potential_profit' => 0.0];
 $vatRate = (float) ($tenant['vat_rate'] ?? 0);
 $vatMode = !empty($tenant['vat_inclusive']) ? 'inclusive' : 'exclusive';
 foreach ($grouped as $items) {
     foreach ($items as $p) {
         $totals['products']++;
         $qty = (float)$p['quantity'];
-        $totals['stock_value'] += Models\ProductModel::stockValue((float)$p['buying_price'], $qty);
-        $totals['retail_value'] += $qty * (float)($p['retail_price'] ?? $p['selling_price']);
+        $buy = (float)$p['buying_price'];
+        $retail = (float)($p['retail_price'] ?? $p['selling_price']);
+        $totals['stock_value'] += Models\ProductModel::stockValue($buy, $qty);
+        $totals['retail_value'] += $qty * $retail;
+        $totals['potential_profit'] += ($retail - $buy) * $qty;
         $totals['faulty'] += (float)($p['faulty_quantity'] ?? 0);
     }
 }
@@ -76,7 +79,7 @@ ob_start();
 <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
   <div>
     <h1 class="h5 fw-bold mb-1">Shop Inventory by <?php echo $groupLabels[$groupBy]; ?></h1>
-    <p class="text-muted small mb-0">Sellable stock for the till. New deliveries go to <a href="<?php echo $storeUrl; ?>">Store warehouse</a> first — transfer here with an internal invoice so you never record twice.</p>
+    <p class="text-muted small mb-0">Sellable stock for the till. Record buys under <a href="<?php echo public_url('super/purchases/'); ?>">Purchases</a>, transfer to <a href="<?php echo $storeUrl; ?>">Store warehouse</a>, then invoice into Inventory so you never record twice.</p>
   </div>
   <?php if ($canEdit): ?>
     <a href="<?php echo $storeUrl; ?>" class="btn btn-outline-secondary btn-sm"><i class="fas fa-box-archive me-1"></i>Store warehouse</a>
@@ -119,8 +122,9 @@ ob_start();
   <div class="col-6 col-md-3">
     <div class="card border-0 shadow-sm" style="border-radius:12px;">
       <div class="card-body p-3">
-        <div class="text-muted small text-uppercase fw-semibold">Faulty / broken</div>
-        <div class="h5 mb-0 fw-bold text-danger"><?php echo rtrim(rtrim(number_format($totals['faulty'], 2), '0'), '.'); ?></div>
+        <div class="text-muted small text-uppercase fw-semibold">Potential profit</div>
+        <div class="h5 mb-0 fw-bold <?php echo $totals['potential_profit'] < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($totals['potential_profit'], 0); ?></div>
+        <div class="text-muted" style="font-size:.7rem;">Faulty: <?php echo rtrim(rtrim(number_format($totals['faulty'], 2), '0'), '.'); ?></div>
       </div>
     </div>
   </div>
@@ -244,6 +248,10 @@ ob_start();
               $wholesaleProfitTotal = ($hasPack && $packBuy > 0 && $packSell > 0)
                   ? (($packSell - $packBuy) * $packageCount)
                   : (((float)($p['wholesale_price'] ?? 0) - $buy) * $qty);
+              $retailMargin = $retail > 0 ? round((($retail - $buy) / $retail) * 100, 1) : null;
+              $wholesaleUnit = $hasPack && $packSell > 0 ? $packSell : (float)($p['wholesale_price'] ?? 0);
+              $wholesaleCost = $hasPack && $packBuy > 0 ? $packBuy : $buy;
+              $wholesaleMargin = $wholesaleUnit > 0 ? round((($wholesaleUnit - $wholesaleCost) / $wholesaleUnit) * 100, 1) : null;
               $low = $qty <= (int)$p['low_stock_threshold'];
               $colors = $p['colors'] ? (is_array($p['colors']) ? $p['colors'] : (json_decode($p['colors'], true) ?: [])) : [];
               if (is_string($p['colors'] ?? null) && !$colors && $p['colors'] !== '') {
@@ -290,8 +298,8 @@ ob_start();
               <?php endif; ?>
             </td>
             <td class="text-end small">
-              <div>Retail: <span class="<?php echo $retailProfitTotal < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($retailProfitTotal, 0); ?></span></div>
-              <div>Wholesale: <span class="<?php echo $wholesaleProfitTotal < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($wholesaleProfitTotal, 0); ?></span></div>
+              <div>Retail: <span class="<?php echo $retailProfitTotal < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($retailProfitTotal, 0); ?></span><?php if ($retailMargin !== null): ?> <span class="text-muted">(<?php echo number_format($retailMargin, 1); ?>%)</span><?php endif; ?></div>
+              <div>Wholesale: <span class="<?php echo $wholesaleProfitTotal < 0 ? 'text-danger' : 'text-success'; ?>">KES <?php echo number_format($wholesaleProfitTotal, 0); ?></span><?php if ($wholesaleMargin !== null): ?> <span class="text-muted">(<?php echo number_format($wholesaleMargin, 1); ?>%)</span><?php endif; ?></div>
             </td>
             <td class="text-end text-muted"><?php echo number_format($vatRate, 2); ?>%</td>
             <td class="text-end text-muted">

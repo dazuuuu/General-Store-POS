@@ -51,6 +51,7 @@ $tenantRow = (new Models\TenantModel($pdo))->find(TenantContext::tenantId()) ?: 
 $vatRate = (float) ($tenantRow['vat_rate'] ?? 0);
 $vatInclusive = (int) ($tenantRow['vat_inclusive'] ?? 1) === 1;
 $products   = $P->sellable();
+$productTiers = (new Models\PriceTierModel($pdo))->forProducts(array_map(static fn($p) => (int) $p['id'], $products));
 $categories = $C->all(['type' => 'product'], 'name ASC');
 if (!$categories) { $categories = $C->all(['type' => 'subject'], 'name ASC'); }
 $brands     = $BA->all(['type' => 'brand'], 'name ASC');
@@ -363,14 +364,18 @@ ob_start();
               $faulty > 0 ? ('faulty ' . rtrim(rtrim(number_format($faulty, 2), '0'), '.')) : null,
           ]));
           $label = $p['name'] . ($sub ? " ({$sub})" : '');
+          $tiersJson = json_encode($productTiers[(int) $p['id']] ?? [], JSON_UNESCAPED_UNICODE);
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
              data-price="<?php echo $price; ?>" data-wholesale="<?php echo $wholesale; ?>"
+             data-buying="<?php echo (float) ($p['buying_price'] ?? 0); ?>"
+             data-package-buying="<?php echo (float) ($p['package_buying_price'] ?? 0); ?>"
              data-stock="<?php echo (float) $p['quantity']; ?>"
              data-units-per-pack="<?php echo $unitsPerPack; ?>"
              data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
              data-pack-price="<?php echo $packPrice; ?>"
              data-retail-pack-price="<?php echo $retailPackPrice; ?>"
+             data-tiers="<?php echo htmlspecialchars($tiersJson ?: '[]', ENT_QUOTES); ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -475,6 +480,10 @@ ob_start();
         <input type="hidden" name="vat_rate" id="vatRateInput" value="0">
         <input type="hidden" name="vat_inclusive" id="vatInclusiveInput" value="1">
         <div class="d-flex justify-content-between pos-total-line"><span>Total</span><span id="totalOut">KES 0</span></div>
+        <div class="d-flex justify-content-between small mt-1" id="cartProfitRow" style="display:none !important;">
+          <span class="text-muted">Est. profit</span>
+          <span id="profitOut" class="fw-semibold text-success">KES 0</span>
+        </div>
       </div>
 
       <div class="pos-actions" id="cartButtons">
@@ -1146,20 +1155,26 @@ ob_start();
 <script src="<?php echo htmlspecialchars(public_url('assets/js/pos-pack-cart.js')); ?>"></script>
 <script>
 var PC = window.PosPackCart;
+var PRODUCT_COMMISSION_ENABLED = <?php echo !empty($tenantRow['product_commission_enabled']) ? 'true' : 'false'; ?>;
 var PRODUCTS = {};
 var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
     var img = el.querySelector('.pos-card-img img');
+    var tiers = [];
+    try { tiers = JSON.parse(el.dataset.tiers || '[]') || []; } catch (e) { tiers = []; }
     PRODUCTS[el.dataset.id] = {
         name: el.dataset.name,
         price: parseFloat(el.dataset.price),
         wholesale: parseFloat(el.dataset.wholesale),
+        buying: parseFloat(el.dataset.buying) || 0,
+        packageBuying: parseFloat(el.dataset.packageBuying) || 0,
         stock: parseFloat(el.dataset.stock),
         unitsPerPack: parseFloat(el.dataset.unitsPerPack) || 1,
         packUnit: el.dataset.packUnit || '',
         packPrice: parseFloat(el.dataset.packPrice) || 0,
         retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
         barcode: el.dataset.barcode || '',
+        tiers: tiers,
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
@@ -1351,6 +1366,33 @@ function total() {
     }
     return { total: Math.round((net + extra) * 100) / 100, vat: Math.round(vat * 100) / 100, extra: Math.round(extra * 100) / 100 };
 }
+function lineCost(p, c) {
+    var cost = 0;
+    var unitBuy = parseFloat(p.buying) || 0;
+    var pkgBuy = parseFloat(p.packageBuying) || 0;
+    var upp = parseFloat(p.unitsPerPack) || 1;
+    if ((c.retail || 0) > 0) cost += (c.retail || 0) * unitBuy;
+    if ((c.retailPack || 0) > 0) {
+        cost += (c.retailPack || 0) * (pkgBuy > 0 ? pkgBuy : (unitBuy * upp));
+    }
+    if ((c.wholesale || 0) > 0) {
+        if (PC.hasWholesalePack(p)) {
+            cost += (c.wholesale || 0) * (pkgBuy > 0 ? pkgBuy : (unitBuy * upp));
+        } else {
+            cost += (c.wholesale || 0) * unitBuy;
+        }
+    }
+    return Math.round(cost * 100) / 100;
+}
+function cartProfit() {
+    var profit = 0;
+    Object.keys(cart).forEach(function (id) {
+        var p = PRODUCTS[id], c = cart[id];
+        if (!p || !c || PC.isEmpty(c)) return;
+        profit += PC.lineTotal(p, c) - lineCost(p, c);
+    });
+    return Math.round(profit * 100) / 100;
+}
 function updateTotals() {
     var t = total();
     document.getElementById('subtotalOut').textContent = money(subtotal());
@@ -1360,6 +1402,18 @@ function updateTotals() {
     document.getElementById('payableOut').textContent = money(t.total);
     var mobileBarTotal = document.getElementById('mobileBarTotal');
     if (mobileBarTotal) mobileBarTotal.textContent = money(t.total);
+    var profit = cartProfit();
+    var profitRow = document.getElementById('cartProfitRow');
+    var profitOut = document.getElementById('profitOut');
+    if (profitRow && profitOut) {
+        if (cartHasItems()) {
+            profitRow.style.setProperty('display', 'flex', 'important');
+            profitOut.textContent = money(profit);
+            profitOut.className = 'fw-semibold ' + (profit < 0 ? 'text-danger' : 'text-success');
+        } else {
+            profitRow.style.setProperty('display', 'none', 'important');
+        }
+    }
     updatePayFields();
 }
 
@@ -1456,6 +1510,7 @@ function render() {
             var wholesaleMax = Math.max(c.wholesale || 0, PC.maxWholesale(p, c));
             var wLabel = PC.hasWholesalePack(p) ? PC.packLabel(p) : 'item';
             var lineTotal = PC.lineTotal(p, c);
+            var profit = Math.round((lineTotal - lineCost(p, c)) * 100) / 100;
             var rows = '';
             if ((c.retail || 0) > 0) {
                 rows += PC.qtyRow(id, 'Retail item', money(PC.productPrice(p, 'retail')) + '/item', 'retail', c.retail || 0, retailMax);
@@ -1466,6 +1521,12 @@ function render() {
             if ((c.wholesale || 0) > 0) {
                 rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
             }
+            if (PRODUCT_COMMISSION_ENABLED && (c.retail || 0) > 0) {
+                rows += '<label class="pos-dual-row"><span class="pos-dual-label">Commission selling price'
+                  + ' <span class="text-muted">(minimum ' + money(p.price) + ')</span></span>'
+                  + '<input type="number" step="0.01" min="' + p.price + '" class="form-control form-control-sm"'
+                  + ' style="max-width:130px;" data-commission-price="' + id + '" value="' + (c.customUnitPrice || p.price) + '"></label>';
+            }
             var line = document.createElement('div');
             line.className = 'pos-cart-line pos-cart-line-dual';
             line.innerHTML = '<span class="pos-cart-idx">#' + seqIndex + '</span>'
@@ -1474,6 +1535,7 @@ function render() {
               +   '<div class="pos-cart-name">' + p.name + '</div>'
               +   '<div class="pos-dual-qty">' + rows + '</div>'
               +   '<div class="pos-cart-price mt-1">Line ' + money(lineTotal)
+              +     ' · <span class="' + (profit < 0 ? 'text-danger' : 'text-success') + '">profit ' + money(profit) + '</span>'
               +     (c.retail > 0 && Math.abs((c.retail % 1) - 0.5) < 0.001 ? ' · retail ' + formatHalfQty(c.retail) : '')
               +     (c.retailPack > 0 && Math.abs((c.retailPack % 1) - 0.5) < 0.001 ? ' · box ' + formatHalfQty(c.retailPack) : '')
               +     (c.wholesale > 0 && Math.abs((c.wholesale % 1) - 0.5) < 0.001 ? ' · wholesale ' + formatHalfQty(c.wholesale) : '')
@@ -1544,6 +1606,16 @@ document.getElementById('cartRows').addEventListener('change', function (e) {
     if (input) syncTypedQty(input);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
+    var commissionInput = e.target.closest('[data-commission-price]');
+    if (commissionInput) {
+        var commissionId = commissionInput.dataset.commissionPrice;
+        var product = PRODUCTS[commissionId];
+        var entered = parseFloat(commissionInput.value);
+        ensureCart(commissionId).customUnitPrice = product && entered >= product.price ? entered : null;
+        document.getElementById('cartInput').value = JSON.stringify(serializeCart());
+        updateTotals();
+        return;
+    }
     var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
     if (!input) return;
     var info = qtyInputField(input);
@@ -1774,6 +1846,7 @@ document.querySelectorAll('input[name=pm]').forEach(function (r) { r.addEventLis
 });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
+    if (this.dataset.submitting === '1') { e.preventDefault(); return; }
     if (!cartHasItems()) { e.preventDefault(); alert('Add at least one product.'); return; }
     if (document.getElementById('formAction').value === 'pay') {
         var m = payMethod(), t = total().total;
@@ -1783,6 +1856,8 @@ document.getElementById('orderForm').addEventListener('submit', function (e) {
             if (Math.abs(cp + mp - t) > 0.01) { e.preventDefault(); alert('Cash and M-Pesa portions must add up to the total.'); return; }
         }
     }
+    this.dataset.submitting = '1';
+    this.querySelectorAll('button[type=submit]').forEach(function(button){button.disabled=true;});
 });
 
 // Shop VAT settings from the owner Settings page
@@ -1817,12 +1892,19 @@ if (barcodeScan) {
         var code = barcodeScan.value.trim();
         barcodeScan.value = '';
         if (!code) { return; }
-        var id = BARCODES[code];
-        if (!id) { flashScan('No product with that barcode.', false); return; }
-        var p = PRODUCTS[id];
-        if (p && stockUsed(id) >= p.stock) { flashScan(p.name + ' — no more in stock.', false); return; }
-        add(id);
-        flashScan((p ? p.name : 'Product') + ' added.', true);
+        fetch(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code))
+          .then(function(r){return r.json();})
+          .then(function(data){
+            var p=data.item||(data.items&&data.items[0]);if(!p){flashScan('No in-stock product with that barcode.',false);return;}
+            p.stock=parseFloat(p.stock!=null?p.stock:p.balance)||0;
+            p.unitsPerPack=parseFloat(p.unitsPerPack!=null?p.unitsPerPack:p.unitsInPack)||1;
+            p.packUnit=p.packUnit||p.package||'pack';
+            p.packPrice=parseFloat(p.packPrice!=null?p.packPrice:p.packSize)||0;
+            p.packageBuying=parseFloat(p.packageBuying!=null?p.packageBuying:p.packagingbying)||0;
+            var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
+            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
+            add(id);flashScan(p.name+' added.',true);
+          }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
     });
     document.addEventListener('click', function (e) {
         if (e.target === barcodeScan || e.target.closest('input, textarea, select, option, label, button, .btn-group, .modal')) { return; }

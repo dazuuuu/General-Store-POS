@@ -216,6 +216,9 @@ class OrderModel extends Model
         }
 
         $db = $this->db;
+        // Construct before opening the transaction: compatibility DDL in the
+        // return model would otherwise make MySQL implicitly commit this edit.
+        $returnModel = new ReturnModel($db);
         try {
             $db->beginTransaction();
 
@@ -226,9 +229,9 @@ class OrderModel extends Model
                 $db->rollBack();
                 return ['ok' => false, 'errors' => ['_' => 'Invoice not found.']];
             }
-            if (($order['status'] ?? '') !== 'open') {
+            if (!in_array(($order['status'] ?? ''), ['open','paid'], true)) {
                 $db->rollBack();
-                return ['ok' => false, 'errors' => ['_' => 'Only unpaid/open invoices can be edited.']];
+                return ['ok' => false, 'errors' => ['_' => 'Only active or paid sales can be edited.']];
             }
 
             $saleType = (($in['sale_type'] ?? $order['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
@@ -239,7 +242,7 @@ class OrderModel extends Model
                 $existingRows[(int) $row['id']] = $row;
             }
 
-            $returns = (new ReturnModel($db))->returnsForItems('order', array_keys($existingRows));
+            $returns = $returnModel->returnsForItems('order', array_keys($existingRows));
             $productSel = $db->prepare(
                 "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
                         quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
@@ -348,6 +351,8 @@ class OrderModel extends Model
             $paid = max(0, (float) ($order['amount_paid'] ?? 0));
             $paid = min($paid, (float) $priced['total']);
             $due = max(0, round((float) $priced['total'] - $paid, 2));
+            $newStatus = $due <= 0.0001 ? 'paid' : 'open';
+            $newPaymentStatus = $due <= 0.0001 ? 'paid' : ($paid > 0 ? 'part_paid' : 'credit');
             $creditDays = max(0, (int) ($in['credit_duration_days'] ?? 0));
             $creditDueAt = $creditDays > 0 ? date('Y-m-d H:i:s', strtotime('+' . $creditDays . ' days', strtotime($order['created_at'] ?? 'now'))) : null;
 
@@ -356,7 +361,7 @@ class OrderModel extends Model
                     SET table_name = ?, sale_type = ?, subtotal = ?, discount_amount = ?, additional_charges = ?,
                         additional_charges_note = ?, total = ?,
                         amount_paid = ?, amount_due = ?, customer_email = ?, customer_phone = ?,
-                        credit_duration_days = ?, credit_due_at = ?
+                        credit_duration_days = ?, credit_due_at = ?, status = ?, payment_status = ?
                   WHERE id = ? AND tenant_id = ?'
             )->execute([
                 $tableName,
@@ -372,6 +377,8 @@ class OrderModel extends Model
                 trim((string) ($in['customer_phone'] ?? '')) ?: null,
                 $creditDays > 0 ? $creditDays : null,
                 $creditDueAt,
+                $newStatus,
+                $newPaymentStatus,
                 $orderId,
                 $tid,
             ]);
@@ -397,10 +404,17 @@ class OrderModel extends Model
             $sel = $db->prepare("SELECT id, name, selling_price, retail_price, quantity, unit FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE");
         }
         $insItem = $db->prepare(
-            'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, price_type, quantity, line_total, added_by)
-             VALUES (?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
         $dec = $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
+        $commissionEnabled = false;
+        try {
+            $setting = $db->prepare('SELECT product_commission_enabled FROM tenants WHERE id = ? LIMIT 1');
+            $setting->execute([$tid]);
+            $commissionEnabled = (bool) $setting->fetchColumn();
+        } catch (\Throwable $ignored) {
+        }
 
         foreach ($items as $it) {
             $pid = (int) $it['product_id'];
@@ -423,8 +437,19 @@ class OrderModel extends Model
             }
             $lineSaleType = $this->normalizePriceType($it['price_type'] ?? $saleType);
             $lineTotal = \Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
-            $unitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
-            if ($unitPrice <= 0) { $unitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($unitPrice * $qty, 2); }
+            $baseUnitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
+            if ($baseUnitPrice <= 0) { $baseUnitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($baseUnitPrice * $qty, 2); }
+            $unitPrice = $baseUnitPrice;
+            $commission = 0.0;
+            if ($commissionEnabled && ($it['unit_price'] ?? '') !== '') {
+                $requestedPrice = round((float) $it['unit_price'], 2);
+                if ($requestedPrice + 0.0001 < $baseUnitPrice) {
+                    return ['ok' => false, 'errors' => ['_' => "{$p['name']} cannot be sold below KES " . number_format($baseUnitPrice, 2) . '.']];
+                }
+                $unitPrice = $requestedPrice;
+                $commission = round(($unitPrice - $baseUnitPrice) * $qty, 2);
+                $lineTotal = round($unitPrice * $qty, 2);
+            }
             if ($enforceCreditLimit && isset($p['credit_limit']) && $p['credit_limit'] !== null && $p['credit_limit'] !== '') {
                 $limit = max((float) $p['credit_limit'], $creditOverride);
                 if ($limit > 0 && $lineTotal > $limit + 0.0001) {
@@ -432,7 +457,7 @@ class OrderModel extends Model
                 }
             }
 
-            $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $lineSaleType, $qty, $lineTotal, $staffId]);
+            $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
             $dec->execute([$qty, $pid, $tid, $qty]);
             if ($dec->rowCount() !== 1) {
                 return ['ok' => false, 'errors' => ['_' => "Stock changed for {$p['name']} while saving. Please try again."]];
@@ -1126,6 +1151,8 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'customer_id', "ALTER TABLE orders ADD COLUMN customer_id INT NULL AFTER customer_email");
         $this->ensureColumn('orders', 'sale_type', "ALTER TABLE orders ADD COLUMN sale_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER channel");
         $this->ensureColumn('order_items', 'price_type', "ALTER TABLE order_items ADD COLUMN price_type ENUM('retail','wholesale') NOT NULL DEFAULT 'retail' AFTER unit_price");
+        $this->ensureColumn('order_items', 'base_unit_price', "ALTER TABLE order_items ADD COLUMN base_unit_price DECIMAL(12,2) NULL AFTER unit_price");
+        $this->ensureColumn('order_items', 'commission_amount', "ALTER TABLE order_items ADD COLUMN commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER base_unit_price");
         $this->widenPriceTypeColumn('order_items');
         $this->ensureColumn('orders', 'vat_rate', "ALTER TABLE orders ADD COLUMN vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
         $this->ensureColumn('orders', 'additional_charges', "ALTER TABLE orders ADD COLUMN additional_charges DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER discount_amount");
@@ -1253,7 +1280,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Tab not found.']; }
@@ -1270,6 +1297,9 @@ class OrderModel extends Model
 
             $db->prepare("UPDATE orders SET status = 'void', paid_by = ?, paid_at = NOW() WHERE id = ?")->execute([$staffId, $orderId]);
             $db->commit();
+            if (!empty($order['customer_id'])) {
+                try { (new CustomerModel($db))->refreshCreditBalance((int)$order['customer_id']); } catch (\Throwable $ignored) {}
+            }
             return ['ok' => true, 'error' => null];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
@@ -1288,7 +1318,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -1328,6 +1358,9 @@ class OrderModel extends Model
             )->execute([$staffId, $orderId, $tid]);
 
             $db->commit();
+            if (!empty($order['customer_id'])) {
+                try { (new CustomerModel($db))->refreshCreditBalance((int)$order['customer_id']); } catch (\Throwable $ignored) {}
+            }
             return ['ok' => true, 'error' => null];
         } catch (\Throwable $e) {
             if ($db->inTransaction()) { $db->rollBack(); }
@@ -1601,9 +1634,11 @@ class OrderModel extends Model
             "SELECT oi.id, oi.order_id, oi.product_name, oi.quantity, oi.line_total,
                     oi.product_id, oi.price_type, oi.unit_price,
                     p.quantity AS stock_left, p.unit AS product_unit,
-                    p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
+                    p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
+                    p.category_id, c.name AS category_name
                FROM order_items oi
           LEFT JOIN products p ON p.id = oi.product_id AND p.tenant_id = oi.tenant_id
+          LEFT JOIN categories c ON c.id = p.category_id AND c.tenant_id = oi.tenant_id
               WHERE oi.tenant_id = ? AND oi.order_id IN ($in) ORDER BY oi.id ASC"
         );
         $stmt->execute(array_merge([$tid], $orderIds));
@@ -1626,6 +1661,8 @@ class OrderModel extends Model
                 'pack_unit' => $r['pack_unit'] ?? '',
                 'pack_price' => $r['pack_price'] ?? null,
                 'retail_pack_price' => $r['retail_pack_price'] ?? null,
+                'category_id' => (int) ($r['category_id'] ?? 0),
+                'category_name' => $r['category_name'] ?? '',
             ];
         }
         return $out;

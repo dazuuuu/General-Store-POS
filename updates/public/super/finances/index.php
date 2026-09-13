@@ -70,7 +70,9 @@ $revenues = $F->forTenant('revenue', $period, 100);
 
 // Deposits / payments collected in period (cash movement into the shop).
 $tid = (int) TenantContext::tenantId();
-$paySql = 'SELECT COALESCE(SUM(amount),0) FROM order_payments WHERE tenant_id = ? AND ' . fin_period_sql($period, 'created_at');
+$paySql = "SELECT COALESCE(SUM(op.amount),0) FROM order_payments op
+           JOIN orders o ON o.id=op.order_id AND o.tenant_id=op.tenant_id
+           WHERE op.tenant_id = ? AND o.status <> 'void' AND " . fin_period_sql($period, 'op.created_at');
 $stPay = $pdo->prepare($paySql);
 $stPay->execute([$tid]);
 $depositsCollected = round((float) $stPay->fetchColumn(), 2);
@@ -188,14 +190,17 @@ foreach ($transferInvoices as $inv) {
     $flow[] = [
         'when' => $inv['created_at'] ?? '',
         'type' => 'Store → Inventory',
-        'detail' => ($inv['invoice_number'] ?? 'Transfer') . ($inv['invoice_to'] ? ' · ' . $inv['invoice_to'] : ''),
+        'detail' => ($inv['invoice_number'] ?? 'Transfer')
+            . ($inv['invoice_to'] ? ' · ' . $inv['invoice_to'] : '')
+            . (!empty($inv['product_summary']) ? ' · ' . $inv['product_summary'] : ''),
         'in' => 0.0,
         'out' => 0.0,
-        'note' => 'Capital moved KES ' . number_format((float) ($inv['total'] ?? 0), 0) . ' · ' . (int) ($inv['item_count'] ?? 0) . ' lines',
+        'capital' => (float) ($inv['total'] ?? 0),
+        'note' => 'Internal stock movement · ' . (int) ($inv['item_count'] ?? 0) . ' lines (not cash income/expense)',
     ];
 }
 usort($flow, fn($a, $b) => strtotime($b['when'] ?? 'now') <=> strtotime($a['when'] ?? 'now'));
-$flow = array_slice($flow, 0, 80);
+$flow = array_slice($flow, 0, 500);
 
 $periodLabel = ['today' => 'Today', 'week' => 'Last 7 days', 'month' => 'Last 30 days', 'all' => 'All time'][$period];
 $page_title = 'Finances';
@@ -388,27 +393,33 @@ ob_start();
   </div>
 
   <div class="col-lg-8">
-    <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
-      <div class="px-4 py-3 border-bottom"><h2 class="h6 fw-bold mb-0">Money flow · <?php echo htmlspecialchars($periodLabel); ?></h2></div>
+    <div class="card border mb-4" style="border-radius:0;overflow:hidden;">
+      <div class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center gap-2"><h2 class="h6 fw-bold mb-0">Money flow · <?php echo htmlspecialchars($periodLabel); ?></h2><input id="financeSearch" class="form-control form-control-sm" style="max-width:300px" placeholder="Search anything in finances..."></div>
       <div class="table-responsive">
-        <table class="table align-middle mb-0">
-          <thead><tr class="text-muted small text-uppercase"><th>When</th><th>Type</th><th>Detail</th><th class="text-end">In</th><th class="text-end">Out</th></tr></thead>
+        <table class="table table-bordered table-sm align-middle mb-0" id="financeLedger" style="font-family:Arial,sans-serif;font-size:13px;">
+          <thead style="background:#e2f0d9;"><tr><th>When</th><th>Type</th><th>Detail</th><th class="text-end">Money In</th><th class="text-end">Money Out</th><th class="text-end">Capital moved</th></tr></thead>
           <tbody>
             <?php if (!$flow): ?>
-              <tr><td colspan="5" class="text-center text-muted py-4">No money movement in this period.</td></tr>
-            <?php else: foreach ($flow as $row): ?>
-              <tr>
+              <tr><td colspan="6" class="text-center text-muted py-4">No money movement in this period.</td></tr>
+            <?php else: $flowDate=''; foreach ($flow as $row): $rowDate=date('Y-m-d',strtotime($row['when']?:'now')); if($rowDate!==$flowDate):$flowDate=$rowDate;?>
+              <tr class="finance-date" data-date="<?php echo $flowDate;?>" style="background:#d9eaf7;"><td colspan="6" class="fw-bold"><?php echo htmlspecialchars(date('l, j F Y',strtotime($flowDate)));?></td></tr>
+              <?php endif;?>
+              <tr class="finance-row" data-date="<?php echo $flowDate;?>" data-search="<?php echo htmlspecialchars(strtolower(implode(' ',[$row['when'],$row['type'],$row['detail'],$row['note']??'',$row['in'],$row['out'],$row['capital']??0])));?>">
                 <td class="small text-nowrap"><?php echo $row['when'] ? htmlspecialchars(date('j M, g:i a', strtotime($row['when']))) : '—'; ?></td>
                 <td class="small fw-semibold"><?php echo htmlspecialchars($row['type']); ?></td>
                 <td class="small"><?php echo htmlspecialchars($row['detail']); ?><?php if ($row['note']): ?><div class="text-muted"><?php echo htmlspecialchars($row['note']); ?></div><?php endif; ?></td>
                 <td class="text-end text-success small"><?php echo $row['in'] > 0 ? 'KES ' . number_format($row['in'], 0) : '—'; ?></td>
                 <td class="text-end text-danger small"><?php echo $row['out'] > 0 ? 'KES ' . number_format($row['out'], 0) : '—'; ?></td>
+                <td class="text-end text-primary fw-semibold small"><?php echo (float) ($row['capital'] ?? 0) > 0 ? 'KES ' . number_format((float) $row['capital'], 0) : '—'; ?></td>
               </tr>
             <?php endforeach; endif; ?>
           </tbody>
         </table>
       </div>
     </div>
+    <script>
+    (function(){var input=document.getElementById('financeSearch'),table=document.getElementById('financeLedger');if(!input||!table)return;
+    input.addEventListener('input',function(){var q=this.value.toLowerCase(),visible={};table.querySelectorAll('.finance-row').forEach(function(r){var show=!q||r.dataset.search.indexOf(q)!==-1;r.style.display=show?'':'none';if(show)visible[r.dataset.date]=true;});table.querySelectorAll('.finance-date').forEach(function(r){r.style.display=visible[r.dataset.date]?'':'none';});});})();</script>
 
     <div class="card border-0 shadow-sm mb-4" style="border-radius:14px;overflow:hidden;">
       <div class="px-4 py-3 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -417,13 +428,14 @@ ob_start();
       </div>
       <div class="table-responsive">
         <table class="table align-middle mb-0">
-          <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>To</th><th>When</th><th class="text-end">Lines</th><th class="text-end">Capital</th></tr></thead>
+          <thead><tr class="text-muted small text-uppercase"><th>Invoice</th><th>Products moved</th><th>To</th><th>When</th><th class="text-end">Lines</th><th class="text-end">Capital</th></tr></thead>
           <tbody>
             <?php if (!$transferInvoices): ?>
-              <tr><td colspan="5" class="text-center text-muted py-4">No warehouse transfers in this period.</td></tr>
+              <tr><td colspan="6" class="text-center text-muted py-4">No warehouse transfers in this period.</td></tr>
             <?php else: foreach ($transferInvoices as $inv): ?>
               <tr>
                 <td class="fw-semibold small"><a href="<?php echo public_url('super/store/invoice.php?id=' . (int) $inv['id']); ?>"><?php echo htmlspecialchars($inv['invoice_number']); ?></a></td>
+                <td class="small"><?php echo htmlspecialchars($inv['product_summary'] ?: '—'); ?></td>
                 <td class="small"><?php echo htmlspecialchars($inv['invoice_to'] ?: '—'); ?></td>
                 <td class="small text-muted"><?php echo htmlspecialchars(date('j M Y, g:i a', strtotime($inv['created_at']))); ?></td>
                 <td class="text-end small"><?php echo (int) ($inv['item_count'] ?? 0); ?></td>
@@ -434,7 +446,7 @@ ob_start();
           <?php if ($transferInvoices): ?>
           <tfoot>
             <tr class="border-top">
-              <th colspan="4">Capital moved this period</th>
+              <th colspan="5">Capital moved this period</th>
               <th class="text-end">KES <?php echo number_format($transferTotal, 0); ?></th>
             </tr>
           </tfoot>

@@ -152,7 +152,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $tiers = [];
             foreach (($_POST['tiers'] ?? []) as $tr) {
-                if ((float)($tr['min_qty'] ?? 0) > 0 && ($tr['unit_price'] ?? '') !== '') {
+                $minOk = (float)($tr['min_qty'] ?? 0) > 0;
+                $hasUnit = ($tr['unit_price'] ?? '') !== '';
+                $hasDisc = ($tr['discount_amount'] ?? '') !== '' && (float)($tr['discount_amount'] ?? 0) > 0;
+                if ($minOk && ($hasUnit || $hasDisc)) {
                     $tiers[] = $tr;
                 }
             }
@@ -391,19 +394,20 @@ $actionBadge = function (string $a): string {
               <div class="form-text">Admin ceiling for a single credit line on this product.</div>
             </div>
           </div>
-          <h3 class="h6 fw-bold">Tiered pricing</h3>
-          <p class="text-muted small">Quantity breaks — larger buys get a lower unit price.</p>
+          <h3 class="h6 fw-bold">Tiered pricing / quantity discounts</h3>
+          <p class="text-muted small">Quantity breaks — cheaper unit price and/or flat KES off when the customer buys enough (e.g. ≥10 kg → KES 100 off, or ≥2 bales).</p>
           <?php
             $tierRows = (new Models\PriceTierModel($pdo))->forProduct($editId);
-            if (!$tierRows) { $tierRows = [['min_qty'=>'', 'max_qty'=>'', 'unit_price'=>'', 'label'=>'']]; }
+            if (!$tierRows) { $tierRows = [['min_qty'=>'', 'max_qty'=>'', 'unit_price'=>'', 'discount_amount'=>'', 'label'=>'']]; }
           ?>
           <div id="tierRows">
             <?php foreach ($tierRows as $i => $tr): ?>
             <div class="row g-2 mb-2">
-              <div class="col-3"><input name="tiers[<?php echo $i; ?>][min_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Min qty" value="<?php echo htmlspecialchars((string)($tr['min_qty'] ?? '')); ?>"></div>
-              <div class="col-3"><input name="tiers[<?php echo $i; ?>][max_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Max (opt)" value="<?php echo htmlspecialchars((string)($tr['max_qty'] ?? '')); ?>"></div>
-              <div class="col-3"><input name="tiers[<?php echo $i; ?>][unit_price]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Unit price" value="<?php echo htmlspecialchars((string)($tr['unit_price'] ?? '')); ?>"></div>
-              <div class="col-3"><input name="tiers[<?php echo $i; ?>][label]" type="text" class="form-control form-control-sm" placeholder="Label" value="<?php echo htmlspecialchars((string)($tr['label'] ?? '')); ?>"></div>
+              <div class="col-6 col-md-2"><input name="tiers[<?php echo $i; ?>][min_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Min qty" value="<?php echo htmlspecialchars((string)($tr['min_qty'] ?? '')); ?>"></div>
+              <div class="col-6 col-md-2"><input name="tiers[<?php echo $i; ?>][max_qty]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Max (opt)" value="<?php echo htmlspecialchars((string)($tr['max_qty'] ?? '')); ?>"></div>
+              <div class="col-6 col-md-2"><input name="tiers[<?php echo $i; ?>][unit_price]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="Unit price" value="<?php echo htmlspecialchars((string)(($tr['unit_price'] ?? '') !== '' && (float)$tr['unit_price'] > 0 ? $tr['unit_price'] : '')); ?>"></div>
+              <div class="col-6 col-md-3"><input name="tiers[<?php echo $i; ?>][discount_amount]" type="number" step="0.01" min="0" class="form-control form-control-sm" placeholder="KES off total" value="<?php echo htmlspecialchars((string)($tr['discount_amount'] ?? '')); ?>"></div>
+              <div class="col-12 col-md-3"><input name="tiers[<?php echo $i; ?>][label]" type="text" class="form-control form-control-sm" placeholder="Label e.g. Bulk 10kg+" value="<?php echo htmlspecialchars((string)($tr['label'] ?? '')); ?>"></div>
             </div>
             <?php endforeach; ?>
           </div>

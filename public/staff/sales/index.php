@@ -142,6 +142,7 @@ ob_start();
                   <a class="btn btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a>
                   <?php if (TenantContext::can(Capabilities::SALES_RECORD)): ?>
                     <a class="btn btn-outline-primary" href="<?php echo public_url('staff/returns/?receipt=' . urlencode($s['receipt_number'])); ?>">Return</a>
+                    <?php if(($s['source']??'')==='order'):?><a class="btn btn-outline-warning" href="<?php echo public_url('staff/invoices/edit.php?id='.(int)$s['id']);?>">Edit</a><?php endif;?>
                   <?php endif; ?>
                 </div>
               </td>

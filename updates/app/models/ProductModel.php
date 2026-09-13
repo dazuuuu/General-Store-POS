@@ -14,7 +14,14 @@ class ProductModel extends Model
 
     public const UNITS = ['carton', 'bale', 'parcel', 'sack', 'bag', 'box', 'pack', 'piece', 'dozen', 'bundle', 'roll', 'set', 'pair', 'kg', 'g', 'ml', 'litre', 'tonne'];
     public const SIZE_UNITS = ['ml', 'l'];
+    public const CONTINUOUS_UNITS = ['kg', 'g', 'ml', 'litre', 'l', 'tonne'];
     public const PRODUCT_TYPES = ['product', 'book', 'stationery']; // legacy book/stationery kept for old rows
+
+    /** Units sold by weight/volume (partial transfers make sense). */
+    public static function isContinuousUnit(?string $unit): bool
+    {
+        return in_array(strtolower(trim((string) $unit)), self::CONTINUOUS_UNITS, true);
+    }
 
     /**
      * @param array $in name, category_id, subcategory_id, supplier_id, description,
@@ -214,7 +221,7 @@ class ProductModel extends Model
     {
         $tid = \TenantContext::tenantId();
         $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
-                       p.offer_price, p.offer_starts_at, p.offer_ends_at,
+                       p.offer_price, p.offer_starts_at, p.offer_ends_at, p.buying_price, p.package_buying_price,
                        p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
                        p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,
@@ -464,6 +471,7 @@ class ProductModel extends Model
             'retail_pack_price' => "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`",
             'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `retail_pack_price`",
             'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
+            'tax_rate' => "ALTER TABLE `products` ADD COLUMN `tax_rate` DECIMAL(5,2) NULL AFTER `retail_price`",
         ];
 
         foreach ($checks as $column => $sql) {
@@ -477,9 +485,18 @@ class ProductModel extends Model
                 }
             }
         }
+        // Avoid unconditional MODIFY (DDL commits open transactions in MySQL).
         try {
-            $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
-        } catch (\PDOException $ignored) {}
+            $colType = (string) $this->db->query(
+                "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'product_type'
+                  LIMIT 1"
+            )->fetchColumn();
+            if ($colType !== '' && stripos($colType, "'product'") === false) {
+                $this->db->exec("ALTER TABLE `products` MODIFY COLUMN `product_type` ENUM('book','stationery','product') NOT NULL DEFAULT 'product'");
+            }
+        } catch (\PDOException $ignored) {
+        }
     }
 
     public function normalizeInputs(array &$in, bool $isNew = true): void

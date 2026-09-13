@@ -338,9 +338,11 @@ class SaleModel extends Model
         $stmt = $this->db->prepare(
             "SELECT si.id, si.sale_id, si.product_name, si.quantity, si.line_total,
                     si.product_id, si.price_type, si.unit_price, si.unit,
-                    p.quantity AS stock_left, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price
+                    p.quantity AS stock_left, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
+                    p.category_id, c.name AS category_name
                FROM sale_items si
           LEFT JOIN products p ON p.id = si.product_id AND p.tenant_id = si.tenant_id
+          LEFT JOIN categories c ON c.id = p.category_id AND c.tenant_id = si.tenant_id
               WHERE si.tenant_id = ? AND si.sale_id IN ($in) ORDER BY si.id ASC"
         );
         $stmt->execute(array_merge([$tid], $saleIds));
@@ -363,6 +365,8 @@ class SaleModel extends Model
                 'pack_unit' => $r['pack_unit'] ?? '',
                 'pack_price' => $r['pack_price'] ?? null,
                 'retail_pack_price' => $r['retail_pack_price'] ?? null,
+                'category_id' => (int) ($r['category_id'] ?? 0),
+                'category_name' => $r['category_name'] ?? '',
             ];
         }
         return $out;

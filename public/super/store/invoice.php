@@ -95,6 +95,10 @@ body{background:#f1f5f9;margin:0;padding:24px;font-family:-apple-system,'Segoe U
 </div>
 <div class="actions">
   <button class="btn btn-primary w-100 mb-2" onclick="window.print()">Print / Download invoice</button>
+  <?php if (($invoice['invoice_type'] ?? 'transfer') !== 'return'): ?>
+    <a class="btn btn-success w-100 mb-2" href="<?php echo public_url('super/inventory/?group=unit'); ?>"><i class="fas fa-boxes-stacked me-1"></i>View transferred stock in Inventory</a>
+    <a class="btn btn-outline-primary w-100 mb-2" href="<?php echo public_url('super/finances/?period=today'); ?>"><i class="fas fa-coins me-1"></i>View transfer value in Finances</a>
+  <?php endif; ?>
   <a class="btn btn-link w-100" href="<?php echo public_url('super/store/'); ?>">Back to Store warehouse</a>
 </div>
 </body>

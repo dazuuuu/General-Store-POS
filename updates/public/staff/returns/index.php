@@ -17,7 +17,20 @@ $receiptQuery = trim($_GET['receipt'] ?? $_POST['receipt_number'] ?? '');
 $source = $receiptQuery !== '' ? $R->findReceipt($receiptQuery) : null;
 
 if ($receiptQuery !== '' && !$source) {
-    $error = 'No sale found with that receipt number.';
+    $matches = $R->searchReceipts($receiptQuery, 1);
+    if (count($matches) === 1) {
+        $source = $R->findReceipt((string) $matches[0]['receipt_number']);
+    }
+    if (!$source) $error = 'No sale found. Scan or enter the receipt / invoice number.';
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'return_all' && $source) {
+    $res = $R->returnAll((string)$_POST['source_type'], (int)$_POST['source_id'], TenantContext::userId());
+    if ($res['ok']) {
+        $_SESSION['flash']['success'] = 'Entire sale returned. Stock and sale totals were restored.';
+        header('Location: ' . $returnsBase . '?receipt=' . urlencode($receiptQuery)); exit;
+    }
+    $error = $res['error'] ?? 'Could not return this sale.';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'return' && $source) {
@@ -31,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'retur
         'note' => $_POST['note'] ?? '',
     ], TenantContext::userId());
     if ($res['ok']) {
-        $_SESSION['flash']['success'] = 'Return recorded for ' . strtoupper($receiptQuery) . '. Stock and credit balance adjusted.';
+        $_SESSION['flash']['success'] = 'Product returned. Stock and sale totals were restored.';
         header('Location: ' . $returnsBase . '?receipt=' . urlencode($receiptQuery));
         exit;
     }
@@ -51,13 +64,13 @@ ob_start();
   <div class="card-body p-4">
     <form method="get" class="row g-2 align-items-end" id="receiptSearchForm">
       <div class="col-12 col-sm-8">
-        <label class="form-label small mb-1 fw-semibold"><i class="fas fa-magnifying-glass me-1 text-primary"></i>Original receipt or customer / product</label>
+        <label class="form-label small mb-1 fw-semibold"><i class="fas fa-receipt me-1 text-primary"></i>Scan or enter receipt / invoice</label>
         <div class="position-relative">
-          <input type="text" name="receipt" id="receiptSearchInput" class="form-control form-control-lg text-uppercase" placeholder="Type receipt #, customer name, or product..."
+          <input type="text" name="receipt" id="receiptSearchInput" class="form-control form-control-lg text-uppercase" placeholder="RCP-000123 or ORD-000123"
                  value="<?php echo htmlspecialchars($receiptQuery); ?>" autocomplete="off" autofocus>
           <div id="receiptSuggestMenu" class="dropdown-menu shadow-lg border-0 w-100 mt-1 py-0" style="max-height:360px;overflow-y:auto;display:none;z-index:1060;border-radius:10px;"></div>
         </div>
-        <div class="text-muted small mt-1" style="font-size:0.75rem;">Type receipt #, customer, or product to see live suggestions, then click or press Enter to autofill</div>
+        <div class="text-muted small mt-1">Receipt scanners work here. Press Enter to open the sale.</div>
       </div>
       <div class="col-12 col-sm-4">
         <button class="btn btn-primary btn-lg w-100" id="receiptSearchBtn"><i class="fas fa-magnifying-glass me-1"></i>Find sale</button>
@@ -81,7 +94,15 @@ ob_start();
         </div>
       </div>
       <?php $receiptUrl = $source['source_type'] === 'order' ? ($receiptBase . '?id=' . (int) $source['id']) : ($saleReceiptBase . '?id=' . (int) $source['id']); ?>
-      <a class="btn btn-sm btn-outline-secondary" href="<?php echo $receiptUrl; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
+      <div class="d-flex gap-2">
+        <?php if ($source['source_type'] === 'order'): ?><a class="btn btn-sm btn-outline-primary" href="<?php echo public_url(($isStaffViewer?'staff':'super').'/invoices/edit.php?id='.(int)$source['id']); ?>"><i class="fas fa-pen me-1"></i>Edit sale</a><?php endif; ?>
+        <a class="btn btn-sm btn-outline-secondary" href="<?php echo $receiptUrl; ?>"><i class="fas fa-receipt me-1"></i>Receipt</a>
+        <form method="post" onsubmit="return confirm('Return every remaining product on this sale?');">
+          <input type="hidden" name="action" value="return_all"><input type="hidden" name="receipt_number" value="<?php echo htmlspecialchars($source['receipt_number']); ?>">
+          <input type="hidden" name="source_type" value="<?php echo htmlspecialchars($source['source_type']); ?>"><input type="hidden" name="source_id" value="<?php echo (int)$source['id']; ?>">
+          <button class="btn btn-sm btn-danger"><i class="fas fa-rotate-left me-1"></i>Return entire sale</button>
+        </form>
+      </div>
     </div>
 
     <?php if (!$items): ?>
@@ -91,7 +112,7 @@ ob_start();
         <table class="table align-middle mb-0">
           <thead>
             <tr class="text-muted small text-uppercase">
-              <th>Product</th><th class="text-end">Sold</th><th class="text-end">Returned</th><th class="text-end">Available</th><th style="min-width:280px;">Record return</th>
+              <th>Product</th><th class="text-end">Sold</th><th class="text-end">Already returned</th><th class="text-end">Available</th><th class="text-end">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -117,31 +138,15 @@ ob_start();
                 <?php if ($available <= 0): ?>
                   <span class="badge bg-secondary">Fully returned</span>
                 <?php else: ?>
-                <form method="post" class="return-form">
+                <form method="post" onsubmit="return confirm('Return <?php echo addslashes($it['product_name']); ?> to stock?');">
                   <input type="hidden" name="action" value="return">
                   <input type="hidden" name="receipt_number" value="<?php echo htmlspecialchars($source['receipt_number']); ?>">
                   <input type="hidden" name="source_type" value="<?php echo htmlspecialchars($source['source_type']); ?>">
                   <input type="hidden" name="source_id" value="<?php echo (int) $source['id']; ?>">
                   <input type="hidden" name="source_item_id" value="<?php echo (int) $it['id']; ?>">
-                  <div class="row g-2">
-                    <div class="col-6">
-                      <label class="form-label small mb-1">Returned</label>
-                      <input type="number" step="0.01" min="0.01" max="<?php echo htmlspecialchars((string) $available); ?>" name="returned_quantity" class="form-control form-control-sm returned-input" required>
-                    </div>
-                    <div class="col-6">
-                      <label class="form-label small mb-1">Used</label>
-                      <input type="number" step="0.01" min="0" name="used_quantity" class="form-control form-control-sm used-input" value="0">
-                    </div>
-                    <div class="col-12">
-                      <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason, e.g. wrong item, damaged, expired">
-                    </div>
-                    <div class="col-12">
-                      <textarea name="note" class="form-control form-control-sm" rows="1" placeholder="Note (optional)"></textarea>
-                    </div>
-                    <div class="col-12">
-                      <button class="btn btn-sm btn-outline-primary w-100"><i class="fas fa-check me-1"></i>Record return</button>
-                    </div>
-                  </div>
+                  <input type="hidden" name="returned_quantity" value="<?php echo htmlspecialchars((string)$available); ?>">
+                  <input type="hidden" name="used_quantity" value="0"><input type="hidden" name="reason" value="Product return">
+                  <button class="btn btn-sm btn-outline-danger"><i class="fas fa-rotate-left me-1"></i>Return product</button>
                 </form>
                 <?php endif; ?>
               </td>

@@ -6,10 +6,21 @@ PageGuard::auth();
 $pdo  = Database::pdo();
 $SA   = new Models\SaleModel($pdo);
 $OR   = new Models\OrderModel($pdo);
+$C    = new Models\CategoryModel($pdo);
 
-// Period filter
+// Period + spreadsheet-style transaction filters.
 $allowed = ['today', 'week', 'month', 'all'];
-$period  = in_array($_GET['period'] ?? '', $allowed, true) ? $_GET['period'] : 'today';
+$period  = in_array($_GET['period'] ?? '', $allowed, true) ? $_GET['period'] : 'all';
+$filters = [
+    'q' => trim((string) ($_GET['q'] ?? '')),
+    'date_from' => trim((string) ($_GET['date_from'] ?? '')),
+    'date_to' => trim((string) ($_GET['date_to'] ?? '')),
+    'category_id' => (int) ($_GET['category_id'] ?? 0),
+];
+$categories = $C->all(['type' => 'product'], 'name ASC');
+if (!$categories) {
+    $categories = $C->all(['type' => 'subject'], 'name ASC');
+}
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_sale') {
@@ -19,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         ? $OR->deleteSale($id, TenantContext::userId())
         : $SA->deleteSale($id, TenantContext::userId());
     if ($res['ok']) {
-        $_SESSION['flash']['success'] = 'Sale deleted and stock restored.';
+        $_SESSION['flash']['success'] = 'Duplicate sale undone. Stock, sale totals and customer balance were restored.';
         header('Location: ' . public_url('super/sales/?period=' . urlencode($period)));
         exit;
     }
@@ -46,9 +57,7 @@ function sales_and_orders(Models\SaleModel $SA, Models\OrderModel $OR, string $p
     return $merged;
 }
 
-$sales      = sales_and_orders($SA, $OR, $period);
-$sum        = Models\SaleModel::summarize($sales);
-$staffBd    = Models\SaleModel::staffBreakdown($sales);
+$sales = sales_and_orders($SA, $OR, $period);
 
 // Batch-load line items for the products column — one query per source,
 // not one per row.
@@ -61,9 +70,50 @@ foreach ($sales as &$s) {
 }
 unset($s);
 
+// Search receipt/customer/staff/product/category and an exact date range.
+$sales = array_values(array_filter($sales, static function (array $sale) use ($filters): bool {
+    $createdDate = date('Y-m-d', strtotime((string) ($sale['created_at'] ?? 'now')));
+    if ($filters['date_from'] !== '' && $createdDate < $filters['date_from']) {
+        return false;
+    }
+    if ($filters['date_to'] !== '' && $createdDate > $filters['date_to']) {
+        return false;
+    }
+    if ($filters['category_id'] > 0) {
+        $categoryMatch = false;
+        foreach ($sale['items'] as $item) {
+            if ((int) ($item['category_id'] ?? 0) === $filters['category_id']) {
+                $categoryMatch = true;
+                break;
+            }
+        }
+        if (!$categoryMatch) {
+            return false;
+        }
+    }
+    if ($filters['q'] !== '') {
+        $bits = [
+            $sale['receipt_number'] ?? '',
+            $sale['staff_name'] ?? '',
+            $sale['customer_name'] ?? ($sale['table_name'] ?? ''),
+        ];
+        foreach ($sale['items'] as $item) {
+            $bits[] = $item['name'] ?? '';
+            $bits[] = $item['category_name'] ?? '';
+        }
+        if (stripos(implode(' ', $bits), $filters['q']) === false) {
+            return false;
+        }
+    }
+    return true;
+}));
+
+$sum = Models\SaleModel::summarize($sales);
+$staffBd = Models\SaleModel::staffBreakdown($sales);
+
 // Always compute today stats for the header card
-$todaySales = ($period === 'today') ? $sales : sales_and_orders($SA, $OR, 'today');
-$todaySum   = ($period === 'today') ? $sum    : Models\SaleModel::summarize($todaySales);
+$todaySales = sales_and_orders($SA, $OR, 'today');
+$todaySum = Models\SaleModel::summarize($todaySales);
 
 $periodLabel = match ($period) {
     'today' => 'Today',
@@ -170,6 +220,39 @@ ob_start();
     <?php endforeach; ?>
   </div>
 </div>
+
+<form method="get" class="card border-0 shadow-sm mb-4" style="border-radius:14px;">
+  <input type="hidden" name="period" value="<?php echo htmlspecialchars($period); ?>">
+  <div class="card-body p-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-lg-4">
+        <label class="form-label small mb-1">Search sales</label>
+        <input type="search" name="q" class="form-control" placeholder="Product, category, receipt, customer or staff…" value="<?php echo htmlspecialchars($filters['q']); ?>">
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">From date</label>
+        <input type="date" name="date_from" class="form-control" value="<?php echo htmlspecialchars($filters['date_from']); ?>">
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">To date</label>
+        <input type="date" name="date_to" class="form-control" value="<?php echo htmlspecialchars($filters['date_to']); ?>">
+      </div>
+      <div class="col-7 col-md-3 col-lg-2">
+        <label class="form-label small mb-1">Product category</label>
+        <select name="category_id" class="form-select">
+          <option value="0">All categories</option>
+          <?php foreach ($categories as $cat): ?>
+            <option value="<?php echo (int) $cat['id']; ?>" <?php echo $filters['category_id'] === (int) $cat['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($cat['name']); ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="col-5 col-md-3 col-lg-2 d-flex gap-2">
+        <button class="btn btn-primary flex-grow-1"><i class="fas fa-search me-1"></i>Search</button>
+        <a class="btn btn-outline-secondary" href="?period=all" title="Clear filters">×</a>
+      </div>
+    </div>
+  </div>
+</form>
 
 <!-- ===== Stat cards ===== -->
 <div class="row g-3 mb-4">
@@ -457,12 +540,12 @@ ob_start();
 </div>
 <?php endif; ?>
 
-<!-- ===== Full sales table ===== -->
+<!-- ===== Date-grouped sales ledger ===== -->
 <div class="card border-0 shadow-sm" style="border-radius:14px;">
   <div class="card-body p-4">
     <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
       <h2 class="h6 fw-bold mb-0">
-        Sales — <?php echo htmlspecialchars($periodLabel); ?>
+        Sales ledger — newest first
         <span class="badge bg-light text-dark ms-1"><?php echo count($sales); ?></span>
       </h2>
       <div class="position-relative" style="max-width:220px;width:100%;">
@@ -477,17 +560,29 @@ ob_start();
       </div>
     <?php else: ?>
       <div class="table-responsive">
-        <table class="table align-middle mb-0" id="saleTable">
+        <table class="table table-bordered align-middle mb-0" id="saleTable" style="border-color:#dbe3ee;">
           <thead><tr class="text-muted small text-uppercase">
             <th>Receipt</th><th>When</th><th>Type</th><th>Staff</th><th>Customer</th><th>Products</th><th>Pay</th><th class="text-end">Total</th><th></th>
           </tr></thead>
           <tbody>
-            <?php foreach ($sales as $s):
+            <?php $previousDate = null; foreach ($sales as $saleIndex => $s):
+                $saleDate = date('Y-m-d', strtotime($s['created_at']));
                 $itemNames = implode(' ', array_column($s['items'], 'name'));
+                $categoryNames = implode(' ', array_column($s['items'], 'category_name'));
+                if ($saleDate !== $previousDate):
+                    $isToday = $saleDate === date('Y-m-d');
+                    $isYesterday = $saleDate === date('Y-m-d', strtotime('-1 day'));
+                    $dateLabel = $isToday ? 'Today' : ($isYesterday ? 'Yesterday' : date('l, j F Y', strtotime($saleDate)));
             ?>
-            <tr data-search="<?php echo strtolower(htmlspecialchars($s['receipt_number'].' '.$s['staff_name'].' '.($s['customer_name']??'').' '.$itemNames)); ?>">
+            <tr class="sale-date-heading<?php echo $saleIndex >= 20 ? ' initial-hidden' : ''; ?>" data-ledger-date="<?php echo htmlspecialchars($saleDate); ?>" <?php echo $saleIndex >= 20 ? 'style="display:none;"' : ''; ?>>
+              <td colspan="9" class="bg-light fw-bold text-primary py-2">
+                <i class="fas fa-calendar-day me-2"></i><?php echo htmlspecialchars($dateLabel); ?>
+              </td>
+            </tr>
+            <?php $previousDate = $saleDate; endif; ?>
+            <tr class="sale-ledger-row<?php echo $saleIndex >= 20 ? ' initial-hidden' : ''; ?>" data-search="<?php echo strtolower(htmlspecialchars($s['receipt_number'].' '.$s['staff_name'].' '.($s['customer_name']??'').' '.$itemNames.' '.$categoryNames)); ?>" data-ledger-date="<?php echo htmlspecialchars($saleDate); ?>" <?php echo $saleIndex >= 20 ? 'style="display:none;"' : ''; ?>>
               <td class="fw-semibold small"><?php echo htmlspecialchars($s['receipt_number']); ?></td>
-              <td class="small text-nowrap"><?php echo date('j M, g:i a', strtotime($s['created_at'])); ?></td>
+              <td class="small text-nowrap"><?php echo date('g:i a', strtotime($s['created_at'])); ?></td>
               <td><?php echo ($s['source'] ?? 'sale') === 'order' ? '<span class="badge bg-warning text-dark">Tab</span>' : Models\SaleModel::saleTypeBadge($s); ?></td>
               <td class="small"><?php echo htmlspecialchars($s['staff_name'] ?: '—'); ?></td>
               <td class="small">
@@ -515,12 +610,13 @@ ob_start();
                 <div class="btn-group btn-group-sm">
                   <a class="btn btn-outline-secondary" href="<?php echo public_url($s['receipt_url']); ?>">Receipt</a>
                   <a class="btn btn-outline-primary" href="<?php echo public_url('super/returns/?receipt=' . urlencode($s['receipt_number'])); ?>">Return</a>
+                  <?php if(($s['source']??'')==='order'):?><a class="btn btn-outline-warning" href="<?php echo public_url('super/invoices/edit.php?id='.(int)$s['id']);?>">Edit sale</a><?php endif;?>
                 </div>
-                <form method="post" class="d-inline" onsubmit="return confirm('Delete this sale and return its products to stock?');">
+                <form method="post" class="d-inline" onsubmit="return confirm('Undo this duplicate sale? Products and totals will return to their previous state.');">
                   <input type="hidden" name="action" value="delete_sale">
                   <input type="hidden" name="source" value="<?php echo htmlspecialchars($s['source'] ?? 'sale'); ?>">
                   <input type="hidden" name="id" value="<?php echo (int) $s['id']; ?>">
-                  <button class="btn btn-sm btn-outline-danger mt-1"><i class="fas fa-trash me-1"></i>Delete</button>
+                  <button class="btn btn-sm btn-outline-danger mt-1"><i class="fas fa-rotate-left me-1"></i>Undo duplicate</button>
                 </form>
               </td>
             </tr>
@@ -528,6 +624,13 @@ ob_start();
           </tbody>
         </table>
       </div>
+      <?php if (count($sales) > 20): ?>
+        <div class="text-center pt-3">
+          <button type="button" class="btn btn-outline-primary" id="showAllSales">
+            <i class="fas fa-chevron-down me-1"></i>View all other sales (<?php echo count($sales) - 20; ?>)
+          </button>
+        </div>
+      <?php endif; ?>
     <?php endif; ?>
   </div>
 </div>
@@ -539,9 +642,31 @@ ob_start();
     if (!inp) return;
     inp.addEventListener('input', function(){
       var q = this.value.toLowerCase().trim();
-      document.querySelectorAll('#' + tableId + ' tbody tr').forEach(function(tr){
-        tr.style.display = !q || tr.dataset.search.indexOf(q) !== -1 ? '' : 'none';
+      document.querySelectorAll('#' + tableId + ' tbody tr[data-search]').forEach(function(tr){
+        tr.style.display = !q || (tr.dataset.search || '').indexOf(q) !== -1 ? '' : 'none';
       });
+      if (tableId === 'saleTable') refreshDateHeadings();
+    });
+  }
+  function refreshDateHeadings(){
+    document.querySelectorAll('#saleTable .sale-date-heading').forEach(function(head){
+      var date = head.dataset.ledgerDate;
+      var visible = Array.prototype.some.call(
+        document.querySelectorAll('#saleTable .sale-ledger-row[data-ledger-date="' + date + '"]'),
+        function(row){ return row.style.display !== 'none'; }
+      );
+      head.style.display = visible ? '' : 'none';
+    });
+  }
+  var showAll = document.getElementById('showAllSales');
+  if (showAll) {
+    showAll.addEventListener('click', function(){
+      document.querySelectorAll('#saleTable .initial-hidden').forEach(function(row){
+        row.classList.remove('initial-hidden');
+        row.style.display = '';
+      });
+      showAll.remove();
+      refreshDateHeadings();
     });
   }
   wireFilter('saleSearch', 'saleTable');

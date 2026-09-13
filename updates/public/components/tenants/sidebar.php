@@ -34,6 +34,8 @@ $isOn = function (string $needle) use ($uri): string {
     </div>
 
     <nav class="t-nav">
+        <?php include __DIR__ . '/../shared/pos-menu.php'; ?>
+        <?php if (false): // Legacy flat menu retained temporarily for safe route reference. ?>
         <a class="t-link <?php echo $isOn('/dashboard'); ?>" href="<?php echo $dashUrl; ?>">
             <i class="fas fa-house"></i><span>Home</span>
         </a>
@@ -88,6 +90,29 @@ $isOn = function (string $needle) use ($uri): string {
             <i class="fas fa-box-archive"></i><span>Store (Warehouse)</span>
         </a>
         <?php endif; ?>
+
+        <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_EDIT) || TenantContext::can(Capabilities::STOCK_ENTER)):
+            $onPurchases = strpos($uri, '/super/purchases') !== false;
+            $onPurchaseNew = strpos($uri, '/super/purchases/new') !== false;
+            $onPurchaseTrack = strpos($uri, '/super/purchases/track') !== false;
+            $onPurchaseTransfer = strpos($uri, '/super/purchases/transfer') !== false;
+            $onPurchaseView = strpos($uri, '/super/purchases/view') !== false;
+            $onPurchaseIndex = $onPurchases && !$onPurchaseNew && !$onPurchaseTrack && !$onPurchaseTransfer;
+        ?>
+        <div class="t-group <?php echo $onPurchases ? 'open' : ''; ?>" data-nav-group>
+            <button type="button" class="t-link t-group-toggle <?php echo $onPurchases ? 'active' : ''; ?>" aria-expanded="<?php echo $onPurchases ? 'true' : 'false'; ?>">
+                <i class="fas fa-cart-shopping"></i><span>Purchases</span>
+                <i class="fas fa-chevron-down t-group-caret"></i>
+            </button>
+            <div class="t-subnav">
+                <a class="t-sublink <?php echo $onPurchaseNew ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/new.php'); ?>">Record purchase</a>
+                <a class="t-sublink <?php echo ($onPurchaseIndex || $onPurchaseView) ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/'); ?>">View purchases</a>
+                <a class="t-sublink <?php echo $onPurchaseTrack ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/track.php'); ?>">Track purchases</a>
+                <a class="t-sublink <?php echo $onPurchaseTransfer ? 'active' : ''; ?>" href="<?php echo public_url('super/purchases/transfer.php'); ?>">Transfer purchases</a>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <?php if ($isOwner): ?>
         <a class="t-link <?php echo $isOn('/super/expenses'); ?>" href="<?php echo public_url('super/expenses/'); ?>">
             <i class="fas fa-money-bill-wave"></i><span>Expenses</span>
@@ -96,6 +121,7 @@ $isOn = function (string $needle) use ($uri): string {
             <i class="fas fa-chart-pie"></i><span>Finances</span>
         </a>
         <?php endif; ?>
+
         <?php if ($isOwner || TenantContext::can(Capabilities::INVENTORY_EDIT)): ?>
         <a class="t-link <?php echo $isOn('/super/categories'); ?>" href="<?php echo public_url('super/categories/'); ?>">
             <i class="fas fa-tags"></i><span>Categories</span>
@@ -137,6 +163,7 @@ $isOn = function (string $needle) use ($uri): string {
         <a class="t-link <?php echo $isOn('/clean_migrations.php'); ?>" href="<?php echo public_url('clean_migrations.php'); ?>"><i class="fas fa-broom"></i><span>Clean records</span></a>
         <?php endif; ?>
 
+        <?php endif; ?>
     </nav>
 
     <div class="t-sidebar-footer">
@@ -162,6 +189,17 @@ $isOn = function (string $needle) use ($uri): string {
 .t-link:hover i{ color:#1f2330; }
 .t-link.active { background:var(--t-bg2); color:var(--t-accent); font-weight:700; box-shadow:inset 3px 0 0 var(--t-accent); }
 .t-link.active i { color:var(--t-accent); }
+.t-group { margin-bottom:3px; }
+.t-group-toggle { width:100%; border:0; background:transparent; cursor:pointer; text-align:left; font:inherit; }
+.t-group-caret { margin-left:auto; width:auto !important; font-size:.7rem; transition:transform .2s ease; }
+.t-group.open .t-group-caret { transform:rotate(180deg); }
+.t-subnav { display:none; padding:2px 0 6px 18px; }
+.t-group.open .t-subnav { display:block; }
+.t-sublink { display:block; padding:8px 12px; border-radius:8px; color:#6b7280; text-decoration:none; font-size:.84rem; margin-bottom:2px; }
+.t-sublink:hover { background:#f7f7fb; color:#1f2330; }
+.t-sublink.active { background:var(--t-bg2); color:var(--t-accent); font-weight:700; }
+.t-subsection { padding:9px 12px 4px; color:#374151; font-size:.76rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+.t-subsub { padding-left:24px; font-size:.8rem; }
 .t-soon { margin-left:auto; font-size:.62rem; font-style:normal; background:#f3f4f7; color:#9aa0ac; padding:1px 7px; border-radius:999px; }
 .t-danger { color:#64748b; }
 .t-danger:hover { background:#f1f5f9; color:#334155; }
@@ -185,5 +223,13 @@ $isOn = function (string $needle) use ($uri): string {
   tg&&tg.addEventListener('click',open); cl&&cl.addEventListener('click',close); ov&&ov.addEventListener('click',close);
   document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});
   document.querySelectorAll('[data-soon]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();});});
+  document.querySelectorAll('[data-nav-group]').forEach(function(group){
+    var btn=group.querySelector('.t-group-toggle');
+    if(!btn) return;
+    btn.addEventListener('click',function(){
+      group.classList.toggle('open');
+      btn.setAttribute('aria-expanded', group.classList.contains('open') ? 'true' : 'false');
+    });
+  });
 })();
 </script>

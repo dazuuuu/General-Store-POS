@@ -15,6 +15,7 @@ $BA = new Models\BookAttributeModel($pdo);
 $HO = new Models\HeldOrderModel($pdo);
 $CM = new Models\CustomerModel($pdo);
 $products   = $P->sellable();
+$productTiers = (new Models\PriceTierModel($pdo))->forProducts(array_map(static fn($p) => (int) $p['id'], $products));
 $categories = $C->all(['type' => 'product'], 'name ASC');
 if (!$categories) { $categories = $C->all(['type' => 'subject'], 'name ASC'); }
 $brands     = $BA->all(['type' => 'brand'], 'name ASC');
@@ -258,6 +259,7 @@ ob_start();
               $faulty > 0 ? ('faulty ' . rtrim(rtrim(number_format($faulty, 2), '0'), '.')) : null,
           ]));
           $label = $p['name'] . ($sub ? " ({$sub})" : '');
+          $tiersJson = json_encode($productTiers[(int) $p['id']] ?? [], JSON_UNESCAPED_UNICODE);
       ?>
         <div class="pos-card<?php echo !empty($p['is_archived']) ? ' pos-card-archived' : ''; ?>" data-id="<?php echo (int) $p['id']; ?>" data-name="<?php echo htmlspecialchars($label, ENT_QUOTES); ?>"
              data-price="<?php echo $price; ?>" data-wholesale="<?php echo $wholesale; ?>" data-stock="<?php echo (float) $p['quantity']; ?>"
@@ -265,6 +267,7 @@ ob_start();
              data-pack-unit="<?php echo htmlspecialchars($packUnit, ENT_QUOTES); ?>"
              data-pack-price="<?php echo $packPrice; ?>"
              data-retail-pack-price="<?php echo $retailPackPrice; ?>"
+             data-tiers="<?php echo htmlspecialchars($tiersJson ?: '[]', ENT_QUOTES); ?>"
              data-type="product"
              data-category="<?php echo (int) ($p['category_id'] ?? 0); ?>"
              data-brand="<?php echo (int) (($p['brand_id'] ?? 0) ?: ($p['publisher_id'] ?? 0)); ?>"
@@ -478,10 +481,13 @@ ob_start();
 <script src="<?php echo htmlspecialchars(public_url('assets/js/pos-pack-cart.js')); ?>"></script>
 <script>
 var PC = window.PosPackCart;
+var PRODUCT_COMMISSION_ENABLED = <?php echo !empty($tenant['product_commission_enabled']) ? 'true' : 'false'; ?>;
 var PRODUCTS = {};
 var BARCODES = {};
 document.querySelectorAll('.pos-card').forEach(function (el) {
     var img = el.querySelector('.pos-card-img img');
+    var tiers = [];
+    try { tiers = JSON.parse(el.dataset.tiers || '[]') || []; } catch (e) { tiers = []; }
     PRODUCTS[el.dataset.id] = {
         name: el.dataset.name,
         price: parseFloat(el.dataset.price),
@@ -491,6 +497,7 @@ document.querySelectorAll('.pos-card').forEach(function (el) {
         packUnit: el.dataset.packUnit || '',
         packPrice: parseFloat(el.dataset.packPrice) || 0,
         retailPackPrice: parseFloat(el.dataset.retailPackPrice) || 0,
+        tiers: tiers,
         img: img ? img.getAttribute('src') : null
     };
     if (el.dataset.barcode) { BARCODES[el.dataset.barcode] = el.dataset.id; }
@@ -688,6 +695,12 @@ function render() {
         if ((c.wholesale || 0) > 0) {
             rows += PC.qtyRow(id, 'Wholesale', money(PC.productPrice(p, 'wholesale')) + '/' + wLabel, 'wholesale', c.wholesale || 0, wholesaleMax);
         }
+        if (PRODUCT_COMMISSION_ENABLED && (c.retail || 0) > 0) {
+            rows += '<label class="pos-dual-row"><span class="pos-dual-label">Commission selling price'
+              + ' <span class="text-muted">(minimum ' + money(p.price) + ')</span></span>'
+              + '<input type="number" step="0.01" min="' + p.price + '" class="form-control form-control-sm"'
+              + ' style="max-width:130px;" data-commission-price="' + id + '" value="' + (c.customUnitPrice || p.price) + '"></label>';
+        }
         var line = document.createElement('div');
         line.className = 'pos-cart-line pos-cart-line-dual';
         line.innerHTML =
@@ -760,6 +773,16 @@ document.getElementById('cartRows').addEventListener('change', function (e) {
     if (input) syncTypedQty(input);
 });
 document.getElementById('cartRows').addEventListener('input', function (e) {
+    var commissionInput = e.target.closest('[data-commission-price]');
+    if (commissionInput) {
+        var commissionId = commissionInput.dataset.commissionPrice;
+        var product = PRODUCTS[commissionId];
+        var entered = parseFloat(commissionInput.value);
+        ensureCart(commissionId).customUnitPrice = product && entered >= product.price ? entered : null;
+        document.getElementById('cartInput').value = JSON.stringify(PC.serialize(cart, PRODUCTS));
+        updateTotals();
+        return;
+    }
     var input = e.target.closest('[data-retail-qty], [data-retail-pack-qty], [data-wholesale-qty]');
     if (!input) return;
     var info = qtyInputField(input);
@@ -841,8 +864,11 @@ document.getElementById('holdBtn').addEventListener('click', function () { docum
 document.getElementById('checkoutBtn').addEventListener('click', function () { document.getElementById('formAction').value = 'checkout'; });
 
 document.getElementById('orderForm').addEventListener('submit', function (e) {
+    if (this.dataset.submitting === '1') { e.preventDefault(); return; }
     if (!cartHasItems()) { e.preventDefault(); alert('Add at least one item.'); return; }
-    if (!document.getElementById('customerName').value.trim()) { e.preventDefault(); alert('Enter a customer name.'); }
+    if (!document.getElementById('customerName').value.trim()) { e.preventDefault(); alert('Enter a customer name.'); return; }
+    this.dataset.submitting='1';
+    this.querySelectorAll('button[type=submit]').forEach(function(button){button.disabled=true;});
 });
 
 var barcodeScan = document.getElementById('barcodeScan');
@@ -860,12 +886,18 @@ if (barcodeScan) {
         var code = barcodeScan.value.trim();
         barcodeScan.value = '';
         if (!code) { return; }
-        var id = BARCODES[code];
-        if (!id) { flashScan('No product with that barcode.', false); return; }
-        var p = PRODUCTS[id];
-        if (p && stockUsed(id) >= p.stock) { flashScan(p.name + ' — no more in stock.', false); return; }
-        add(id);
-        flashScan((p ? p.name : 'Product') + ' added.', true);
+        fetch(<?php echo json_encode(public_url('api/inventory/pos_barcode.php')); ?> + '?code=' + encodeURIComponent(code))
+          .then(function(r){return r.json();}).then(function(data){
+            var p=data.item||(data.items&&data.items[0]);if(!p){flashScan('No in-stock product with that barcode.',false);return;}
+            p.stock=parseFloat(p.stock!=null?p.stock:p.balance)||0;
+            p.unitsPerPack=parseFloat(p.unitsPerPack!=null?p.unitsPerPack:p.unitsInPack)||1;
+            p.packUnit=p.packUnit||p.package||'pack';
+            p.packPrice=parseFloat(p.packPrice!=null?p.packPrice:p.packSize)||0;
+            p.packageBuying=parseFloat(p.packageBuying!=null?p.packageBuying:p.packagingbying)||0;
+            var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
+            if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
+            add(id);flashScan(p.name+' added.',true);
+          }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
     });
     document.addEventListener('click', function (e) {
         if (e.target === barcodeScan || e.target.closest('input, textarea, button')) { return; }
