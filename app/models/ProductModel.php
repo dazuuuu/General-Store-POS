@@ -294,14 +294,14 @@ class ProductModel extends Model
         $stmt = $this->db->prepare(
             "SELECT p.id, p.name, p.quantity, p.faulty_quantity, p.unit, p.colors, p.buying_price,
                     p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
-                    p.package_buying_price, p.image_path, p.barcode,
+                    p.package_buying_price, p.image_path, p.barcode, p.serial_tracking,
                     c.name AS category_name, c.name AS subject_name,
                     pu.name AS publisher_name, br.name AS brand_name
                FROM products p
           LEFT JOIN categories c ON c.id = p.category_id
           LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
           LEFT JOIN book_attributes br ON br.id = p.brand_id
-              WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
+              WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND COALESCE(p.is_menu_item,0)=0 AND p.status = ? AND p.name LIKE ?
            ORDER BY (p.name LIKE ?) DESC, p.name ASC
               LIMIT " . (int) $limit
         );
@@ -310,14 +310,14 @@ class ProductModel extends Model
             $stmt->execute($params);
         } catch (\PDOException $e) {
             $stmt = $this->db->prepare(
-                "SELECT p.id, p.name, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                "SELECT p.id, p.name, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode, p.serial_tracking,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
               LEFT JOIN categories c ON c.id = p.category_id
               LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
               LEFT JOIN book_attributes br ON br.id = p.brand_id
-                  WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
+                  WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND COALESCE(p.is_menu_item,0)=0 AND p.status = ? AND p.name LIKE ?
                ORDER BY (p.name LIKE ?) DESC, p.name ASC
                   LIMIT " . (int) $limit
             );

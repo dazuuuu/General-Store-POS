@@ -37,5 +37,6 @@ echo json_encode(['items' => array_map(function (array $r) {
         'unit'           => $r['unit'] ?? null,
         'colors'         => $r['colors'] ?? null,
         'faulty_quantity'=> isset($r['faulty_quantity']) ? (float) $r['faulty_quantity'] : null,
+        'serial_tracking'=> !empty($r['serial_tracking']),
     ];
 }, $rows)]);

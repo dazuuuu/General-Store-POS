@@ -632,6 +632,7 @@ ob_start();
     if (item.buying_price) document.getElementById('buyingPrice').value = item.buying_price;
     if (item.pack_price && document.getElementById('wholesalePrice')) document.getElementById('wholesalePrice').value = item.pack_price;
     if (item.retail_pack_price && document.getElementById('retailPackPrice')) document.getElementById('retailPackPrice').value = item.retail_pack_price;
+    if(item.serial_tracking&&serialTracking){document.getElementById('destShop').checked=true;updateDestUI();serialTracking.checked=true;serialFields.style.display='block';updateSerialQuantity();}
     var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
     note.style.display = 'block';
     note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +

@@ -605,6 +605,7 @@ ob_start();
       if (item.retail_price) { row.querySelector('.retailPrice').value = item.retail_price; }
       if (item.wholesale_price) { row.querySelector('.wholesalePrice').value = item.pack_price && item.pack_price > 0 ? item.pack_price : item.wholesale_price; }
       if (item.retail_pack_price) { row.querySelector('.retailPackPrice').value = item.retail_pack_price; }
+      if(item.serial_tracking&&row.querySelector('.serialTracking')){document.getElementById('destShop').checked=true;updateDestUI();var serialToggle=row.querySelector('.serialTracking');serialToggle.checked=true;row.querySelector('.serialFields').style.display='block';row.querySelector('.qty').readOnly=true;}
       row.querySelector('.qtyLabel').textContent = 'Qty to add';
       var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
       note.style.display = 'block';
