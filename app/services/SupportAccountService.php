@@ -7,8 +7,8 @@ class SupportAccountService
 
     public function exists(): bool
     {
-        $st=$this->db->query("SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id WHERE u.tenant_id IS NULL AND r.role_name='platform_admin' LIMIT 1");
-        return (bool)$st->fetchColumn();
+        try{$st=$this->db->query("SELECT 1 FROM users u JOIN roles r ON r.id=u.role_id WHERE u.tenant_id IS NULL AND r.role_name='platform_admin' LIMIT 1");return (bool)$st->fetchColumn();}
+        catch(Throwable $e){return false;}
     }
 
     public function create(string $name,string $email,string $password): array

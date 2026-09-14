@@ -35,6 +35,53 @@ class MigrationRunnerService
         return ['ran'=>$ran,'skipped'=>$skipped];
     }
 
+    public function coreSchemaReady(): bool
+    {
+        try{
+            $tables=(int)$this->db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('roles','users','tenants')")->fetchColumn();
+            return $tables===3&&(int)$this->db->query('SELECT COUNT(*) FROM roles')->fetchColumn()>0;
+        }catch(Throwable $e){return false;}
+    }
+
+    public function supportSchemaReady(): bool
+    {
+        try{
+            $columns=(int)$this->db->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tenants' AND COLUMN_NAME IN ('enabled_modules','offline_enabled','enabled_pages','settings_revision')")->fetchColumn();
+            return $columns===4;
+        }catch(Throwable $e){return false;}
+    }
+
+    /** Brand-new hosting bootstrap: install the baseline, then current POS additions. */
+    public function installInitialSchema(): array
+    {
+        if($this->coreSchemaReady())throw new RuntimeException('The core database is already installed.');
+        $path=ROOT_PATH.'/databases/full_schema.sql';if(!is_file($path))throw new RuntimeException('Initial schema file not found on the server.');
+        $base=$this->executeSql((string)file_get_contents($path));
+        $latest=$this->runRequiredSupportMigrations(0);
+        return ['ran'=>$base['ran']+$latest['ran'],'skipped'=>$base['skipped']+$latest['skipped']];
+    }
+
+    /** Bring an existing hosted database up to the support-portal release. */
+    public function runRequiredSupportMigrations(int $actorId=0): array
+    {
+        $ran=0;$skipped=0;
+        foreach(['062_purchases.sql','063_services_commissions_taxes.sql','064_payroll_purchase_destination.sql','065_tenant_modules_offline_restaurant_serials.sql','066_restaurant_orders_and_menu_categories.sql','067_restaurant_inventory_variants_branches.sql','068_purchase_serials_vat.sql','069_support_portal_controls.sql'] as $name){
+            $result=$this->run($name,$actorId);$ran+=$result['ran'];$skipped+=$result['skipped'];
+        }
+        return ['ran'=>$ran,'skipped'=>$skipped];
+    }
+
+    private function executeSql(string $sql): array
+    {
+        if(stripos($sql,'DELIMITER')!==false)throw new RuntimeException('The schema contains unsupported DELIMITER statements.');
+        $ran=0;$skipped=0;
+        foreach($this->split($sql) as $statement){
+            try{$this->db->exec($statement);$ran++;}
+            catch(PDOException $e){$code=(int)($e->errorInfo[1]??0);if(in_array($code,[1050,1060,1061,1062,1091,1826],true)){$skipped++;continue;}throw $e;}
+        }
+        return ['ran'=>$ran,'skipped'=>$skipped];
+    }
+
     private function split(string $sql): array
     {
         $out=[];$buffer='';$quote=null;$line=false;$block=false;$len=strlen($sql);
