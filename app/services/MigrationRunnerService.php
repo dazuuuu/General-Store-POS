@@ -65,7 +65,10 @@ class MigrationRunnerService
     public function runRequiredSupportMigrations(int $actorId=0): array
     {
         $ran=0;$skipped=0;
-        foreach(['062_purchases.sql','063_services_commissions_taxes.sql','064_payroll_purchase_destination.sql','065_tenant_modules_offline_restaurant_serials.sql','066_restaurant_orders_and_menu_categories.sql','067_restaurant_inventory_variants_branches.sql','068_purchase_serials_vat.sql','069_support_portal_controls.sql'] as $name){
+        $names=[];
+        foreach(glob(ROOT_PATH.'/databases/migrations/*.sql')?:[] as $path){$name=basename($path);$number=(int)strtok($name,'_');if($number>=36)$names[]=$name;}
+        usort($names,'strnatcasecmp');
+        foreach($names as $name){
             $result=$this->run($name,$actorId);$ran+=$result['ran'];$skipped+=$result['skipped'];
         }
         return ['ran'=>$ran,'skipped'=>$skipped];
