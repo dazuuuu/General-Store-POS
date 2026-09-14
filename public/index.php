@@ -2,6 +2,8 @@
 // public/index.php — the staff terminal. Type your PIN, then Login, Clock In
 // or Clock Out. Owners go to /admin instead.
 require_once __DIR__ . '/../app/app.php';
+$requestPath=strtolower((string)(parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)??'/'));
+if(preg_match('#(?:^|/)devs(?:/|$)#',$requestPath)){http_response_code(404);exit('Not found.');}
 
 // Already fully logged in? Skip straight to the dashboard.
 if (!empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified'])) {
