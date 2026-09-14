@@ -586,6 +586,9 @@ class ProductModel extends Model
         if (isset($in['credit_limit']) && $in['credit_limit'] !== '' && (!is_numeric($in['credit_limit']) || (float) $in['credit_limit'] < 0)) {
             $errors['credit_limit'] = 'Enter a valid credit limit.';
         }
+        if (isset($in['tax_rate']) && $in['tax_rate'] !== '' && (!is_numeric($in['tax_rate']) || (float)$in['tax_rate']<0 || (float)$in['tax_rate']>100)) {
+            $errors['tax_rate'] = 'Enter a VAT rate between 0 and 100%.';
+        }
         if (isset($in['units_per_pack']) && $in['units_per_pack'] !== '' && (!is_numeric($in['units_per_pack']) || (float) $in['units_per_pack'] <= 0)) {
             $errors['units_per_pack'] = 'Enter a valid pack size.';
         }
@@ -661,6 +664,7 @@ class ProductModel extends Model
         $productTypeIn = $in['product_type'] ?? 'product';
         $productType = in_array($productTypeIn, self::PRODUCT_TYPES, true) ? $productTypeIn : 'product';
         $creditLimit = ($in['credit_limit'] ?? '') !== '' ? (float) $in['credit_limit'] : null;
+        $taxRate = ($in['tax_rate'] ?? '') !== '' ? min(100,max(0,(float)$in['tax_rate'])) : null;
         $unitsPerPack = max(0.01, (float) ($in['units_per_pack'] ?? 1));
         $packUnit = trim((string) ($in['pack_unit'] ?? '')) ?: null;
         $packPrice = ($in['pack_price'] ?? '') !== '' ? (float) $in['pack_price'] : null;
@@ -713,6 +717,7 @@ class ProductModel extends Model
             'image_path'          => ($in['image_path'] ?? '') !== '' ? $in['image_path'] : null,
             'low_stock_threshold' => (int) ($in['low_stock_threshold'] ?? 10),
             'credit_limit'        => $creditLimit,
+            'tax_rate'            => $taxRate,
             'status'              => $status,
         ];
     }

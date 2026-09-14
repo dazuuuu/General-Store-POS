@@ -92,6 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = $receipt['error'];
     } else {
         $items = [];
+        $hasPurchaseSerials=false;
         foreach (($_POST['items'] ?? []) as $i => $row) {
             $name = trim((string) ($row['name'] ?? ''));
             $variant = trim((string) ($row['variant_label'] ?? ''));
@@ -100,7 +101,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $directQty = max(0, (float) ($row['quantity'] ?? 0));
             $packageCost = max(0, (float) ($row['buying_price'] ?? 0));
             $barcode = trim((string) ($row['barcode'] ?? ''));
-            $has = $name !== '' || $variant !== '' || $packageQty > 0 || $directQty > 0 || $packageCost > 0 || $barcode !== '';
+            $serialText=trim((string)($row['serials']??''));
+            $serialList=Models\ProductSerialModel::parse($serialText);
+            $hasPurchaseSerials=$hasPurchaseSerials||!empty($serialList);
+            $has = $name !== '' || $variant !== '' || $packageQty > 0 || $directQty > 0 || $packageCost > 0 || $barcode !== '' || $serialList;
             if (!$has) {
                 continue;
             }
@@ -110,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             }
             $effectiveInside = $inside > 0 ? $inside : 1.0;
-            $qty = $directQty > 0 ? $directQty : ($packageQty > 0 ? round($packageQty * $effectiveInside, 2) : 0.0);
+            $qty = $serialList?count($serialList):($directQty > 0 ? $directQty : ($packageQty > 0 ? round($packageQty * $effectiveInside, 2) : 0.0));
             $categoryId = !empty($row['category']) ? (int) $C->findOrCreate($row['category'], 'product') : 0;
             $brandId = !empty($row['brand']) ? (int) $BA->findOrCreate('brand', $row['brand']) : 0;
             $items[] = [
@@ -119,14 +123,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'category_id' => $categoryId,
                 'brand_id' => $brandId,
                 'barcode' => $barcode,
-                'package_unit' => $row['package_unit'] ?? 'bale',
-                'unit' => $row['inner_unit'] ?? 'piece',
-                'package_quantity' => $packageQty > 0 ? $packageQty : null,
-                'units_per_package' => $effectiveInside,
+                'package_unit' => $serialList?null:($row['package_unit'] ?? 'bale'),
+                'unit' => $serialList?'piece':($row['inner_unit'] ?? 'piece'),
+                'package_quantity' => $serialList?null:($packageQty > 0 ? $packageQty : null),
+                'units_per_package' => $serialList?1:$effectiveInside,
                 'quantity' => $qty,
                 'faulty_quantity' => max(0, (float) ($row['faulty_quantity'] ?? 0)),
                 'buying_price' => $packageCost,
                 'package_buying_price' => $packageCost > 0 ? $packageCost : null,
+                'tax_rate' => $row['tax_rate']??null,
+                'serial_numbers' => $serialText,
                 'image_path' => $img['path'],
                 'notes' => trim((string) ($row['remark'] ?? '')),
             ];
@@ -144,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'transfer_destination' => ($_POST['transfer_destination'] ?? '') === 'store' ? 'store' : 'shop',
             ], $items);
             if ($res['ok']) {
-                $_SESSION['flash']['success'] = 'Purchase saved. Transfer destination: ' . (($_POST['transfer_destination'] ?? '') === 'store' ? 'Store Warehouse' : 'Shop Inventory') . '.';
+                $_SESSION['flash']['success'] = 'Purchase saved. Transfer destination: ' . ($hasPurchaseSerials||($_POST['transfer_destination']??'')!=='store'?'Shop Inventory':'Store Warehouse') . '.';
                 header('Location: ' . $base . 'view.php?id=' . (int) $res['purchase_id']);
                 exit;
             }
@@ -308,6 +314,19 @@ ob_start();
           <input type="number" step="0.01" min="0" name="items[__i__][buying_price]" class="form-control form-control-sm buy-price" placeholder="0">
         </div>
         <div class="col-md-3">
+          <label class="form-label small mb-1">VAT rate <span class="text-muted">(optional)</span></label>
+          <div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" name="items[__i__][tax_rate]" class="form-control" placeholder="e.g. 16"><span class="input-group-text">%</span></div>
+        </div>
+        <?php if(TenantFeatures::enabled('serials')):?>
+        <div class="col-12">
+          <div class="border rounded p-2 bg-light">
+            <label class="form-label small fw-semibold mb-1">Serial numbers / IMEIs <span class="text-muted fw-normal">(optional — one per unit)</span></label>
+            <textarea name="items[__i__][serials]" class="form-control form-control-sm font-monospace serial-numbers" rows="4" placeholder="IMEI-001&#10;IMEI-002"></textarea>
+            <div class="form-text"><span class="serial-count">0</span> units. Serial entry automatically calculates quantity and sends this purchase directly to Shop Inventory.</div>
+          </div>
+        </div>
+        <?php endif;?>
+        <div class="col-md-3">
           <label class="form-label small mb-1">Faulty items</label>
           <input type="number" step="0.01" min="0" name="items[__i__][faulty_quantity]" class="form-control form-control-sm" value="0">
         </div>
@@ -411,7 +430,10 @@ ob_start();
     var pkgQty = parseFloat((card.querySelector('.pkg-qty') || {}).value) || 0;
     var inside = parseFloat((card.querySelector('.inside-qty') || {}).value) || 0;
     var buy = parseFloat((card.querySelector('.buy-price') || {}).value) || 0;
-    var total = (pkgQty > 0 && inside > 0) ? Math.round(pkgQty * inside * 100) / 100 : 0;
+    var serialInput=card.querySelector('.serial-numbers');
+    var serials=serialInput?Array.from(new Set(serialInput.value.split(/[\r\n,]+/).map(function(v){return v.trim();}).filter(Boolean))):[];
+    var total = serials.length?serials.length:((pkgQty > 0 && inside > 0) ? Math.round(pkgQty * inside * 100) / 100 : 0);
+    var serialCount=card.querySelector('.serial-count');if(serialCount)serialCount.textContent=serials.length;
     var totalEl = card.querySelector('.total-items');
     var qtyHidden = card.querySelector('.qty-hidden');
     if (totalEl) totalEl.textContent = String(total);
@@ -566,6 +588,8 @@ ob_start();
     renumber();
     bindTypeahead(card);
     wireBarcodeField(card);
+    var serialInput=card.querySelector('.serial-numbers');
+    if(serialInput)serialInput.addEventListener('input',function(){recalc(card);var any=Array.prototype.some.call(wrap.querySelectorAll('.serial-numbers'),function(el){return el.value.trim()!=='';});var store=document.getElementById('destStore');store.disabled=any;if(any)document.getElementById('destShop').checked=true;});
     card.querySelectorAll('.pkg-unit, .pkg-qty, .inside-qty, .buy-price').forEach(function (el) {
       el.addEventListener('input', function () { recalc(card); });
       el.addEventListener('change', function () { recalc(card); });

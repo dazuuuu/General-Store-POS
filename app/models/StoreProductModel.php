@@ -70,6 +70,7 @@ class StoreProductModel extends Model
                 'package_buying_price' => ($item['package_buying_price'] ?? '') !== '' ? max(0, (float) $item['package_buying_price']) : null,
                 'retail_price' => max(0, (float) ($item['retail_price'] ?? 0)),
                 'wholesale_price' => max(0, (float) ($item['wholesale_price'] ?? 0)),
+                'tax_rate' => ($item['tax_rate']??'')!==''?min(100,max(0,(float)$item['tax_rate'])):null,
                 'offer_price' => ($item['offer_price'] ?? '') !== '' ? max(0, (float) $item['offer_price']) : null,
                 'offer_starts_at' => $this->dateOrNull($item['offer_starts_at'] ?? null),
                 'offer_ends_at' => $this->dateOrNull($item['offer_ends_at'] ?? null),
@@ -305,7 +306,7 @@ class StoreProductModel extends Model
      * @param array $packageQuantities whole packages to move (cartons/bales)
      * @param array $transferQuantities continuous units (kg/L) to move by quantity
      */
-    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = [], array $transferQuantities = []): array
+    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = [], array $transferQuantities = [],array $taxRates=[]): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         if (!$ids) {
@@ -355,6 +356,7 @@ class StoreProductModel extends Model
                     $copy['transfer_packages'] = $pkgs;
                     $copy['package_quantity'] = $pkgs;
                     $copy['faulty_quantity'] = 0;
+                    if(($taxRates[$sid]??'')!=='')$copy['tax_rate']=min(100,max(0,(float)$taxRates[$sid]));
                     $invoiceItems[] = $copy;
                     $unitBuy = (float) $it['buying_price'];
                     $subtotal += $qty * $unitBuy;
@@ -389,6 +391,7 @@ class StoreProductModel extends Model
                 $copy['package_quantity'] = $pkgs;
                 // Sealed packages only — do not move opened/faulty units from the warehouse.
                 $copy['faulty_quantity'] = 0;
+                if(($taxRates[$sid]??'')!=='')$copy['tax_rate']=min(100,max(0,(float)$taxRates[$sid]));
                 $invoiceItems[] = $copy;
                 $pkgBuy = ($it['package_buying_price'] ?? '') !== '' && (float) $it['package_buying_price'] > 0
                     ? (float) $it['package_buying_price']
@@ -773,6 +776,7 @@ class StoreProductModel extends Model
             'package_buying_price' => $it['package_buying_price'] ?? null,
             'retail_price' => (float) $it['retail_price'],
             'wholesale_price' => (float) ($it['wholesale_price'] ?: $it['retail_price']),
+            'tax_rate' => ($it['tax_rate']??'')!==''?(float)$it['tax_rate']:null,
             'offer_price' => $it['offer_price'] ?? '',
             'offer_starts_at' => $it['offer_starts_at'] ?? '',
             'offer_ends_at' => $it['offer_ends_at'] ?? '',
@@ -868,6 +872,7 @@ class StoreProductModel extends Model
             $params[] = $it['offer_starts_at'] ?: null;
             $params[] = $it['offer_ends_at'] ?: null;
         }
+        if(($it['tax_rate']??'')!==''){$sets[]='tax_rate = ?';$params[]=min(100,max(0,(float)$it['tax_rate']));}
         $params[] = $productId;
         $params[] = $tid;
         $this->db->prepare('UPDATE products SET ' . implode(', ', $sets) . ' WHERE id = ? AND tenant_id = ?')->execute($params);
@@ -933,6 +938,7 @@ class StoreProductModel extends Model
                 package_buying_price DECIMAL(12,2) NULL,
                 retail_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
                 wholesale_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                tax_rate DECIMAL(5,2) NULL,
                 offer_price DECIMAL(12,2) NULL,
                 offer_starts_at DATETIME NULL,
                 offer_ends_at DATETIME NULL,
@@ -954,6 +960,7 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_products', 'retail_pack_price', "ALTER TABLE `store_products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `package_price`");
         $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $this->ensureColumn('store_products', 'package_buying_price', "ALTER TABLE `store_products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `buying_price`");
+        $this->ensureColumn('store_products', 'tax_rate', "ALTER TABLE `store_products` ADD COLUMN `tax_rate` DECIMAL(5,2) NULL AFTER `wholesale_price`");
         $this->ensureColumn('store_products', 'offer_price', "ALTER TABLE `store_products` ADD COLUMN `offer_price` DECIMAL(12,2) NULL AFTER `wholesale_price`");
         $this->ensureColumn('store_products', 'offer_starts_at', "ALTER TABLE `store_products` ADD COLUMN `offer_starts_at` DATETIME NULL AFTER `offer_price`");
         $this->ensureColumn('store_products', 'offer_ends_at', "ALTER TABLE `store_products` ADD COLUMN `offer_ends_at` DATETIME NULL AFTER `offer_starts_at`");

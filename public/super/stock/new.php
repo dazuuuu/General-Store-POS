@@ -120,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $packageRetail = max(0, (float) ($row['retail_pack_price'] ?? 0));
         $itemRetail = max(0, (float) ($row['selling_price'] ?? 0));
         $barcode = trim((string) ($row['barcode'] ?? ''));
+        $taxRate=($row['tax_rate']??'')!==''?min(100,max(0,(float)$row['tax_rate'])):null;
         $serialText=trim((string)($row['serials']??''));
         $serialRequested=!empty($row['serial_tracking'])||$serialText!=='';
         $serialList=$serialRequested?Models\ProductSerialModel::parse($serialText):[];
@@ -179,6 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'notes' => $lineNotes,
                     'serials' => $serialText,
                     'serialized' => $serialRequested||!empty($existing['serial_tracking']),
+                    'tax_rate' => $taxRate??($existing['tax_rate']??null),
                 ];
                 continue;
             }
@@ -214,6 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'notes' => $lineNotes,
             'serials' => $serialText,
             'serialized' => $serialRequested,
+            'tax_rate' => $taxRate,
         ];
     }
 
@@ -239,6 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'package_buying_price' => $it['package_buying_price'] ?: ($curr['package_buying_price'] ?? null),
                             'retail_price' => $it['retail_price'] > 0 ? $it['retail_price'] : ($curr['retail_price'] ?? 0),
                             'wholesale_price' => $it['wholesale_price'] > 0 ? $it['wholesale_price'] : ($curr['wholesale_price'] ?? 0),
+                            'tax_rate' => $it['tax_rate'],
                         ]));
                         if(!$editRes['ok'])throw new RuntimeException($editRes['errors']['_']??'Could not update product.');
                         $targetProductId=(int)$curr['id'];
@@ -262,6 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'buying_price' => $it['buying_price'] ?: 0,
                         'wholesale_price' => $it['wholesale_price'] ?: 0,
                         'retail_price' => $it['retail_price'] ?: 0,
+                        'tax_rate' => $it['tax_rate'],
                         'offer_price' => $it['offer_price'] ?: null,
                         'offer_starts_at' => $it['offer_starts_at'] ?: null,
                         'offer_ends_at' => $it['offer_ends_at'] ?: null,
@@ -460,7 +465,7 @@ ob_start();
       <div class="col-12 mt-2 serialStockBox">
         <div class="border rounded p-2 bg-light">
           <label class="form-check mb-0"><input class="form-check-input serialTracking" type="checkbox" name="items[__I__][serial_tracking]" value="1"> <span class="fw-semibold small">Track serial numbers / IMEI for this inventory product</span></label>
-          <div class="serialFields mt-2" style="display:none"><textarea name="items[__I__][serials]" class="form-control form-control-sm font-monospace serialNumbers" rows="4" placeholder="One serial per unit&#10;IMEI-001&#10;IMEI-002"></textarea><div class="form-text"><span class="serialCount">0</span> units. Quantity is calculated from serials. Direct-to-Shop only.</div></div>
+          <div class="serialFields mt-2"><textarea name="items[__I__][serials]" class="form-control form-control-sm font-monospace serialNumbers" rows="4" placeholder="One serial per unit&#10;IMEI-001&#10;IMEI-002"></textarea><div class="form-text"><span class="serialCount">0</span> units. Quantity is calculated from serials. Direct-to-Shop only.</div></div>
         </div>
       </div>
       <?php endif;?>
@@ -471,6 +476,10 @@ ob_start();
       <div class="col-6 col-sm-3 mt-2 newProductFields">
         <label class="form-label small mb-1 wholesaleLabel">Wholesale price per package <span class="text-muted">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="items[__I__][wholesale_price]" class="form-control form-control-sm wholesalePrice" placeholder="0">
+      </div>
+      <div class="col-6 col-sm-3 mt-2">
+        <label class="form-label small mb-1">VAT rate <span class="text-muted">(optional)</span></label>
+        <div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" name="items[__I__][tax_rate]" class="form-control" placeholder="e.g. 16"><span class="input-group-text">%</span></div>
       </div>
       <div class="col-6 col-sm-3 mt-2 newProductFields">
         <label class="form-label small mb-1 retailPackLabel">Retail price per package <span class="text-muted">(optional)</span></label>
@@ -720,11 +729,11 @@ ob_start();
       if(!serialToggle||!serialText)return;
       var values=Array.from(new Set(serialText.value.split(/[\r\n,]+/).map(function(v){return v.trim();}).filter(Boolean)));
       row.querySelector('.serialCount').textContent=values.length;
-      row.querySelector('.serialFields').style.display=serialToggle.checked?'block':'none';
+      row.querySelector('.serialFields').style.display='block';
       var qty=row.querySelector('.qty');qty.readOnly=serialToggle.checked;if(serialToggle.checked)qty.value=values.length;
       recalc();
     }
-    if(serialToggle){serialToggle.addEventListener('change',updateSerialRow);serialText.addEventListener('input',updateSerialRow);}
+    if(serialToggle){serialToggle.addEventListener('change',updateSerialRow);serialText.addEventListener('input',function(){if(this.value.trim()){serialToggle.checked=true;document.getElementById('destShop').checked=true;updateDestUI();}updateSerialRow();});}
 
     ['category', 'brand'].forEach(function (field) {
       var el = row.querySelector('[data-field="' + field + '"]');

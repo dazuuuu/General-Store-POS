@@ -156,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : ($existing['wholesale_price'] ?? 0),
+                        'tax_rate' => ($_POST['tax_rate']??'')!==''?$_POST['tax_rate']:($existing['tax_rate']??null),
                     ]));
                     if(!$editRes['ok'])throw new RuntimeException($editRes['errors']['_']??'Could not update product.');
                     $targetProductId=(int)$existing['id'];
@@ -177,6 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'buying_price' => $unitBuying,
                         'wholesale_price' => $unitWholesale,
                         'retail_price' => $sellingPrice,
+                        'tax_rate' => $_POST['tax_rate']??'',
                         'offer_price' => $_POST['offer_price'] ?? null,
                         'offer_starts_at' => $_POST['offer_starts_at'] ?? null,
                         'offer_ends_at' => $_POST['offer_ends_at'] ?? null,
@@ -215,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'buying_price' => $unitBuying > 0 ? $unitBuying : (float) ($existing['buying_price'] ?? 0),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : (float) ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : (float) ($existing['wholesale_price'] ?? 0),
+                        'tax_rate' => $_POST['tax_rate']??'',
                         'offer_price' => '',
                         'offer_starts_at' => '',
                         'offer_ends_at' => '',
@@ -242,6 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'buying_price' => $unitBuying,
                         'retail_price' => $sellingPrice,
                         'wholesale_price' => $unitWholesale,
+                        'tax_rate' => $_POST['tax_rate']??'',
                         'offer_price' => $_POST['offer_price'] ?? '',
                         'offer_starts_at' => $_POST['offer_starts_at'] ?? '',
                         'offer_ends_at' => $_POST['offer_ends_at'] ?? '',
@@ -379,7 +383,7 @@ ob_start();
             <input class="form-check-input" type="checkbox" name="serial_tracking" value="1" id="serialTracking" <?php echo !empty($_POST['serial_tracking'])?'checked':'';?>>
             <label class="form-check-label fw-semibold" for="serialTracking">This inventory product uses serial numbers / IMEI</label>
           </div>
-          <div id="serialFields" class="mt-2" style="<?php echo !empty($_POST['serial_tracking'])?'':'display:none;';?>">
+          <div id="serialFields" class="mt-2">
             <label class="form-label small">Serial numbers / IMEIs — one per unit</label>
             <textarea name="serials" id="serialNumbers" class="form-control font-monospace" rows="5" placeholder="IMEI-001&#10;IMEI-002"><?php echo htmlspecialchars($_POST['serials']??'');?></textarea>
             <div class="form-text"><span id="serialCount">0</span> sellable units. Quantity is derived from these serials to prevent stock mismatch. Available only when recording directly to Shop Inventory.</div>
@@ -413,6 +417,10 @@ ob_start();
         <label class="form-label fw-semibold" id="retailLabel">Retail price (single item) <span class="text-muted fw-normal small">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="selling_price" id="retailPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>" placeholder="0">
         <div class="form-text">Price when selling one item individually.</div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">VAT rate <span class="text-muted fw-normal small">(optional)</span></label>
+        <div class="input-group"><input type="number" step="0.01" min="0" max="100" name="tax_rate" class="form-control" value="<?php echo htmlspecialchars($_POST['tax_rate']??'');?>" placeholder="e.g. 16"><span class="input-group-text">%</span></div>
       </div>
       <div class="col-12">
         <div id="profitSummary" class="alert alert-light border small mb-0" style="display:none;"></div>
@@ -570,13 +578,13 @@ ob_start();
     } else {
       if (btnText) btnText.textContent = 'Save to Store warehouse';
     }
-    if(serialTracking){serialTracking.disabled=!isShop;if(!isShop)serialTracking.checked=false;serialFields.style.display=isShop&&serialTracking.checked?'block':'none';updateSerialQuantity();}
+    if(serialTracking){serialTracking.disabled=!isShop;if(!isShop)serialTracking.checked=false;serialFields.style.display=isShop?'block':'none';updateSerialQuantity();}
   }
   document.querySelectorAll('.dest-radio').forEach(function (r) {
     r.addEventListener('change', updateDestUI);
   });
   updateDestUI();
-  if(serialTracking){serialTracking.addEventListener('change',function(){serialFields.style.display=this.checked?'block':'none';updateSerialQuantity();});serialNumbers.addEventListener('input',updateSerialQuantity);updateSerialQuantity();}
+  if(serialTracking){serialTracking.addEventListener('change',updateSerialQuantity);serialNumbers.addEventListener('input',function(){if(this.value.trim()){serialTracking.checked=true;document.getElementById('destShop').checked=true;updateDestUI();}updateSerialQuantity();});updateSerialQuantity();}
   if (offerToggle) {
     offerToggle.addEventListener('change', function () {
       offerFields.style.display = offerToggle.checked ? 'flex' : 'none';

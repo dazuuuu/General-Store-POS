@@ -56,6 +56,8 @@ class PurchaseModel extends Model
                 'package_price' => null,
                 'retail_price' => null,
                 'retail_pack_price' => null,
+                'tax_rate' => null,
+                'serial_numbers' => null,
                 'image_path' => null,
                 'notes' => null,
             ];
@@ -65,6 +67,8 @@ class PurchaseModel extends Model
         if ($supplierId > 0 && !$this->supplierBelongsToTenant($supplierId)) {
             $supplierId = 0;
         }
+        $hasSerialized=(bool)array_filter($normalized,fn($line)=>!empty($line['serial_numbers']));
+        $destination=$hasSerialized?'shop':(($header['transfer_destination']??'')==='store'?'store':'shop');
 
         try {
             $this->db->beginTransaction();
@@ -81,7 +85,7 @@ class PurchaseModel extends Model
                 $this->dateOrNull($header['purchase_date'] ?? null),
                 $this->nullIfBlank($header['notes'] ?? null),
                 $staffId > 0 ? $staffId : null,
-                ($header['transfer_destination'] ?? '') === 'store' ? 'store' : 'shop',
+                $destination,
                 'recorded',
             ]);
             $purchaseId = (int) $this->db->lastInsertId();
@@ -94,8 +98,8 @@ class PurchaseModel extends Model
                     (tenant_id, purchase_id, name, category_id, brand_id, barcode, unit, package_unit,
                      package_quantity, units_per_package, variant_label, colors, quantity, faulty_quantity,
                      buying_price, package_buying_price, wholesale_price, package_price, retail_price,
-                     retail_pack_price, image_path, notes, status)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                     retail_pack_price, tax_rate, serial_numbers, image_path, notes, status)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
             );
             foreach ($normalized as $line) {
                 $ins->execute([
@@ -103,7 +107,7 @@ class PurchaseModel extends Model
                     $line['unit'], $line['package_unit'], $line['package_quantity'], $line['units_per_package'],
                     $line['variant_label'], $line['colors'], $line['quantity'], $line['faulty_quantity'],
                     $line['buying_price'], $line['package_buying_price'], $line['wholesale_price'],
-                    $line['package_price'], $line['retail_price'], $line['retail_pack_price'],
+                    $line['package_price'], $line['retail_price'], $line['retail_pack_price'],$line['tax_rate'],$line['serial_numbers'],
                     $line['image_path'], $line['notes'], 'pending',
                 ]);
             }
@@ -312,6 +316,7 @@ class PurchaseModel extends Model
             foreach ($rows as $row) {
                 $id = (int) $row['id'];
                 $over = is_array($selections[$id] ?? null) ? $selections[$id] : [];
+                if(!empty($row['serial_numbers']))throw new \RuntimeException('Serialized purchase items must transfer directly to Shop Inventory.');
                 $split = $this->splitTransferQuantity($row, $over);
                 if ($split['transfer_qty'] <= 0) {
                     continue;
@@ -471,6 +476,7 @@ class PurchaseModel extends Model
         $store=new StoreProductModel($this->db);
         $products=new ProductModel($this->db);
         $tierModel=new PriceTierModel($this->db);
+        $serialModel=new ProductSerialModel($this->db);
         try{
             $this->db->beginTransaction();
             $in=implode(',',array_fill(0,count($ids),'?'));
@@ -483,8 +489,11 @@ class PurchaseModel extends Model
             foreach($rows as $row){
                 $id=(int)$row['id'];$over=(array)($selections[$id]??[]);$split=$this->splitTransferQuantity($row,$over);
                 if($split['transfer_qty']<=0)continue;
+                $serials=ProductSerialModel::parse((string)($row['serial_numbers']??''));
+                if($serials&&(abs($split['transfer_qty']-(float)$row['quantity'])>.0001||count($serials)!==(int)round($split['transfer_qty'])))throw new \RuntimeException('Serialized purchase items must transfer in full and have one serial per unit.');
                 $item=$this->mergeTransferOverrides($row,$over,$split['transfer_qty'],$split['transfer_packages']);
                 $productId=$store->upsertDirectInventory($products,$item);
+                if($serials){$serialResult=$serialModel->add($productId,implode("\n",$serials),false);if(!$serialResult['ok'])throw new \RuntimeException($serialResult['error']);}
                 $tiers=$this->normalizeTierInput($over['tiers']??[]);
                 if($tiers)$tierModel->replaceForProduct($productId,$tiers);
                 $vals=[
@@ -715,6 +724,8 @@ class PurchaseModel extends Model
             'package_buying_price' => $pkgBuy,
             'retail_price' => $retail,
             'wholesale_price' => $wholesale,
+            'tax_rate' => ($over['tax_rate']??'')!==''?min(100,max(0,(float)$over['tax_rate'])):(($row['tax_rate']??'')!==''?(float)$row['tax_rate']:null),
+            'serial_numbers' => trim((string)($row['serial_numbers']??'')),
             'image_path' => trim((string) ($row['image_path'] ?? '')),
             'notes' => trim((string) ($over['notes'] ?? $row['notes'] ?? $row['shop_name'] ?? '')),
         ];
@@ -777,7 +788,9 @@ class PurchaseModel extends Model
         $variant = trim((string) ($item['variant_label'] ?? ''));
         $inside = ($item['units_per_package'] ?? '') !== '' ? max(0.01, (float) $item['units_per_package']) : 1.0;
         $pkgQty = ($item['package_quantity'] ?? '') !== '' ? max(0, (float) $item['package_quantity']) : null;
+        $serialNumbers=ProductSerialModel::parse((string)($item['serial_numbers']??$item['serials']??''));
         $qty = (float) ($item['quantity'] ?? 0);
+        if($serialNumbers){$qty=(float)count($serialNumbers);$inside=1.0;$pkgQty=null;}
         if ($qty <= 0 && $pkgQty !== null && $pkgQty > 0) {
             $qty = round($pkgQty * $inside, 2);
         }
@@ -808,7 +821,7 @@ class PurchaseModel extends Model
             || $unitBuy > 0 || ($pkgBuy !== null && $pkgBuy > 0)
             || ($packagePrice !== null && $packagePrice > 0) || ($retailPack !== null && $retailPack > 0)
             || ($retail !== null && $retail > 0) || ($wholesale !== null && $wholesale > 0)
-            || trim((string) ($item['barcode'] ?? '')) !== '';
+            || trim((string) ($item['barcode'] ?? '')) !== '' || $serialNumbers;
         if (!$hasContent) {
             return null;
         }
@@ -824,6 +837,7 @@ class PurchaseModel extends Model
         $units = ProductModel::UNITS;
         $unit = in_array($item['unit'] ?? '', $units, true) ? $item['unit'] : 'piece';
         $packageUnit = in_array($item['package_unit'] ?? '', $units, true) ? $item['package_unit'] : null;
+        if($serialNumbers){$unit='piece';$packageUnit=null;}
         if ($packageUnit === 'piece') {
             $packageUnit = null;
         }
@@ -847,6 +861,8 @@ class PurchaseModel extends Model
             'package_price' => $packagePrice,
             'retail_price' => $retail,
             'retail_pack_price' => $retailPack,
+            'tax_rate' => ($item['tax_rate']??'')!==''?min(100,max(0,(float)$item['tax_rate'])):null,
+            'serial_numbers' => $serialNumbers?implode("\n",$serialNumbers):null,
             'image_path' => $this->nullIfBlank($item['image_path'] ?? null),
             'notes' => $this->nullIfBlank($item['notes'] ?? $item['remark'] ?? null),
         ];
@@ -900,6 +916,8 @@ class PurchaseModel extends Model
                 package_price DECIMAL(12,2) NULL,
                 retail_price DECIMAL(12,2) NULL,
                 retail_pack_price DECIMAL(12,2) NULL,
+                tax_rate DECIMAL(5,2) NULL,
+                serial_numbers TEXT NULL,
                 image_path VARCHAR(255) NULL,
                 notes VARCHAR(255) NULL,
                 status ENUM('pending','transferred') NOT NULL DEFAULT 'pending',
@@ -912,6 +930,7 @@ class PurchaseModel extends Model
                 KEY idx_purchase_items_name (tenant_id, name)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
+        foreach(['tax_rate'=>"ALTER TABLE purchase_items ADD COLUMN tax_rate DECIMAL(5,2) NULL AFTER retail_pack_price",'serial_numbers'=>"ALTER TABLE purchase_items ADD COLUMN serial_numbers TEXT NULL AFTER tax_rate"] as $column=>$sql){try{$this->db->query("SELECT `$column` FROM purchase_items LIMIT 1");}catch(\PDOException $e){$this->db->exec($sql);}}
     }
 
     private function ensureTable(string $table, string $sql): void

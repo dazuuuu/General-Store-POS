@@ -101,6 +101,7 @@ ob_start();
           $availQty = (float) ($it['quantity'] ?? 0);
           $shop = $it['shop_name'] ?: ($it['supplier_name'] ?: '—');
           $isContinuous = Models\ProductModel::isContinuousUnit($innerUnit);
+          $serialCount=count(Models\ProductSerialModel::parse((string)($it['serial_numbers']??'')));
       ?>
       <div class="small fw-semibold mb-1 text-<?php echo ($it['transfer_destination']??'shop')==='store'?'warning':'success';?>">
         Destination: <?php echo ($it['transfer_destination']??'shop')==='store'?'Store Warehouse':'Shop Inventory';?>
@@ -129,14 +130,15 @@ ob_start();
                 ? htmlspecialchars(rtrim(rtrim(number_format($pkgQty, 2), '0'), '.') . ' ' . $pkgUnit . ' × ' . rtrim(rtrim(number_format($inside, 2), '0'), '.') . ' ' . $innerUnit)
                 : htmlspecialchars(rtrim(rtrim(number_format($availQty, 2), '0'), '.') . ' ' . $innerUnit); ?>
               · Cost <?php echo $pkgBuy > 0 ? ('KES ' . number_format($pkgBuy, 0) . '/' . $pkgUnit) : ('KES ' . number_format($unitBuy, 2) . '/' . $innerUnit); ?>
+              <?php if($serialCount):?> · <strong><?php echo $serialCount;?> serials / IMEIs</strong><?php endif;?>
             </div>
           </div>
         </div>
         <div class="row g-2 transfer-fields" style="opacity:.55;">
           <div class="col-6 col-md-3">
             <label class="form-label small mb-1">Transfer qty (<?php echo htmlspecialchars($innerUnit); ?>)</label>
-            <input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $availQty); ?>" name="lines[<?php echo $id; ?>][transfer_quantity]" class="form-control form-control-sm f-xfer-qty" placeholder="<?php echo htmlspecialchars(rtrim(rtrim(number_format($availQty, 2), '0'), '.') ?: '0'); ?>" value="">
-            <div class="form-text">Leave blank to move all <?php echo htmlspecialchars(rtrim(rtrim(number_format($availQty, 2), '0'), '.')); ?> <?php echo htmlspecialchars($innerUnit); ?>.</div>
+            <input type="number" step="0.01" min="0" max="<?php echo htmlspecialchars((string) $availQty); ?>" name="lines[<?php echo $id; ?>][transfer_quantity]" class="form-control form-control-sm f-xfer-qty" placeholder="<?php echo htmlspecialchars(rtrim(rtrim(number_format($availQty, 2), '0'), '.') ?: '0'); ?>" value="" <?php echo $serialCount?'disabled':'';?>>
+            <div class="form-text"><?php echo $serialCount?'Serialized stock transfers together in full.':'Leave blank to move all '.htmlspecialchars(rtrim(rtrim(number_format($availQty, 2), '0'), '.')).' '.htmlspecialchars($innerUnit).'.';?></div>
           </div>
           <?php if ($pkgQty > 0): ?>
           <div class="col-6 col-md-3">
@@ -159,6 +161,10 @@ ob_start();
           <div class="col-6 col-md-3">
             <label class="form-label small mb-1">Wholesale / <?php echo htmlspecialchars($innerUnit); ?></label>
             <input type="number" step="0.01" min="0" name="lines[<?php echo $id; ?>][wholesale_price]" class="form-control form-control-sm f-ws-item" placeholder="optional" value="<?php echo htmlspecialchars((string) ($it['wholesale_price'] ?? '')); ?>">
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">VAT rate</label>
+            <div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" name="lines[<?php echo $id;?>][tax_rate]" class="form-control" value="<?php echo htmlspecialchars((string)($it['tax_rate']??''));?>" placeholder="optional"><span class="input-group-text">%</span></div>
           </div>
           <div class="col-12">
             <div class="border rounded p-2" style="background:#fafbfc;border-color:#e2e8f0!important;">
