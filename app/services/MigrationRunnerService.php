@@ -28,8 +28,8 @@ class MigrationRunnerService
         if(stripos($sql,'DELIMITER')!==false)throw new RuntimeException('DELIMITER migrations must be run from the deployment CLI.');
         $ran=0;$skipped=0;
         foreach($this->split($sql) as $statement){
-            try{$this->db->exec($statement);$ran++;}
-            catch(PDOException $e){$code=(int)($e->errorInfo[1]??0);if(in_array($code,[1050,1060,1061,1062,1091,1826],true)){$skipped++;continue;}throw $e;}
+            try{$this->executeStatement($statement);$ran++;}
+            catch(PDOException $e){$code=(int)($e->errorInfo[1]??0);if(in_array($code,[1050,1060,1061,1062,1091,1826],true)){$skipped++;continue;}throw new RuntimeException($name.' failed: '.$e->getMessage(),0,$e);}
         }
         $this->db->prepare('INSERT INTO platform_migrations(migration,executed_by) VALUES (?,?) ON DUPLICATE KEY UPDATE executed_by=VALUES(executed_by),executed_at=NOW()')->execute([$name,$actorId?:null]);
         return ['ran'=>$ran,'skipped'=>$skipped];
@@ -79,10 +79,18 @@ class MigrationRunnerService
         if(stripos($sql,'DELIMITER')!==false)throw new RuntimeException('The schema contains unsupported DELIMITER statements.');
         $ran=0;$skipped=0;
         foreach($this->split($sql) as $statement){
-            try{$this->db->exec($statement);$ran++;}
+            try{$this->executeStatement($statement);$ran++;}
             catch(PDOException $e){$code=(int)($e->errorInfo[1]??0);if(in_array($code,[1050,1060,1061,1062,1091,1826],true)){$skipped++;continue;}throw $e;}
         }
         return ['ran'=>$ran,'skipped'=>$skipped];
+    }
+
+    private function executeStatement(string $sql): void
+    {
+        $statement=$this->db->prepare($sql);$statement->execute();
+        try{while($statement->nextRowset()){}}
+        catch(PDOException $e){if((int)($e->errorInfo[1]??0)!==0)throw $e;}
+        $statement->closeCursor();
     }
 
     private function split(string $sql): array
