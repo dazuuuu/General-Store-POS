@@ -3,7 +3,7 @@
   "short_name": "Shop POS",
   "description": "General shop POS — sales, stock, invoices, receipts, and loyalty.",
   "id": "./",
-  "start_url": "./auth/staff-login.php",
+  "start_url": "./admin/",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

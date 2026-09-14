@@ -13,7 +13,13 @@ class TenantModel extends Model
 
     public function create(string $name, string $slug): int
     {
-        return $this->insert(['name' => $name, 'slug' => $slug, 'status' => 'active']);
+        $id=$this->insert(['name' => $name, 'slug' => $slug, 'status' => 'active']);
+        // New businesses start with only their dashboard. Support enables the
+        // pages/modules selected for that account after owner creation.
+        try{$this->db->prepare('UPDATE tenants SET enabled_modules=?,enabled_pages=?,settings_revision=1 WHERE id=?')->execute([
+            json_encode([\TenantFeatures::VERSION_MARKER]),json_encode([\TenantFeatures::PAGE_VERSION_MARKER]),$id,
+        ]);}catch(\PDOException $ignored){}
+        return $id;
     }
 
     public function setOwner(int $tenantId, int $userId): bool
@@ -28,7 +34,7 @@ class TenantModel extends Model
             'name', 'logo_path', 'currency', 'phone', 'address', 'po_box', 'business_email', 'receipt_footer', 'kra_pin',
             'payment_credentials', 'payment_methods_json',
             'vat_rate', 'vat_inclusive', 'loyalty_points_per_kes', 'loyalty_kes_per_point',
-            'low_stock_alert_enabled', 'product_commission_enabled', 'enabled_modules', 'offline_enabled',
+            'low_stock_alert_enabled', 'product_commission_enabled', 'enabled_modules', 'enabled_pages', 'offline_enabled','settings_revision',
         ];
         $clean = array_intersect_key($data, array_flip($allowed));
         if (!$clean) {
@@ -53,6 +59,8 @@ class TenantModel extends Model
             'business_email' => "ALTER TABLE `tenants` ADD COLUMN `business_email` VARCHAR(190) NULL AFTER `po_box`",
             'enabled_modules' => "ALTER TABLE `tenants` ADD COLUMN `enabled_modules` TEXT NULL AFTER `payment_methods_json`",
             'offline_enabled' => "ALTER TABLE `tenants` ADD COLUMN `offline_enabled` TINYINT(1) NOT NULL DEFAULT 0 AFTER `enabled_modules`",
+            'enabled_pages' => "ALTER TABLE `tenants` ADD COLUMN `enabled_pages` TEXT NULL AFTER `enabled_modules`",
+            'settings_revision' => "ALTER TABLE `tenants` ADD COLUMN `settings_revision` INT UNSIGNED NOT NULL DEFAULT 1 AFTER `offline_enabled`",
         ];
         foreach ($checks as $column => $sql) {
             try {

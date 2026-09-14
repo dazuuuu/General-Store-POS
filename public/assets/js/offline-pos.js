@@ -6,6 +6,7 @@
   function get(store,key){return db().then(function(d){return new Promise(function(ok,no){var r=d.transaction(store).objectStore(store).get(key);r.onsuccess=function(){ok(r.result)};r.onerror=function(){no(r.error)};});});}
   function all(store){return db().then(function(d){return new Promise(function(ok,no){var r=d.transaction(store).objectStore(store).getAll();r.onsuccess=function(){ok(r.result||[])};r.onerror=function(){no(r.error)};});});}
   function del(store,key){return db().then(function(d){var t=d.transaction(store,'readwrite');t.objectStore(store).delete(key);});}
+  function clear(store){return db().then(function(d){return new Promise(function(ok,no){var r=d.transaction(store,'readwrite').objectStore(store).clear();r.onsuccess=function(){ok();};r.onerror=function(){no(r.error);};});});}
   function digest(pin,salt){var enc=new TextEncoder();return crypto.subtle.importKey('raw',enc.encode(pin),'PBKDF2',false,['deriveBits']).then(function(key){return crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(salt),iterations:200000,hash:'SHA-256'},key,256);}).then(function(x){return Array.from(new Uint8Array(x)).map(function(b){return b.toString(16).padStart(2,'0')}).join('');});}
   function uuid(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16);});}
   var api={
@@ -15,6 +16,7 @@
     refreshCatalog:function(){return get('state','session').then(function(s){if(!s||!s.catalog_url||!navigator.onLine)return;return fetch(s.catalog_url,{credentials:'same-origin'}).then(function(r){if(!r.ok)throw Error('catalog');return r.json();}).then(function(data){return db().then(function(d){var t=d.transaction('catalog','readwrite'),os=t.objectStore('catalog');os.clear();(data.products||[]).forEach(function(p){os.put(p);});return put('state',data,'catalog_meta');});});}).catch(function(){});},
     queueSale:function(payload){payload.client_uuid=payload.client_uuid||uuid();payload.queued_at=new Date().toISOString();payload.sync_status='pending';return put('outbox',payload);},
     sync:function(){if(!navigator.onLine)return Promise.resolve();return Promise.all([get('state','session'),all('outbox')]).then(function(x){var s=x[0],rows=x[1];if(!s||!s.sync_url)return;return rows.reduce(function(chain,row){return chain.then(function(){return fetch(s.sync_url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)}).then(function(r){if(r.status===401||r.status===403)throw Error('login');return r.json();}).then(function(result){if(result.ok)return del('outbox',row.client_uuid);throw Error(result.error||'sync');});});},Promise.resolve());}).then(api.refreshCatalog).catch(function(){});},
+    revokeOfflineAccess:function(){return Promise.all([del('state','candidate'),del('state','offline_login'),del('state','session'),clear('catalog')]).catch(function(){});},
     pending:function(){return all('outbox');}
   };
   w.OfflinePOS=api;w.addEventListener('online',api.sync);

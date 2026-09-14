@@ -15,6 +15,7 @@ $__authLogo   = Branding::tenantLogo($__authTenant);
     <title><?php echo htmlspecialchars($page_title ?? 'Admin'); ?> — <?php echo htmlspecialchars($__authShop); ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <?php if(!empty($__authTenant['offline_enabled']))include __DIR__.'/../../components/pwa_head.php';?>
     <style>
         :root{ --pos-green:#16a34a; --pos-green-dark:#15803d; --pos-green-light:#f0fdf4; --pos-bg:#f7f7fb; --pos-ink:#1f2330; }
         *{box-sizing:border-box;margin:0;padding:0}
@@ -57,6 +58,7 @@ $__authLogo   = Branding::tenantLogo($__authTenant);
         .auth-foot{text-align:center;margin-top:18px;font-size:.85rem;color:#7a7f8c}
         .auth-foot a{color:var(--pos-green);text-decoration:none;font-weight:600}
         .auth-foot a:hover{text-decoration:underline}
+        .pwa-install-banner{position:fixed;left:16px;top:16px;z-index:1000;background:#fff;border:1px solid #d1fae5;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.12);padding:10px 12px;display:none;align-items:center;gap:10px;max-width:280px}
 
         @media(max-width:480px){
           .auth-head{padding:24px 24px 0}
@@ -65,6 +67,7 @@ $__authLogo   = Branding::tenantLogo($__authTenant);
     </style>
 </head>
 <body>
+    <?php if(!empty($__authTenant['offline_enabled'])):?><div class="pwa-install-banner" id="pwaInstallBanner"><i class="fas fa-download text-success"></i><div class="small"><strong>Install this POS</strong><span class="d-block text-muted">Open it quickly and use enabled offline features.</span></div><button type="button" class="btn btn-success btn-sm" id="pwaInstallButton">Install</button></div><?php endif;?>
     <div class="auth-card">
         <div class="auth-head">
             <div class="logo-icon">
@@ -78,5 +81,8 @@ $__authLogo   = Branding::tenantLogo($__authTenant);
             <?php echo $content ?? ''; ?>
         </div>
     </div>
+<?php if(!empty($__authTenant['offline_enabled'])):?><script>
+(function(){if(matchMedia('(display-mode: standalone)').matches||navigator.standalone)return;var prompt,banner=document.getElementById('pwaInstallBanner'),button=document.getElementById('pwaInstallButton');addEventListener('beforeinstallprompt',function(e){e.preventDefault();prompt=e;banner.style.display='flex';});button.addEventListener('click',function(){if(!prompt)return;prompt.prompt();prompt.userChoice.finally(function(){prompt=null;banner.style.display='none';});});addEventListener('appinstalled',function(){banner.style.display='none';});})();
+</script><?php endif;?>
 </body>
 </html>

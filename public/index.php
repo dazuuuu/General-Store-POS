@@ -28,7 +28,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $stmt = $pdo->prepare(
         "SELECT u.*, r.role_name FROM users u JOIN roles r ON r.id = u.role_id
-          WHERE r.role_name = 'staff' AND u.is_active = 1 AND u.pin_hash IS NOT NULL"
+           JOIN tenants t ON t.id=u.tenant_id AND t.status='active'
+      LEFT JOIN branches b ON b.id=u.branch_id AND b.tenant_id=u.tenant_id
+          WHERE r.role_name = 'staff' AND u.is_active = 1 AND u.pin_hash IS NOT NULL
+            AND (u.branch_id IS NULL OR b.is_active=1)"
     );
     $stmt->execute();
     $user = null;

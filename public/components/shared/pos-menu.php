@@ -156,3 +156,13 @@ try {
   <i class="fas fa-key"></i><span>Change PIN</span>
 </a>
 <?php endif; ?>
+<script>
+(function(){
+  var disabled=<?php echo json_encode(TenantFeatures::disabledRouteFragments());?>,root=document.currentScript.parentElement;
+  root.querySelectorAll('a[href]').forEach(function(a){
+    var path='';try{path=(new URL(a.href,location.href)).pathname.toLowerCase();}catch(e){}
+    if(disabled.some(function(fragment){return path.indexOf(fragment)!==-1;}))a.remove();
+  });
+  root.querySelectorAll('[data-nav-group]').forEach(function(group){if(!group.querySelector('a[href]'))group.remove();});
+})();
+</script>

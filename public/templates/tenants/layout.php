@@ -75,6 +75,7 @@ $shopName = $__tenant['name'] ?? 'My Shop';
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <?php if(TenantFeatures::offlineEnabled()):?><script>window.addEventListener('load',function(){window.OfflinePOS&&OfflinePOS.provision(<?php echo json_encode(['tenant_id'=>TenantContext::tenantId(),'user_id'=>TenantContext::userId(),'username'=>$_SESSION['username']??'Owner','role'=>TenantContext::role(),'dashboard_url'=>public_url('super/dashboard/'),'catalog_url'=>public_url('api/sync/catalog.php'),'sync_url'=>public_url('api/sync/push.php')]);?>);});</script><?php endif;?>
+<script>window.TenantSettingsSyncConfig=<?php echo json_encode(['url'=>public_url('api/tenant/settings.php'),'loginUrl'=>public_url('auth/login.php?locked=1'),'revision'=>TenantFeatures::revision()]);?>;</script><script src="<?php echo public_url('assets/js/tenant-settings-sync.js');?>"></script>
 <?php echo $extra_js ?? ''; ?>
 </body>
 </html>

@@ -11,6 +11,7 @@
 // once you're done setting up a new install.
 
 require_once __DIR__ . '/../../app/app.php';
+PageGuard::platform();
 
 $schemaFile = ROOT_PATH . '/databases/full_schema.sql';
 $error = '';
