@@ -3,8 +3,7 @@
 // command-line access is inconvenient. Migration execution now lives only in
 // the authenticated developer support portal.
 require_once __DIR__ . '/../app/app.php';
-PageGuard::platform();
-header('Location: '.public_url('platform/migrations/'));
+header('Location: '.public_url('domain/support/migrations.php'));
 exit;
 
 $page_title = 'Run migrations';

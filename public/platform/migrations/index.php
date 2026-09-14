@@ -1,5 +1,7 @@
 <?php
-require_once __DIR__.'/../../../app/app.php';PageGuard::platform(Capabilities::PLATFORM_TENANTS);$runner=new MigrationRunnerService(Database::pdo());
+require_once __DIR__.'/../../../app/app.php';
+if(empty($supportRouteMode)){header('Location: '.public_url('domain/support/migrations.php'));exit;}
+SupportGuard::auth();$runner=new MigrationRunnerService(Database::pdo());
 $_SESSION['migration_csrf']=$_SESSION['migration_csrf']??bin2hex(random_bytes(24));$error='';$result='';
 if($_SERVER['REQUEST_METHOD']==='POST'){
   if(!hash_equals((string)$_SESSION['migration_csrf'],(string)($_POST['csrf']??''))){http_response_code(419);exit('Migration form expired.');}

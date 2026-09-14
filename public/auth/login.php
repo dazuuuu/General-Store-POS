@@ -18,6 +18,9 @@ if (!empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified'])) {
         header('Location: ' . public_url('super/dashboard/'));
         exit;
     }
+    if($sessionRole==='platform_admin'){
+        header('Location: '.public_url('domain/support/dashboard.php'));exit;
+    }
     // Unknown/empty role — broken session. Clear it and fall through to login.
     unset(
         $_SESSION['logged_in'], $_SESSION['otp_verified'], $_SESSION['user_id'],
@@ -71,9 +74,9 @@ $verdict = AccountGuard::evaluate($user);
                 exit;
             }
 
-            $dest = TenantContext::isPlatformAdmin()
-                ? public_url('domain/manage/')
-                : (($user['role_name'] === 'staff') ? public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/') : public_url('super/dashboard/'));
+            $dest = ($user['role_name']??'')==='platform_admin'
+                ? public_url('domain/support/dashboard.php')
+                : (TenantContext::isPlatformAdmin()?public_url('domain/support/'): (($user['role_name'] === 'staff') ? public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/') : public_url('super/dashboard/')));
             header('Location: ' . $dest);
             exit;
         }

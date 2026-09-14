@@ -1,0 +1,28 @@
+<?php
+require_once __DIR__.'/../../../app/app.php';
+$db=Database::pdo();$accounts=new SupportAccountService($db);$auth=new AuthService($db);$hasSupport=$accounts->exists();
+if($hasSupport&&!empty($_SESSION['logged_in'])&&!empty($_SESSION['otp_verified'])&&TenantContext::role()==='platform_admin'){header('Location: '.public_url('domain/support/dashboard.php'));exit;}
+$_SESSION['support_setup_csrf']=$_SESSION['support_setup_csrf']??bin2hex(random_bytes(24));$error='';$values=['name'=>'','email'=>''];
+if($_SERVER['REQUEST_METHOD']==='POST'){
+  $action=(string)($_POST['action']??'login');
+  if(!$hasSupport&&$action==='setup'){
+    if(!hash_equals((string)$_SESSION['support_setup_csrf'],(string)($_POST['csrf']??''))){http_response_code(419);exit('Setup form expired.');}
+    $values=['name'=>trim((string)($_POST['name']??'')),'email'=>trim((string)($_POST['email']??''))];
+    if((string)($_POST['password']??'')!==(string)($_POST['password_confirmation']??''))$error='Passwords do not match.';
+    else{$created=$accounts->create($values['name'],$values['email'],(string)($_POST['password']??''));if(!$created['ok'])$error=implode(' ',array_values($created['errors']));else{
+      $user=$auth->findByEmail($values['email']);session_regenerate_id(true);TenantContext::establish($db,$user);$_SESSION['username']=$user['username'];$_SESSION['logged_in']=true;$_SESSION['otp_verified']=true;$_SESSION['support_account']=true;header('Location: '.public_url('domain/support/dashboard.php'));exit;
+    }}
+  }elseif($hasSupport&&$action==='login'){
+    $values['email']=trim((string)($_POST['email']??''));$user=$auth->findByEmail($values['email']);
+    if(!$user||!$accounts->isSupportUser($user)||!$auth->verifyPassword($user,(string)($_POST['password']??''))){$auth->logAttempt($values['email'],$_SERVER['REMOTE_ADDR']??null);$error='Invalid support email or password.';}
+    elseif(!AccountGuard::evaluate($user)['ok'])$error='This support account is inactive.';
+    else{session_regenerate_id(true);TenantContext::establish($db,$user);$_SESSION['username']=$user['username'];$_SESSION['logged_in']=true;$_SESSION['otp_verified']=true;$_SESSION['support_account']=true;header('Location: '.public_url('domain/support/dashboard.php'));exit;}
+  }
+}
+$title=$hasSupport?'Support team login':'Create the first support account';
+?><!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?php echo htmlspecialchars($title);?></title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"><style>body{min-height:100vh;background:#111827;display:grid;place-items:center;padding:24px}.support-card{width:100%;max-width:480px;border:0;border-radius:20px;box-shadow:0 24px 70px rgba(0,0,0,.3)}.brand-icon{width:58px;height:58px;border-radius:16px;background:#111827;color:#fff;display:grid;place-items:center;font-size:24px;margin:auto}.form-control{padding:.75rem;border-radius:10px}</style></head><body>
+<main class="card support-card"><div class="card-body p-4 p-md-5"><div class="text-center mb-4"><div class="brand-icon mb-3"><i class="fas fa-headset"></i></div><h1 class="h4 fw-bold mb-1">Developer Support</h1><p class="text-muted mb-0"><?php echo $hasSupport?'Sign in with your support-team email.':'Secure this portal before managing any POS owner.';?></p></div>
+<?php if($error):?><div class="alert alert-danger"><?php echo htmlspecialchars($error);?></div><?php endif;?>
+<?php if(!$hasSupport):?><div class="alert alert-warning small"><strong>First-time setup:</strong> this account controls owner access, features, pages and database migrations.</div><form method="post"><input type="hidden" name="action" value="setup"><input type="hidden" name="csrf" value="<?php echo htmlspecialchars($_SESSION['support_setup_csrf']);?>"><div class="mb-3"><label class="form-label">Support team / account name</label><input class="form-control" name="name" required value="<?php echo htmlspecialchars($values['name']);?>" placeholder="e.g. POS Support Team"></div><div class="mb-3"><label class="form-label">Support email</label><input class="form-control" type="email" name="email" required value="<?php echo htmlspecialchars($values['email']);?>" autocomplete="email"></div><div class="mb-3"><label class="form-label">Password</label><input class="form-control" type="password" name="password" required minlength="10" autocomplete="new-password"><div class="form-text">At least 10 characters.</div></div><div class="mb-4"><label class="form-label">Confirm password</label><input class="form-control" type="password" name="password_confirmation" required minlength="10" autocomplete="new-password"></div><button class="btn btn-dark w-100 py-2">Create support account</button></form>
+<?php else:?><form method="post"><input type="hidden" name="action" value="login"><div class="mb-3"><label class="form-label">Support email</label><input class="form-control" type="email" name="email" required value="<?php echo htmlspecialchars($values['email']);?>" autocomplete="email"></div><div class="mb-4"><label class="form-label">Password</label><input class="form-control" type="password" name="password" required autocomplete="current-password"></div><button class="btn btn-dark w-100 py-2">Sign in to support portal</button><div class="text-center mt-3"><a href="<?php echo public_url('auth/forgot-password.php');?>" class="small">Forgot support password?</a></div></form><?php endif;?>
+</div></main></body></html>

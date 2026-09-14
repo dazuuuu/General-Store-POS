@@ -1,6 +1,8 @@
 <?php
-require_once __DIR__.'/../../../app/app.php';PageGuard::platform();$db=Database::pdo();$support=new TenantSupportService($db);
-if(!$support->schemaReady()){$_SESSION['flash']['error']='Run support portal migrations first.';header('Location: '.public_url('platform/migrations/'));exit;}
+require_once __DIR__.'/../../../app/app.php';
+if(empty($supportRouteMode)){header('Location: '.public_url('domain/support/business.php'.(!empty($_GET['id'])?'?id='.(int)$_GET['id']:'')));exit;}
+SupportGuard::auth();$db=Database::pdo();$support=new TenantSupportService($db);
+if(!$support->schemaReady()){$_SESSION['flash']['error']='Run support portal migrations first.';header('Location: '.public_url('domain/support/migrations.php'));exit;}
 $id=(int)($_GET['id']??$_POST['tenant_id']??0);$tenant=$support->tenant($id);if(!$tenant){http_response_code(404);exit('Business account not found.');}
 $_SESSION['support_csrf']=$_SESSION['support_csrf']??bin2hex(random_bytes(24));$error='';
 if($_SERVER['REQUEST_METHOD']==='POST'){
@@ -10,14 +12,14 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     if($action==='suspend'||$action==='reopen')$support->setStatus($id,$action==='reopen'?'active':'suspended',(int)TenantContext::userId());
     else $support->saveAccess($id,(array)($_POST['modules']??[]),(array)($_POST['pages']??[]),!empty($_POST['offline_enabled']),(int)TenantContext::userId());
     $_SESSION['flash']['success']=$action==='suspend'?'Business, staff portals and branches closed.':($action==='reopen'?'Business, staff portals and branches reopened.':'Business access settings saved. Online devices will refresh automatically.');
-    header('Location: '.public_url('platform/tenants/edit.php?id='.$id));exit;
+    header('Location: '.public_url('domain/support/business.php?id='.$id));exit;
   }catch(Throwable $e){$error=$e->getMessage();}
 }
 $tenant=$support->tenant($id);$enabledModules=json_decode((string)($tenant['enabled_modules']??''),true);if(!is_array($enabledModules))$enabledModules=array_keys(TenantFeatures::MODULES);
 $enabledPages=json_decode((string)($tenant['enabled_pages']??''),true);if(!is_array($enabledPages))$enabledPages=array_keys(TenantFeatures::PAGES);
 $users=$db->prepare("SELECT u.username,u.email,u.is_active,r.role_name,b.title branch_name FROM users u LEFT JOIN roles r ON r.id=u.role_id LEFT JOIN branches b ON b.id=u.branch_id WHERE u.tenant_id=? ORDER BY u.id");$users->execute([$id]);$users=$users->fetchAll();
 $page_title='Manage '.$tenant['name'];ob_start();?>
-<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4"><div><a class="small text-decoration-none" href="<?php echo public_url('platform/tenants/');?>">← Businesses</a><h1 class="h4 fw-bold mt-2 mb-1"><?php echo htmlspecialchars($tenant['name']);?></h1><p class="text-muted mb-0"><?php echo htmlspecialchars($tenant['owner_email']??'No owner assigned');?> · <?php echo (int)$tenant['user_count'];?> users · <?php echo (int)$tenant['branch_count'];?> branches</p></div><span class="badge fs-6 <?php echo $tenant['status']==='active'?'bg-success':'bg-danger';?>"><?php echo htmlspecialchars(ucfirst($tenant['status']));?></span></div>
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4"><div><a class="small text-decoration-none" href="<?php echo public_url('domain/support/businesses.php');?>">← Businesses</a><h1 class="h4 fw-bold mt-2 mb-1"><?php echo htmlspecialchars($tenant['name']);?></h1><p class="text-muted mb-0"><?php echo htmlspecialchars($tenant['owner_email']??'No owner assigned');?> · <?php echo (int)$tenant['user_count'];?> users · <?php echo (int)$tenant['branch_count'];?> branches</p></div><span class="badge fs-6 <?php echo $tenant['status']==='active'?'bg-success':'bg-danger';?>"><?php echo htmlspecialchars(ucfirst($tenant['status']));?></span></div>
 <?php if($error):?><div class="alert alert-danger"><?php echo htmlspecialchars($error);?></div><?php endif;?>
 <form method="post" data-support-sync><input type="hidden" name="tenant_id" value="<?php echo $id;?>"><input type="hidden" name="csrf" value="<?php echo htmlspecialchars($_SESSION['support_csrf']);?>"><input type="hidden" name="action" value="save_access">
 <div class="card border-0 shadow-sm mb-4"><div class="card-body p-4"><h2 class="h6 fw-bold">Connection and installation</h2><label class="form-check border rounded p-3 ps-5"><input class="form-check-input" type="checkbox" name="offline_enabled" value="1" <?php echo !empty($tenant['offline_enabled'])?'checked':'';?>><strong>Online + Offline installed POS</strong><small class="d-block text-muted">Allows local login/sales while disconnected. Support changes apply when the device reconnects.</small></label></div></div>
