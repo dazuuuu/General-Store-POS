@@ -91,7 +91,7 @@ class PageGuard
             exit;
         }
         $path=strtolower((string)(parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)??''));
-        $moduleRoutes=['/purchases/'=>'purchases','/store/'=>'store','/returns/'=>'returns','/services/'=>'services','/payroll/'=>'payroll','/salary/'=>'payroll','/commissions/'=>'commissions','/menu/'=>'restaurant_menu','/restaurant/'=>'restaurant_menu','/serials/'=>'serials'];
+        $moduleRoutes=['/purchases/'=>'purchases','/store/'=>'store','/returns/'=>'returns','/services/'=>'services','/payroll/'=>'payroll','/salary/'=>'payroll','/commissions/'=>'commissions','/menu/'=>'restaurant_menu','/restaurant/'=>'restaurant_menu','/restaurant-stock/'=>'restaurant_menu','/serials/'=>'serials'];
         foreach($moduleRoutes as $fragment=>$module){
             if(strpos($path,$fragment)!==false&&!TenantFeatures::enabled($module)){http_response_code(404);exit('This feature is not enabled for this business.');}
         }

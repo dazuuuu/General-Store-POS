@@ -239,6 +239,7 @@ class OrderModel extends Model
                 $db->rollBack();
                 return ['ok' => false, 'errors' => ['_' => 'Only active or paid sales can be edited.']];
             }
+            $invoiceStock=$this->branchStock->forBranch((int)($order['branch_id']??0));
 
             $saleType = (($in['sale_type'] ?? $order['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
             $existingRows = [];
@@ -280,13 +281,12 @@ class OrderModel extends Model
                 }
                 $delta = round($newQty - $oldQty, 2);
                 if ($delta > 0) {
-                    $stockDec->execute([$delta, (int) $old['product_id'], $tid, $delta]);
-                    if ($stockDec->rowCount() !== 1) {
+                    if (!$invoiceStock->adjust((int)$old['product_id'],-$delta)) {
                         $db->rollBack();
                         return ['ok' => false, 'errors' => ['_' => 'Not enough stock to increase ' . $old['product_name'] . '.']];
                     }
                 } elseif ($delta < 0) {
-                    $stockAdd->execute([abs($delta), (int) $old['product_id'], $tid]);
+                    $invoiceStock->adjust((int)$old['product_id'],abs($delta));
                 }
                 if ($newQty <= 0.0001 && $returned <= 0.0001) {
                     $deleteItem->execute([$itemId, $orderId, $tid]);
@@ -306,7 +306,7 @@ class OrderModel extends Model
                 $returned = round((float) ($returns[$itemId]['returned'] ?? 0), 2);
                 $restore = max(0, round((float) $old['quantity'] - $returned, 2));
                 if ($restore > 0 && !empty($old['product_id'])) {
-                    $stockAdd->execute([$restore, (int) $old['product_id'], $tid]);
+                    $invoiceStock->adjust((int)$old['product_id'],$restore);
                 }
                 if ($returned <= 0.0001) {
                     $deleteItem->execute([$itemId, $orderId, $tid]);
@@ -328,8 +328,7 @@ class OrderModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => 'One selected product is no longer available.']];
                 }
-                $stockDec->execute([$qty, $pid, $tid, $qty]);
-                if ($stockDec->rowCount() !== 1) {
+                if (!$invoiceStock->adjust($pid,-$qty)) {
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => 'Not enough stock for ' . $p['name'] . '.']];
                 }
@@ -2057,6 +2056,7 @@ class OrderModel extends Model
                        SUM(oi.line_total * {$paidRatio}) AS revenue,
                        SUM(
                            CASE
+                               WHEN oi.cogs_total IS NOT NULL THEN oi.cogs_total * {$paidRatio}
                                WHEN oi.price_type = 'wholesale'
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
@@ -2066,7 +2066,7 @@ class OrderModel extends Model
                            END
                        ) AS cost,
                        SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total * {$paidRatio} ELSE 0 END)
-                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
+                       - SUM(CASE WHEN oi.price_type = 'retail' THEN CASE WHEN oi.cogs_total IS NOT NULL THEN oi.cogs_total * {$paidRatio} ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} END ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total * {$paidRatio} ELSE 0 END)
                        - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
                            CASE

@@ -325,7 +325,7 @@ class ProductModel extends Model
             );
             $stmt->execute($params);
         }
-        return $stmt->fetchAll();
+        $rows=$stmt->fetchAll();return \BranchContext::isIndependent()?(new \BranchStockService($this->db))->overlay($rows):$rows;
     }
 
     /** Exact barcode match for scan-to-restock. */
@@ -365,7 +365,7 @@ class ProductModel extends Model
             );
             $stmt->execute([$tid, $barcode, 'archived']);
         }
-        $row = $stmt->fetch();
+        $row = $stmt->fetch();if($row&&\BranchContext::isIndependent())$row=(new \BranchStockService($this->db))->overlay([$row])[0];
         return $row ?: null;
     }
 
@@ -417,7 +417,7 @@ class ProductModel extends Model
         $sql .= ' ORDER BY p.name ASC';
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll();if(\BranchContext::isIndependent())$rows=(new \BranchStockService($this->db))->overlay($rows);
         foreach ($rows as &$r) {
             $r['retail_price'] = (float) ($r['retail_price'] ?? $r['selling_price'] ?? 0);
             $r['wholesale_price'] = (float) ($r['wholesale_price'] ?? $r['selling_price'] ?? 0);

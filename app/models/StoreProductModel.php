@@ -4,11 +4,13 @@ namespace Models;
 class StoreProductModel extends Model
 {
     protected string $table = 'store_products';
+    private \BranchStockService $branchStock;
 
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensureSchema();
+        $this->branchStock=new \BranchStockService($this->db);
     }
 
     public function createMany(array $items, int $staffId): array
@@ -765,7 +767,7 @@ class StoreProductModel extends Model
             'pack_price' => ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
             'retail_pack_price' => ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
             'colors' => $it['colors'] ? array_map('trim', explode(',', $it['colors'])) : [],
-            'quantity' => (float) $it['quantity'],
+            'quantity' => $this->branchStock->independent()?0:(float)$it['quantity'],
             'faulty_quantity' => (float) ($it['faulty_quantity'] ?? 0),
             'buying_price' => (float) $it['buying_price'],
             'package_buying_price' => $it['package_buying_price'] ?? null,
@@ -781,6 +783,7 @@ class StoreProductModel extends Model
             throw new \RuntimeException('Could not create inventory product: ' . json_encode($res['errors']));
         }
         $productId = (int) $res['id'];
+        if($this->branchStock->independent()&&!$this->branchStock->adjust($productId,(float)$it['quantity']))throw new \RuntimeException('Could not add inventory to the selected branch.');
         $this->applyQuantityDiscountsFromNotes($productId, (string) ($it['notes'] ?? ''));
         return $productId;
     }
@@ -811,9 +814,11 @@ class StoreProductModel extends Model
     private function restockExistingInventoryProduct(int $productId, array $it): void
     {
         $tid = \TenantContext::tenantId();
-        $sets = [
+        $sets = $this->branchStock->independent()?[]:[
             'quantity = quantity + ?',
             'faulty_quantity = faulty_quantity + ?',
+        ];
+        $sets = array_merge($sets,[
             'buying_price = ?',
             'package_buying_price = ?',
             'retail_price = ?',
@@ -824,10 +829,11 @@ class StoreProductModel extends Model
             'pack_unit = ?',
             'pack_price = ?',
             'retail_pack_price = ?',
+        ]);
+        $params = $this->branchStock->independent()?[]:[
+            (float) $it['quantity'],max(0, (float) ($it['faulty_quantity'] ?? 0)),
         ];
-        $params = [
-            (float) $it['quantity'],
-            max(0, (float) ($it['faulty_quantity'] ?? 0)),
+        $params = array_merge($params,[
             (float) $it['buying_price'],
             ($it['package_buying_price'] ?? '') !== '' ? (float) $it['package_buying_price'] : null,
             (float) $it['retail_price'],
@@ -838,7 +844,7 @@ class StoreProductModel extends Model
             $it['package_unit'] ?? null,
             ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
             ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
-        ];
+        ]);
         foreach (['category_id', 'brand_id', 'supplier_id'] as $column) {
             if ((int) ($it[$column] ?? 0) > 0) {
                 $sets[] = $column . ' = ?';
@@ -865,6 +871,7 @@ class StoreProductModel extends Model
         $params[] = $productId;
         $params[] = $tid;
         $this->db->prepare('UPDATE products SET ' . implode(', ', $sets) . ' WHERE id = ? AND tenant_id = ?')->execute($params);
+        if($this->branchStock->independent()&&!$this->branchStock->adjust($productId,(float)$it['quantity']))throw new \RuntimeException('Could not add inventory to the selected branch.');
     }
 
     private function findExistingInventoryProduct(array $it): ?array

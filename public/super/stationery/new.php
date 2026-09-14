@@ -11,6 +11,7 @@ $BA  = new Models\BookAttributeModel($pdo);
 $SP  = new Models\StoreProductModel($pdo);
 $P   = new Models\ProductModel($pdo);
 $SER = new Models\ProductSerialModel($pdo);
+$BSTOCK = new BranchStockService($pdo);
 $units = Models\ProductModel::UNITS;
 $apiBase = public_url('api/inventory/');
 
@@ -148,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                 $targetProductId=0;
                 if ($existing) {
-                    $newQty = (float) $existing['quantity'] + ($serialized?0:$qty);
+                    $newQty = (float) $existing['quantity'] + (($serialized||$BSTOCK->independent())?0:$qty);
                     $editRes=$P->edit((int) $existing['id'], array_merge($existing, [
                         'quantity' => $newQty,
                         'buying_price' => $unitBuying > 0 ? $unitBuying : ($existing['buying_price'] ?? 0),
@@ -171,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : null,
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : null,
                         'units_per_pack' => $effectiveInside,
-                        'quantity' => $serialized?0:$qty,
+                        'quantity' => ($serialized||$BSTOCK->independent())?0:$qty,
                         'faulty_quantity' => $faulty,
                         'buying_price' => $unitBuying,
                         'wholesale_price' => $unitWholesale,
@@ -186,6 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $targetProductId=(int)$createRes['id'];
                 }
                 if($serialized){$serialRes=$SER->add($targetProductId,$serialText,true);if(!$serialRes['ok'])throw new RuntimeException($serialRes['error']);}
+                if($BSTOCK->independent()){$incoming=$serialized?count($serialList):$qty;if($serialized)$pdo->prepare('UPDATE products SET quantity=GREATEST(0,quantity-?) WHERE id=? AND tenant_id=?')->execute([$incoming,$targetProductId,TenantContext::tenantId()]);if(!$BSTOCK->adjust($targetProductId,$incoming))throw new RuntimeException('Could not add stock to the selected branch.');}
                 $pdo->commit();
                 $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
                 header('Location: ' . public_url('super/inventory/'));

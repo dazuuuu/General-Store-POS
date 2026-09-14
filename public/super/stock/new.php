@@ -12,6 +12,7 @@ $BA  = new Models\BookAttributeModel($pdo);
 $SP  = new Models\StoreProductModel($pdo);
 $P   = new Models\ProductModel($pdo);
 $SER = new Models\ProductSerialModel($pdo);
+$BSTOCK = new BranchStockService($pdo);
 
 $base = public_url('super/stock/new.php');
 $apiBase = public_url('api/inventory/');
@@ -231,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $curr = $P->find((int) $it['product_id']);
                     if ($curr) {
                         if(!empty($curr['is_menu_item'])&&!empty($it['serialized']))throw new RuntimeException('Serial numbers are only for inventory products, not restaurant menu items.');
-                        $newQty = (float) $curr['quantity'] + (!empty($it['serialized'])?0:(float)$it['quantity']);
+                        $newQty = (float) $curr['quantity'] + ((!empty($it['serialized'])||$BSTOCK->independent())?0:(float)$it['quantity']);
                         $editRes=$P->edit((int) $curr['id'], array_merge($curr, [
                             'quantity' => $newQty,
                             'buying_price' => $it['buying_price'] > 0 ? $it['buying_price'] : ($curr['buying_price'] ?? 0),
@@ -256,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'retail_pack_price' => $it['retail_pack_price'] ?: null,
                         'package_buying_price' => $it['package_buying_price'] ?: null,
                         'units_per_pack' => $it['units_per_package'] ?: 1,
-                        'quantity' => !empty($it['serialized'])?0:($it['quantity'] ?: 0),
+                        'quantity' => (!empty($it['serialized'])||$BSTOCK->independent())?0:($it['quantity'] ?: 0),
                         'faulty_quantity' => $it['faulty_quantity'] ?: 0,
                         'buying_price' => $it['buying_price'] ?: 0,
                         'wholesale_price' => $it['wholesale_price'] ?: 0,
@@ -273,6 +274,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }else throw new RuntimeException($pRes['errors']['_']??'Could not create product.');
                 }
                 if(!empty($it['serialized'])){$serialRes=$SER->add($targetProductId,(string)$it['serials'],true);if(!$serialRes['ok'])throw new RuntimeException($serialRes['error']);}
+                if($BSTOCK->independent()){$incoming=(float)$it['quantity'];if(!empty($it['serialized']))$pdo->prepare('UPDATE products SET quantity=GREATEST(0,quantity-?) WHERE id=? AND tenant_id=?')->execute([$incoming,$targetProductId,TenantContext::tenantId()]);if(!$BSTOCK->adjust($targetProductId,$incoming))throw new RuntimeException('Could not add stock to the selected branch.');}
             }
             $pdo->commit();
             $_SESSION['flash']['success'] = $savedCount . ' product' . ($savedCount === 1 ? '' : 's') . ' saved directly to Shop (Inventory) and ready to sell.';

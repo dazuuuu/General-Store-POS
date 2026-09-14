@@ -30,10 +30,10 @@ CREATE TABLE IF NOT EXISTS restaurant_ingredient_movements (
  KEY idx_restaurant_movement(tenant_id,order_item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS branches (
- id INT AUTO_INCREMENT PRIMARY KEY, tenant_id INT NOT NULL, name VARCHAR(160) NOT NULL, location VARCHAR(255) NULL,
+ id INT AUTO_INCREMENT PRIMARY KEY, tenant_id INT NOT NULL, title VARCHAR(160) NOT NULL, location VARCHAR(255) NULL,
  inventory_mode ENUM('shared','independent') NOT NULL DEFAULT 'shared', is_default TINYINT(1) NOT NULL DEFAULT 0,
  is_active TINYINT(1) NOT NULL DEFAULT 1, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
- UNIQUE KEY uq_branch_name(tenant_id,name)
+ UNIQUE KEY uq_branch_title(tenant_id,title)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS branch_stock (
  tenant_id INT NOT NULL, branch_id INT NOT NULL, product_id INT NOT NULL,
@@ -51,3 +51,5 @@ SET @s=IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DA
 SET @s=IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='held_orders' AND COLUMN_NAME='branch_id')=0,'ALTER TABLE held_orders ADD branch_id INT NULL AFTER tenant_id','SELECT 1');PREPARE x FROM @s;EXECUTE x;DEALLOCATE PREPARE x;
 SET @s=IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='stock_intakes' AND COLUMN_NAME='branch_id')=0,'ALTER TABLE stock_intakes ADD branch_id INT NULL AFTER tenant_id','SELECT 1');PREPARE x FROM @s;EXECUTE x;DEALLOCATE PREPARE x;
 SET @s=IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='sales' AND COLUMN_NAME='branch_id')=0,'ALTER TABLE sales ADD branch_id INT NULL AFTER tenant_id','SELECT 1');PREPARE x FROM @s;EXECUTE x;DEALLOCATE PREPARE x;
+SET @s=IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='branches' AND COLUMN_NAME='inventory_mode')=0,'ALTER TABLE branches ADD inventory_mode ENUM(''shared'',''independent'') NOT NULL DEFAULT ''shared'' AFTER location','SELECT 1');PREPARE x FROM @s;EXECUTE x;DEALLOCATE PREPARE x;
+SET @s=IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='branches' AND COLUMN_NAME='is_default')=0,'ALTER TABLE branches ADD is_default TINYINT(1) NOT NULL DEFAULT 0 AFTER inventory_mode','SELECT 1');PREPARE x FROM @s;EXECUTE x;DEALLOCATE PREPARE x;
