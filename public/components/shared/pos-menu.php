@@ -90,7 +90,10 @@ try {
   <div class="t-subnav">
     <a class="t-sublink <?php echo $menuOn('/inventory'); ?>" href="<?php echo public_url('super/inventory/'); ?>">Shop Inventory</a>
     <?php if(TenantFeatures::enabled('store')):?><a class="t-sublink <?php echo $menuOn('/store'); ?>" href="<?php echo public_url('super/store/'); ?>">Store Warehouse</a><?php endif;?>
-    <?php if(TenantFeatures::enabled('restaurant_menu')):?><a class="t-sublink <?php echo $menuOn('/menu'); ?>" href="<?php echo public_url('super/menu/'); ?>">Restaurant Menu</a><?php endif;?>
+    <?php if(TenantFeatures::enabled('restaurant_menu')):?>
+    <a class="t-sublink <?php echo $menuOn('/restaurant-stock'); ?>" href="<?php echo public_url('super/restaurant-stock/'); ?>">Restaurant Stock</a>
+    <a class="t-sublink <?php echo $menuOn('/menu'); ?>" href="<?php echo public_url('super/menu/'); ?>">Menu, Variants & Recipes</a>
+    <?php endif;?>
     <?php if(TenantFeatures::enabled('purchases')):?>
     <div class="t-subsection"><i class="fas fa-cart-shopping me-1"></i>Purchases</div>
     <a class="t-sublink t-subsub <?php echo $menuOn('/purchases/new'); ?>" href="<?php echo public_url('super/purchases/new.php'); ?>">Record purchase</a>
@@ -121,6 +124,9 @@ try {
     <a class="t-sublink <?php echo $menuOn('/taxes'); ?>" href="<?php echo public_url('super/taxes/'); ?>">Taxes</a>
   </div>
 </div>
+
+<a class="t-link <?php echo $menuOn('/branches')?'active':'';?>" href="<?php echo public_url('super/branches/');?>"><i class="fas fa-code-branch"></i><span>Branches<?php if(\BranchContext::current()):?><small class="d-block opacity-75"><?php echo htmlspecialchars(\BranchContext::current()['name']);?></small><?php endif;?></span></a>
+<a class="t-link <?php echo $menuOn('/features')?'active':'';?>" href="<?php echo public_url('super/features/');?>"><i class="fas fa-toggle-on"></i><span>Features & Offline</span></a>
 
 <div class="t-group <?php echo $settingsOpen ? 'open' : ''; ?>" data-nav-group>
   <button type="button" class="t-link t-group-toggle <?php echo $settingsOpen ? 'active' : ''; ?>" aria-expanded="<?php echo $settingsOpen ? 'true' : 'false'; ?>">

@@ -13,6 +13,7 @@ class HeldOrderModel extends Model
     {
         parent::__construct($db);
         $this->ensureSchema();
+        new BranchModel($this->db);
     }
 
     /** @param array $in customer_name, staff_id, items[{product_id,quantity}] */
@@ -33,16 +34,16 @@ class HeldOrderModel extends Model
             return ['ok' => false, 'errors' => ['_' => 'No staff in context.']];
         }
 
-        $db = $this->db;
+        $db = $this->db;$restaurant=new RestaurantInventoryModel($db);
         try {
             $db->beginTransaction();
-            $ins = $db->prepare('INSERT INTO held_orders (tenant_id, customer_name, staff_id, context) VALUES (?,?,?,?)');
-            $ins->execute([$tid, $customerName, $staffId,$context]);
+            $ins = $db->prepare('INSERT INTO held_orders (tenant_id, branch_id, customer_name, staff_id, context) VALUES (?,?,?,?,?)');
+            $ins->execute([$tid, \BranchContext::id(), $customerName, $staffId,$context]);
             $heldId = (int) $db->lastInsertId();
 
             $sel = $db->prepare('SELECT id, name, selling_price, wholesale_price, retail_price, units_per_pack, pack_price, retail_pack_price FROM products WHERE id = ? AND tenant_id = ?');
             $insItem = $db->prepare(
-                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, price_type, quantity, serials_json) VALUES (?,?,?,?,?,?,?,?)'
+                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, menu_variant_id, product_name, unit_price, price_type, quantity, serials_json) VALUES (?,?,?,?,?,?,?,?,?)'
             );
             foreach ($items as $it) {
                 $pid = (int) $it['product_id'];
@@ -62,7 +63,8 @@ class HeldOrderModel extends Model
                     $price = (float) ($p['retail_price'] ?: $p['selling_price']);
                 }
                 if(($it['unit_price']??'')!==''&&(float)$it['unit_price']>=$price)$price=(float)$it['unit_price'];
-                $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, $priceType, (float) $it['quantity'],json_encode(array_values((array)($it['serial_numbers']??[])))]);
+                $variantId=(int)($it['menu_variant_id']??0);$variant=$variantId?$restaurant->variant($variantId,$pid):null;if($variant){$price=(float)$variant['retail_price'];$p['name'].=' — '.$variant['label'];}
+                $insItem->execute([$tid, $heldId, $pid, $variantId?:null, $p['name'], $price, $priceType, (float) $it['quantity'],json_encode(array_values((array)($it['serial_numbers']??[])))]);
             }
 
             $db->commit();
@@ -148,6 +150,7 @@ class HeldOrderModel extends Model
         ");
         $this->ensureColumn('held_order_items', 'price_type', "ALTER TABLE held_order_items ADD COLUMN price_type VARCHAR(20) NOT NULL DEFAULT 'retail' AFTER unit_price");
         $this->ensureColumn('held_order_items', 'serials_json', "ALTER TABLE held_order_items ADD COLUMN serials_json TEXT NULL AFTER quantity");
+        $this->ensureColumn('held_order_items', 'menu_variant_id', "ALTER TABLE held_order_items ADD COLUMN menu_variant_id INT NULL AFTER product_id");
         $this->ensureColumn('held_orders', 'context', "ALTER TABLE held_orders ADD COLUMN context VARCHAR(20) NOT NULL DEFAULT 'shop' AFTER staff_id");
         $this->widenPriceTypeColumn('held_order_items');
     }

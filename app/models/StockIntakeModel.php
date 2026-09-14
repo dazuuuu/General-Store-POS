@@ -7,11 +7,13 @@ namespace Models;
 class StockIntakeModel extends Model
 {
     protected string $table = 'stock_intakes';
+    private \BranchStockService $branchStock;
 
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensureSchema();
+        $this->branchStock=new \BranchStockService($this->db);
     }
 
     /**
@@ -51,10 +53,10 @@ class StockIntakeModel extends Model
             $db->beginTransaction();
 
             $insIntake = $db->prepare(
-                'INSERT INTO stock_intakes (tenant_id, supplier_id, staff_id, notes) VALUES (?,?,?,?)'
+                'INSERT INTO stock_intakes (tenant_id, branch_id, supplier_id, staff_id, notes) VALUES (?,?,?,?,?)'
             );
             $insIntake->execute([
-                $tid, $supplierId > 0 ? $supplierId : null, $staffId,
+                $tid, $this->branchStock->branchId(), $supplierId > 0 ? $supplierId : null, $staffId,
                 trim((string) ($header['notes'] ?? '')) !== '' ? trim($header['notes']) : null,
             ]);
             $intakeId = (int) $db->lastInsertId();
@@ -84,7 +86,7 @@ class StockIntakeModel extends Model
                         return ['ok' => false, 'intake_id' => null, 'errors' => ['_' => 'One of the selected products was not found.']];
                     }
                     $packageBuying = ($i['package_buying_price'] ?? '') !== '' ? (float) $i['package_buying_price'] : null;
-                    $bump->execute([$qty, $buying, $packageBuying, $unit, $unitsPerPackage, $packageUnit, $packagePrice, $retailPackPrice, $productId, $tid]);
+                    if($this->branchStock->independent()){$db->prepare('UPDATE products SET buying_price=?,package_buying_price=?,unit=?,units_per_pack=?,pack_unit=?,pack_price=?,retail_pack_price=? WHERE id=? AND tenant_id=?')->execute([$buying,$packageBuying,$unit,$unitsPerPackage,$packageUnit,$packagePrice,$retailPackPrice,$productId,$tid]);$this->branchStock->adjust($productId,$qty);}else{$bump->execute([$qty, $buying, $packageBuying, $unit, $unitsPerPackage, $packageUnit, $packagePrice, $retailPackPrice, $productId, $tid]);}
                     $productName = $prod['name'];
                     $faulty = max(0, (float) ($i['faulty_quantity'] ?? 0));
                     if ($faulty > 0) {
@@ -115,7 +117,7 @@ class StockIntakeModel extends Model
                         'size_unit'       => $i['size_unit'] ?? '',
                         'colors'          => $i['colors'] ?? [],
                         'sizes'           => $i['sizes'] ?? [],
-                        'quantity'        => $qty,
+                        'quantity'        => $this->branchStock->independent()?0:$qty,
                         'faulty_quantity' => (float) ($i['faulty_quantity'] ?? 0),
                         'buying_price'    => $buying,
                         'package_buying_price' => $i['package_buying_price'] ?? '',
@@ -132,6 +134,7 @@ class StockIntakeModel extends Model
                         return ['ok' => false, 'intake_id' => null, 'errors' => $res['errors'] ?: ['_' => "Could not save \"{$name}\"."]];
                     }
                     $productId = (int) $res['id'];
+                    if($this->branchStock->independent())$this->branchStock->adjust($productId,$qty);
                     $productName = $name;
                 }
 

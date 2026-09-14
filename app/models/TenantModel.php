@@ -28,7 +28,7 @@ class TenantModel extends Model
             'name', 'logo_path', 'currency', 'phone', 'address', 'po_box', 'business_email', 'receipt_footer', 'kra_pin',
             'payment_credentials', 'payment_methods_json',
             'vat_rate', 'vat_inclusive', 'loyalty_points_per_kes', 'loyalty_kes_per_point',
-            'low_stock_alert_enabled', 'product_commission_enabled', 'enabled_modules',
+            'low_stock_alert_enabled', 'product_commission_enabled', 'enabled_modules', 'offline_enabled',
         ];
         $clean = array_intersect_key($data, array_flip($allowed));
         if (!$clean) {

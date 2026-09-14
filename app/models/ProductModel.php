@@ -200,19 +200,20 @@ class ProductModel extends Model
     public function lowStock(int $limit = 100): array
     {
         $tid = \TenantContext::tenantId();
+        $independent=\BranchContext::isIndependent();
         $st = $this->db->prepare(
             "SELECT p.*, c.name AS category_name
                FROM products p
                LEFT JOIN categories c ON c.id = p.category_id
               WHERE p.tenant_id = ? AND p.status IN ('active','archived')
-                AND p.quantity <= p.low_stock_threshold
+                ".($independent?'':'AND p.quantity <= p.low_stock_threshold')."
               ORDER BY p.quantity ASC, p.name ASC
               LIMIT ?"
         );
         $st->bindValue(1, $tid, \PDO::PARAM_INT);
         $st->bindValue(2, max(1, $limit), \PDO::PARAM_INT);
         $st->execute();
-        return $st->fetchAll();
+        $rows=$st->fetchAll();if($independent){$rows=(new \BranchStockService($this->db))->overlay($rows);$rows=array_values(array_filter($rows,fn($r)=>(float)$r['quantity']<=(float)$r['low_stock_threshold']));}return array_slice($rows,0,$limit);
     }
 
     /** Sellable stock for the till — category/brand, colors, unit, faulty qty,
@@ -220,6 +221,7 @@ class ProductModel extends Model
     public function sellable(): array
     {
         $tid = \TenantContext::tenantId();
+        $independent=\BranchContext::isIndependent();
         $sql = "SELECT p.id, p.name, p.product_type, p.is_menu_item, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at, p.buying_price, p.package_buying_price,
                        p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
@@ -232,7 +234,7 @@ class ProductModel extends Model
              LEFT JOIN categories c ON c.id = p.category_id
              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
              LEFT JOIN book_attributes br ON br.id = p.brand_id
-                 WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
+                 WHERE p.tenant_id = ? AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
               ORDER BY p.name ASC";
         $stmt = $this->db->prepare($sql);
         try {
@@ -250,12 +252,12 @@ class ProductModel extends Model
               LEFT JOIN categories c ON c.id = p.category_id
               LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
               LEFT JOIN book_attributes br ON br.id = p.brand_id
-                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
+                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
                ORDER BY p.name ASC"
             );
             $stmt->execute([$tid]);
         }
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll();if($independent)$rows=(new \BranchStockService($this->db))->overlay($rows,true);
         foreach ($rows as &$r) {
             $eff = self::effectivePrice($r);
             $r['regular_price']   = $eff['regular_price'];

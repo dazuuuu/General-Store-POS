@@ -77,6 +77,12 @@ class PageGuard
         }
     }
 
+    public static function platform(string $cap=Capabilities::PLATFORM_TENANTS): void
+    {
+        self::requireFullAuth();
+        if(!TenantContext::isPlatformAdmin()&&!TenantContext::can($cap))self::deny();
+    }
+
     private static function requireFullAuth(): void
     {
         $authed = !empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified']) && TenantContext::check();

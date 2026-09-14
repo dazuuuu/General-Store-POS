@@ -16,11 +16,15 @@ class OrderModel extends Model
 
     /** Run expensive one-time schema/balance sync at most once per request. */
     private static bool $paymentSchemaSynced = false;
+    private RestaurantInventoryModel $restaurantInventory;
+    private \BranchStockService $branchStock;
 
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensurePaymentSchema();
+        $this->restaurantInventory=new RestaurantInventoryModel($this->db);
+        $this->branchStock=new \BranchStockService($this->db);
     }
 
     /**
@@ -62,11 +66,11 @@ class OrderModel extends Model
             $db->beginTransaction();
 
             $ins = $db->prepare(
-                "INSERT INTO orders (tenant_id, table_name, channel, opened_by, client_uuid, receipt_number, status, subtotal, total)
-                 VALUES (?,?,?,?,?,'PENDING','open',0,0)"
+                "INSERT INTO orders (tenant_id, branch_id, table_name, channel, opened_by, client_uuid, receipt_number, status, subtotal, total)
+                 VALUES (?,?,?,?,?,?,'PENDING','open',0,0)"
             );
             $clientUuid=trim((string)($in['client_uuid']??''))?:null;
-            $ins->execute([$tid, $tableName, $channel, $openedBy,$clientUuid]);
+            $ins->execute([$tid, $this->branchStock->branchId(), $tableName, $channel, $openedBy,$clientUuid]);
             $orderId = (int) $db->lastInsertId();
             $prefix  = $channel === 'walkin' ? 'RCP-' : ($channel === 'restaurant' ? 'RST-' : 'ORD-');
             $receipt = $prefix . str_pad((string) $orderId, 6, '0', STR_PAD_LEFT);
@@ -398,7 +402,7 @@ class OrderModel extends Model
     private function insertItems(\PDO $db, int $tid, int $orderId, array $items, int $staffId, string $saleType = 'retail', bool $enforceCreditLimit = false, float $creditOverride = 0.0): array
     {
         $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price, serial_tracking
+                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price, serial_tracking, is_menu_item
                      FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE";
         try {
             $sel = $db->prepare($selSql);
@@ -406,8 +410,8 @@ class OrderModel extends Model
             $sel = $db->prepare("SELECT id, name, selling_price, retail_price, quantity, unit FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE");
         }
         $insItem = $db->prepare(
-            'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO order_items (tenant_id, order_id, product_id, menu_variant_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $dec = $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
         $commissionEnabled = false;
@@ -431,8 +435,16 @@ class OrderModel extends Model
             if (!$p) {
                 return ['ok' => false, 'errors' => ['_' => 'One of the products is no longer available. Refresh and try again.']];
             }
-            if ($qty > (float) $p['quantity']) {
-                return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' left.']];
+            $variantId=(int)($it['menu_variant_id']??0);$variant=null;$recipeBacked=false;
+            if(!empty($p['is_menu_item'])){
+                $availableVariants=$this->restaurantInventory->variantsForProduct($pid);
+                if($variantId)$variant=$this->restaurantInventory->variant($variantId,$pid);
+                if($availableVariants&&!$variant)return ['ok'=>false,'errors'=>['_'=>"Choose a valid portion or size for {$p['name']}."]];
+                if($variant)$recipeBacked=(bool)$this->restaurantInventory->recipe($variantId);
+            }
+            $available=$this->branchStock->available($pid,true);
+            if (!$recipeBacked&&$qty > $available) {
+                return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} at this branch — only " . rtrim(rtrim(number_format($available, 2), '0'), '.') . ' left.']];
             }
             $serials=array_values(array_unique(array_filter(array_map('trim',(array)($it['serial_numbers']??[])))));
             if(!empty($p['serial_tracking'])){
@@ -451,7 +463,7 @@ class OrderModel extends Model
                 $offerRow['offer_ends_at'] = null;
             }
             $lineSaleType = $this->normalizePriceType($it['price_type'] ?? $saleType);
-            $lineTotal = \Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
+            $lineTotal = $variant?round((float)$variant['retail_price']*$qty,2):\Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
             $baseUnitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
             if ($baseUnitPrice <= 0) { $baseUnitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($baseUnitPrice * $qty, 2); }
             $unitPrice = $baseUnitPrice;
@@ -473,14 +485,16 @@ class OrderModel extends Model
                 }
             }
 
-            $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
+            $lineName=$p['name'].($variant?' — '.$variant['label']:'');
+            $insItem->execute([$tid, $orderId, $pid, $variantId?:null, $lineName, $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
             $orderItemId=(int)$db->lastInsertId();
+            if($recipeBacked){$used=$this->restaurantInventory->consume($variantId,$qty,$orderItemId);if(!$used['ok'])return['ok'=>false,'errors'=>['_'=>$used['error']]];$db->prepare('UPDATE order_items SET unit_cogs=?,cogs_total=? WHERE id=?')->execute([$qty>0?$used['cogs']/$qty:0,$used['cogs'],$orderItemId]);}
             if($serials){
                 $markSerial=$db->prepare("UPDATE product_serials SET status='sold',order_item_id=?,sold_at=NOW() WHERE tenant_id=? AND product_id=? AND serial_number=? AND status='in_stock'");
                 foreach($serials as $serial)$markSerial->execute([$orderItemId,$tid,$pid,$serial]);
             }
-            $dec->execute([$qty, $pid, $tid, $qty]);
-            if ($dec->rowCount() !== 1) {
+            $stockAdjusted=$recipeBacked?true:$this->branchStock->adjust($pid,-$qty);
+            if (!$stockAdjusted) {
                 return ['ok' => false, 'errors' => ['_' => "Stock changed for {$p['name']} while saving. Please try again."]];
             }
         }
@@ -1309,18 +1323,19 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id,branch_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Tab not found.']; }
             if ($order['status'] !== 'open') { $db->rollBack(); return ['ok' => false, 'error' => 'Only an open tab can be voided.']; }
 
-            $items = $db->prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ? AND tenant_id = ?');
+            $branchStock=$this->branchStock->forBranch((int)($order['branch_id']??0));
+            $items = $db->prepare('SELECT id,product_id, quantity FROM order_items WHERE order_id = ? AND tenant_id = ?');
             $items->execute([$orderId, $tid]);
             $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
             foreach ($items->fetchAll() as $it) {
-                if ($it['product_id']) {
-                    $restore->execute([$it['quantity'], $it['product_id'], $tid]);
+                if (!$this->restaurantInventory->restoreOrderItem((int)$it['id'])&&$it['product_id']) {
+                    $branchStock->adjust((int)$it['product_id'],(float)$it['quantity']);
                 }
             }
 
@@ -1347,7 +1362,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id,branch_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -1359,6 +1374,7 @@ class OrderModel extends Model
                 return ['ok' => false, 'error' => 'This invoice is already deleted.'];
             }
 
+            $branchStock=$this->branchStock->forBranch((int)($order['branch_id']??0));
             $items = $db->prepare(
                 "SELECT oi.id, oi.product_id, oi.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
                    FROM order_items oi
@@ -1374,8 +1390,9 @@ class OrderModel extends Model
             $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
             foreach ($items->fetchAll() as $it) {
                 $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
+                if($qty>0&&$this->restaurantInventory->restoreOrderItem((int)$it['id']))continue;
                 if ($qty > 0 && !empty($it['product_id'])) {
-                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                    $branchStock->adjust((int)$it['product_id'],$qty);
                 }
             }
 

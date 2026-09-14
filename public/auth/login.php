@@ -71,9 +71,9 @@ $verdict = AccountGuard::evaluate($user);
                 exit;
             }
 
-            $dest = ($user['role_name'] === 'staff')
-                ? public_url('staff/dashboard/')
-                : public_url('super/dashboard/');
+            $dest = TenantContext::isPlatformAdmin()
+                ? public_url('domain/manage/')
+                : (($user['role_name'] === 'staff') ? public_url('staff/dashboard/') : public_url('super/dashboard/'));
             header('Location: ' . $dest);
             exit;
         }
