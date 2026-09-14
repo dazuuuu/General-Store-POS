@@ -205,7 +205,7 @@ class ProductModel extends Model
             "SELECT p.*, c.name AS category_name
                FROM products p
                LEFT JOIN categories c ON c.id = p.category_id
-              WHERE p.tenant_id = ? AND p.status IN ('active','archived')
+              WHERE p.tenant_id = ? AND COALESCE(p.is_menu_item,0)=0 AND p.status IN ('active','archived')
                 ".($independent?'':'AND p.quantity <= p.low_stock_threshold')."
               ORDER BY p.quantity ASC, p.name ASC
               LIMIT ?"
@@ -218,7 +218,7 @@ class ProductModel extends Model
 
     /** Sellable stock for the till — category/brand, colors, unit, faulty qty,
      *  and offer/archive flags. Archived items stay sellable from the Archive tab. */
-    public function sellable(): array
+    public function sellable(bool $includeMenuItems=false): array
     {
         $tid = \TenantContext::tenantId();
         $independent=\BranchContext::isIndependent();
@@ -234,7 +234,7 @@ class ProductModel extends Model
              LEFT JOIN categories c ON c.id = p.category_id
              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
              LEFT JOIN book_attributes br ON br.id = p.brand_id
-                 WHERE p.tenant_id = ? AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
+                 WHERE p.tenant_id = ? ".($includeMenuItems?'':'AND COALESCE(p.is_menu_item,0)=0')." AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
               ORDER BY p.name ASC";
         $stmt = $this->db->prepare($sql);
         try {
@@ -252,7 +252,7 @@ class ProductModel extends Model
               LEFT JOIN categories c ON c.id = p.category_id
               LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
               LEFT JOIN book_attributes br ON br.id = p.brand_id
-                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
+                  WHERE p.tenant_id = ? ".($includeMenuItems?'':'AND COALESCE(p.is_menu_item,0)=0')." AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
                ORDER BY p.name ASC"
             );
             $stmt->execute([$tid]);
@@ -275,7 +275,7 @@ class ProductModel extends Model
     /** Active prepared-food/drink items used only by the restaurant order screen. */
     public function sellableMenu(): array
     {
-        return array_values(array_filter($this->sellable(), static fn(array $row): bool => !empty($row['is_menu_item'])));
+        return array_values(array_filter($this->sellable(true), static fn(array $row): bool => !empty($row['is_menu_item'])));
     }
 
     /** Product name type-ahead / restock lookup. */
@@ -409,7 +409,7 @@ class ProductModel extends Model
         $tid = \TenantContext::tenantId();
         $params = [$tid];
         $sql = 'SELECT ' . self::META_SELECT_SQL . self::META_JOIN_SQL . '
-              WHERE p.tenant_id = ?' . ($includeArchived ? '' : " AND p.status <> 'archived'");
+              WHERE p.tenant_id = ? AND COALESCE(p.is_menu_item,0)=0' . ($includeArchived ? '' : " AND p.status <> 'archived'");
         if ($productType !== null) {
             $sql .= ' AND p.product_type = ?';
             $params[] = $productType;
@@ -431,7 +431,7 @@ class ProductModel extends Model
         $tid = \TenantContext::tenantId();
         $stmt = $this->db->prepare(
             'SELECT ' . self::META_SELECT_SQL . self::META_JOIN_SQL . "
-              WHERE p.tenant_id = ? AND p.status = 'archived'
+              WHERE p.tenant_id = ? AND COALESCE(p.is_menu_item,0)=0 AND p.status = 'archived'
            ORDER BY p.name ASC"
         );
         $stmt->execute([$tid]);

@@ -3,10 +3,11 @@
 class TenantFeatures
 {
     public const MODULES = [
-        'store'=>'Store Warehouse','purchases'=>'Purchases','commissions'=>'Commission',
+        'shop_pos'=>'Shop POS & Retail Sales','store'=>'Store Warehouse','purchases'=>'Purchases','commissions'=>'Commission',
         'payroll'=>'Salary & Payroll','returns'=>'Returns','services'=>'Services',
         'restaurant_menu'=>'Restaurant Menu & Orders','serials'=>'Serial Numbers',
     ];
+    public const VERSION_MARKER='__feature_settings_v2';
     private static ?array $enabled=null;
     private static ?bool $offline=null;
 
@@ -28,7 +29,10 @@ class TenantFeatures
             $st->execute([$tid]);$row=$st->fetch();
             if($row&&$row['enabled_modules']!==null&&$row['enabled_modules']!==''){
                 $decoded=json_decode($row['enabled_modules'],true);
-                if(is_array($decoded))self::$enabled=array_values(array_intersect(array_keys(self::MODULES),$decoded));
+                if(is_array($decoded)){
+                    if(!in_array(self::VERSION_MARKER,$decoded,true)&&!in_array('shop_pos',$decoded,true))$decoded[]='shop_pos';
+                    self::$enabled=array_values(array_intersect(array_keys(self::MODULES),$decoded));
+                }
             }
             self::$offline=!empty($row['offline_enabled']);
         }catch(Throwable $ignored){}

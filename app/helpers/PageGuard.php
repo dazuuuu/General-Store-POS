@@ -91,10 +91,11 @@ class PageGuard
             exit;
         }
         $path=strtolower((string)(parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)??''));
-        $moduleRoutes=['/purchases/'=>'purchases','/store/'=>'store','/returns/'=>'returns','/services/'=>'services','/payroll/'=>'payroll','/salary/'=>'payroll','/commissions/'=>'commissions','/menu/'=>'restaurant_menu','/restaurant/'=>'restaurant_menu','/restaurant-stock/'=>'restaurant_menu','/serials/'=>'serials'];
+        $moduleRoutes=['/shop/'=>'shop_pos','/purchases/'=>'purchases','/store/'=>'store','/returns/'=>'returns','/services/'=>'services','/payroll/'=>'payroll','/salary/'=>'payroll','/commissions/'=>'commissions','/menu/'=>'restaurant_menu','/restaurant/'=>'restaurant_menu','/restaurant-stock/'=>'restaurant_menu','/inventory/serials'=>'serials','/serials/'=>'serials'];
         foreach($moduleRoutes as $fragment=>$module){
             if(strpos($path,$fragment)!==false&&!TenantFeatures::enabled($module)){http_response_code(404);exit('This feature is not enabled for this business.');}
         }
+        if(!TenantFeatures::enabled('shop_pos')&&(preg_match('#/orders/?$#',$path)||strpos($path,'/orders/new.php')!==false||strpos($path,'/orders/held.php')!==false)){http_response_code(404);exit('Shop POS is not enabled for this business.');}
     }
 
     /** Kept as a no-op so any remaining callers are harmless in the single-tenant build. */

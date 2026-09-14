@@ -11,7 +11,7 @@ require_once __DIR__ . '/../../app/app.php';
 if (!empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified'])) {
     $sessionRole = $_SESSION['role'] ?? null;
     if ($sessionRole === 'staff') {
-        header('Location: ' . public_url('staff/dashboard/'));
+        header('Location: ' . public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/'));
         exit;
     }
     if ($sessionRole === 'tenant_owner') {
@@ -73,7 +73,7 @@ $verdict = AccountGuard::evaluate($user);
 
             $dest = TenantContext::isPlatformAdmin()
                 ? public_url('domain/manage/')
-                : (($user['role_name'] === 'staff') ? public_url('staff/dashboard/') : public_url('super/dashboard/'));
+                : (($user['role_name'] === 'staff') ? public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/') : public_url('super/dashboard/'));
             header('Location: ' . $dest);
             exit;
         }

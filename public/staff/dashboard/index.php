@@ -4,6 +4,7 @@
 // that's what Orders is for, for customers staying to drink).
 require_once __DIR__ . '/../../../app/app.php';
 PageGuard::capability(Capabilities::SALES_RECORD);
+if(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')){header('Location: '.public_url((TenantContext::role()==='staff'?'staff':'super').'/restaurant/new.php'));exit;}
 
 $pdo = Database::pdo();
 $canSell = TenantContext::can(Capabilities::SALES_RECORD);
@@ -294,7 +295,7 @@ ob_start();
     </div>
     <div class="pos-search pos-scan">
       <i class="fas fa-barcode"></i>
-      <input type="text" id="barcodeScan" placeholder="Scan a barcode to add it…" autocomplete="off">
+      <input type="text" id="barcodeScan" placeholder="Scan/type barcode, serial number or IMEI…" autocomplete="off">
     </div>
     <div id="scanMsg" class="small mb-2" style="display:none;"></div>
 
@@ -1289,6 +1290,11 @@ function confirmSerial(id) {
     if(c.serialNumbers.indexOf(serial)!==-1){alert('That serial is already in this order.');return false;}
     c.serialNumbers.push(serial);return true;
 }
+function addExactSerial(id,serial) {
+    var key=String(id),p=PRODUCTS[key],c=ensureCart(key);if(!p||!p.serialTracking)return false;
+    c.serialNumbers=c.serialNumbers||[];if(c.serialNumbers.indexOf(serial)!==-1){flashScan('That device is already in this order.',false);return false;}
+    if(cartOrder.indexOf(key)===-1)cartOrder.push(key);c.serialNumbers.push(serial);setFieldQty(key,'retail',(c.retail||0)+1);return true;
+}
 function add(id) {
     var strId = String(id);
     var type = defaultSaleType();
@@ -1929,7 +1935,8 @@ if (barcodeScan) {
             p.packageBuying=parseFloat(p.packageBuying!=null?p.packageBuying:p.packagingbying)||0;
             var id=String(p.id);PRODUCTS[id]=PRODUCTS[id]||p;BARCODES[code]=id;
             if(PC.stockUsed(PRODUCTS[id],cart[id]||PC.buckets())>=PRODUCTS[id].stock){flashScan(p.name+' — no more in stock.',false);return;}
-            add(id);flashScan(p.name+' added.',true);
+            if(p.matchedSerial){if(addExactSerial(id,p.matchedSerial))flashScan(p.name+' · '+p.matchedSerial+' added.',true);}
+            else{add(id);flashScan(p.name+' added.',true);}
           }).catch(function(){flashScan('Could not read barcode. Try again.',false);});
     });
     document.addEventListener('click', function (e) {

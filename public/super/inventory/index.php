@@ -56,6 +56,8 @@ $productUrl = public_url('super/stationery/new.php');
 $storeUrl = public_url('super/store/');
 $groupUrl = fn(string $g) => public_url('super/inventory/') . '?group=' . $g;
 $pendingReturns = $R->pendingForInventory();
+$serialEnabled=TenantFeatures::enabled('serials');$serialCounts=[];
+if($serialEnabled){$productIds=[];foreach($grouped as $groupItems)foreach($groupItems as $product)$productIds[]=(int)$product['id'];$serialCounts=(new Models\ProductSerialModel($pdo))->countsForProducts($productIds);}
 
 $totals = ['products' => 0, 'stock_value' => 0.0, 'retail_value' => 0.0, 'faulty' => 0.0, 'potential_profit' => 0.0];
 $vatRate = (float) ($tenant['vat_rate'] ?? 0);
@@ -228,6 +230,7 @@ ob_start();
             <th class="text-end">Profit Totals</th>
             <th class="text-end">VAT</th>
             <th class="text-end">Credit limit</th>
+            <?php if($serialEnabled):?><th>Serial numbers</th><?php endif;?>
             <th>Status</th>
             <?php if ($canEdit): ?><th></th><?php endif; ?>
           </tr>
@@ -305,6 +308,7 @@ ob_start();
             <td class="text-end text-muted">
               <?php echo ($p['credit_limit'] ?? null) !== null && $p['credit_limit'] !== '' ? 'KES ' . number_format((float) $p['credit_limit'], 0) : '—'; ?>
             </td>
+            <?php if($serialEnabled):?><td><?php if(!empty($p['serial_tracking'])):$sc=$serialCounts[(int)$p['id']]??[];?><a class="btn btn-sm btn-outline-primary" href="<?php echo public_url('super/inventory/serials.php?product_id='.(int)$p['id']);?>"><i class="fas fa-fingerprint me-1"></i><?php echo (int)($sc['in_stock']??0);?> in stock · <?php echo (int)($sc['sold']??0);?> sold</a><?php else:?><span class="text-muted">Not tracked</span><?php endif;?></td><?php endif;?>
             <td>
               <?php if ($p['status'] === 'active'): ?><span class="badge bg-success">Active</span>
               <?php elseif ($p['status'] === 'archived'): ?><span class="badge bg-secondary">Archived</span>

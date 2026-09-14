@@ -5,7 +5,9 @@ require_once __DIR__ . '/../app/app.php';
 
 // Already fully logged in? Skip straight to the dashboard.
 if (!empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified'])) {
-    $dest = ($_SESSION['role'] ?? '') === 'staff' ? public_url('staff/dashboard/') : public_url('super/dashboard/');
+    $dest = ($_SESSION['role'] ?? '') === 'staff'
+        ? public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/')
+        : public_url('super/dashboard/');
     header('Location: ' . $dest);
     exit;
 }
@@ -56,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['logged_in']    = true;
         $_SESSION['otp_verified'] = true;
         $_SESSION['must_reset']   = false;
-        header('Location: ' . public_url('staff/dashboard/'));
+        header('Location: ' . public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/'));
         exit;
     }
 }

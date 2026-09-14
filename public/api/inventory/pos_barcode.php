@@ -3,7 +3,8 @@ require_once __DIR__.'/../../../app/app.php';
 header('Content-Type: application/json; charset=utf-8');
 if(!TenantContext::check()||!TenantContext::can(Capabilities::SALES_RECORD)){http_response_code(403);echo json_encode(['item'=>null]);exit;}
 $code=trim((string)($_GET['code']??''));
-$row=$code!==''?(new Models\ProductModel(Database::pdo()))->findByBarcode($code):null;
+$db=Database::pdo();$productModel=new Models\ProductModel($db);$row=$code!==''?$productModel->findByBarcode($code):null;$matchedSerial=null;
+if(!$row&&$code!==''&&TenantFeatures::enabled('serials')){$serial=(new Models\ProductSerialModel($db))->findInStock($code);if($serial){$row=$productModel->find((int)$serial['product_id']);if($row&&BranchContext::isIndependent())$row=(new BranchStockService($db))->overlay([$row])[0];$matchedSerial=$serial['serial_number'];}}
 if(!$row||(float)($row['quantity']??0)<=0){echo json_encode(['item'=>null]);exit;}
 $effective=Models\ProductModel::effectivePrice($row);
 echo json_encode(['item'=>[
@@ -14,5 +15,6 @@ echo json_encode(['item'=>[
   'packUnit'=>$row['pack_unit']??'pack','packPrice'=>(float)($row['pack_price']??0),
   'retailPackPrice'=>(float)($row['retail_pack_price']??0),'barcode'=>$row['barcode'],'tiers'=>[],
   'serialTracking'=>!empty($row['serial_tracking']),
+  'matchedSerial'=>$matchedSerial,
   'img'=>$row['image_path']??null,
 ]]);
