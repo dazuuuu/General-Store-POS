@@ -1,10 +1,10 @@
 <?php
 require_once __DIR__.'/../../../app/app.php';PageGuard::platform();$db=Database::pdo();
-$counts=['tenants'=>(int)$db->query('SELECT COUNT(*) FROM tenants')->fetchColumn(),'users'=>(int)$db->query("SELECT COUNT(*) FROM users WHERE status='active'")->fetchColumn(),'sales_today'=>0,'offline_pending'=>0];
+$counts=['tenants'=>(int)$db->query('SELECT COUNT(*) FROM tenants')->fetchColumn(),'users'=>(int)$db->query('SELECT COUNT(*) FROM users WHERE COALESCE(is_active,1)=1')->fetchColumn(),'sales_today'=>0,'offline_pending'=>0];
 try{$counts['sales_today']=(int)$db->query("SELECT COUNT(*) FROM orders WHERE status='paid' AND DATE(paid_at)=CURDATE()")->fetchColumn();}catch(Throwable $e){}
 try{$counts['offline_pending']=(int)$db->query("SELECT COUNT(*) FROM orders WHERE client_uuid IS NOT NULL AND status='open'")->fetchColumn();}catch(Throwable $e){}
 $sql="SELECT t.id,t.name,t.slug,t.status,t.offline_enabled,t.enabled_modules,t.created_at,u.username owner_name,u.email owner_email,
-(SELECT COUNT(*) FROM users x WHERE x.tenant_id=t.id AND x.status='active') user_count,
+(SELECT COUNT(*) FROM users x WHERE x.tenant_id=t.id AND COALESCE(x.is_active,1)=1) user_count,
 (SELECT COUNT(*) FROM orders o WHERE o.tenant_id=t.id AND o.status='paid' AND o.paid_at>=DATE_SUB(NOW(),INTERVAL 30 DAY)) orders_30d,
 (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.tenant_id=t.id AND o.status='paid' AND o.paid_at>=DATE_SUB(NOW(),INTERVAL 30 DAY)) revenue_30d,
 (SELECT MAX(o.created_at) FROM orders o WHERE o.tenant_id=t.id) last_activity
