@@ -257,7 +257,12 @@ class ProductModel extends Model
             );
             $stmt->execute([$tid]);
         }
-        $rows = $stmt->fetchAll();if($independent)$rows=(new \BranchStockService($this->db))->overlay($rows,true);
+        $rows = $stmt->fetchAll();
+        if($independent){
+            $branchStock=new \BranchStockService($this->db);
+            if($includeMenuItems){$menuRows=array_values(array_filter($rows,fn($r)=>!empty($r['is_menu_item'])));$shopRows=$branchStock->overlay(array_values(array_filter($rows,fn($r)=>empty($r['is_menu_item']))),true);$rows=array_merge($shopRows,$menuRows);}
+            else{$rows=$branchStock->overlay($rows,true);}
+        }
         foreach ($rows as &$r) {
             $eff = self::effectivePrice($r);
             $r['regular_price']   = $eff['regular_price'];
