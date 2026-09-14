@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__.'/../../../app/app.php';
 $db=null;$accounts=null;$auth=null;$runner=null;$connectionError='';$coreReady=false;$supportReady=false;$hasSupport=false;$notice='';
-try{$db=Database::pdo();$runner=new MigrationRunnerService($db);$coreReady=$runner->coreSchemaReady();$supportReady=$runner->supportSchemaReady();$accounts=new SupportAccountService($db);$auth=new AuthService($db);$hasSupport=$accounts->exists();}
+try{$db=Database::pdo();$runner=new MigrationRunnerService($db);$coreReady=$runner->coreSchemaReady();$supportReady=$runner->supportSchemaReady();if($coreReady){$accounts=new SupportAccountService($db);$auth=new AuthService($db);$hasSupport=$accounts->exists();}}
 catch(Throwable $e){$connectionError=$e->getMessage();}
 if($hasSupport&&!empty($_SESSION['logged_in'])&&!empty($_SESSION['otp_verified'])&&TenantContext::role()==='platform_admin'){header('Location: '.public_url('domain/support/dashboard.php'));exit;}
 $_SESSION['support_setup_csrf']=$_SESSION['support_setup_csrf']??bin2hex(random_bytes(24));$error='';$values=['name'=>'','email'=>''];
