@@ -38,4 +38,5 @@ echo json_encode(['item' => [
     'brand_name'      => $row['brand_name'] ?? $row['publisher_name'] ?? null,
     'unit'            => $row['unit'] ?? null,
     'faulty_quantity' => isset($row['faulty_quantity']) ? (float) $row['faulty_quantity'] : null,
+    'serial_tracking' => !empty($row['serial_tracking']),
 ]]);

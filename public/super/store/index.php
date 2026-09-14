@@ -224,7 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'invoice') {
         $ids = $_POST['store_ids'] ?? [];
         $ids = is_array($ids) ? $ids : [];
-        $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_packages'] ?? [], $_POST['transfer_quantities'] ?? []);
+        $res = $SP->generateInvoice($ids, $_POST['invoice_to'] ?? '', $_POST['notes'] ?? '', TenantContext::userId(), $_POST['transfer_packages'] ?? [], $_POST['transfer_quantities'] ?? [],$_POST['transfer_tax_rates']??[]);
         if ($res['ok']) {
             $_SESSION['flash']['success'] = 'Internal transfer invoice ' . $res['invoice_number'] . ' generated. Selected stock moved from Store into shop Inventory.';
             header('Location: ' . public_url('super/store/invoice.php?id=' . (int) $res['invoice_id']));
@@ -382,7 +382,7 @@ ob_start();
     <input type="hidden" name="action" value="invoice">
     <div class="table-responsive">
       <table class="table align-middle mb-0" id="warehouseTable">
-        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">In warehouse</th><th style="width:160px;">Qty to transfer</th><th class="text-end">Unit cost</th><th class="text-end">Line</th><th></th></tr></thead>
+        <thead><tr class="text-muted small text-uppercase"><th></th><th>Product</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="text-end">In warehouse</th><th style="width:160px;">Qty to transfer</th><th style="width:110px;">VAT</th><th class="text-end">Unit cost</th><th class="text-end">Line</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($pending as $p):
             $unitsPerPkg = max(0.01, (float) ($p['units_per_package'] ?? 1));
@@ -443,6 +443,7 @@ ob_start();
               <div class="text-muted" style="font-size:.68rem;">max <?php echo (int) $availPkgsInt; ?></div>
               <?php endif; ?>
             </td>
+            <td><div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" name="transfer_tax_rates[<?php echo $sid;?>]" form="transferInvoiceForm" class="form-control" value="<?php echo htmlspecialchars((string)($p['tax_rate']??''));?>" placeholder="0"><span class="input-group-text">%</span></div></td>
             <td class="text-end">KES <?php echo number_format($isContinuous ? $unitBuy : $pkgBuy, 2); ?></td>
             <td class="text-end fw-semibold transfer-line" data-id="<?php echo $sid; ?>">KES 0.00</td>
             <td class="text-end store-actions">

@@ -6,7 +6,7 @@ class CategoryModel extends Model
 {
     protected string $table = 'categories';
 
-    public const TYPES = ['subject', 'stationery', 'product'];
+    public const TYPES = ['subject', 'stationery', 'product', 'menu'];
 
     public function __construct(?\PDO $db = null)
     {
@@ -22,11 +22,11 @@ class CategoryModel extends Model
         try {
             $this->db->query("SELECT `type` FROM `categories` LIMIT 1");
             try {
-                $this->db->exec("ALTER TABLE `categories` MODIFY COLUMN `type` ENUM('subject','stationery','product') NOT NULL DEFAULT 'product'");
+                $this->db->exec("ALTER TABLE `categories` MODIFY COLUMN `type` ENUM('subject','stationery','product','menu') NOT NULL DEFAULT 'product'");
             } catch (\PDOException $ignored) {}
         } catch (\PDOException $e) {
             try {
-                $this->db->exec("ALTER TABLE `categories` ADD COLUMN `type` ENUM('subject','stationery','product') NOT NULL DEFAULT 'product' AFTER `name`");
+                $this->db->exec("ALTER TABLE `categories` ADD COLUMN `type` ENUM('subject','stationery','product','menu') NOT NULL DEFAULT 'product' AFTER `name`");
             } catch (\PDOException $ignored) {
                 return;
             }

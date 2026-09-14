@@ -77,6 +77,12 @@ class PageGuard
         }
     }
 
+    public static function platform(string $cap=Capabilities::PLATFORM_TENANTS): void
+    {
+        self::requireFullAuth();
+        if(!TenantContext::isPlatformAdmin()&&!TenantContext::can($cap))self::deny();
+    }
+
     private static function requireFullAuth(): void
     {
         $authed = !empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified']) && TenantContext::check();
@@ -84,6 +90,27 @@ class PageGuard
             header('Location: ' . public_url(ltrim(self::LOGIN_URL, '/')));
             exit;
         }
+        $tid=TenantContext::tenantId();
+        if($tid!==null){
+            $st=Database::pdo()->prepare('SELECT status FROM tenants WHERE id=? LIMIT 1');$st->execute([$tid]);
+            if((string)$st->fetchColumn()!=='active'){
+                self::clearSession();header('Location: '.public_url('auth/login.php?locked=1'));exit;
+            }
+            $uid=(int)TenantContext::userId();
+            if(TenantContext::role()==='staff'){
+                try{$branch=Database::pdo()->prepare('SELECT b.is_active FROM users u LEFT JOIN branches b ON b.id=u.branch_id AND b.tenant_id=u.tenant_id WHERE u.id=? AND u.tenant_id=?');
+                    $branch->execute([$uid,$tid]);$active=$branch->fetchColumn();
+                    if($active!==false&&(int)$active!==1){self::clearSession();header('Location: '.public_url('auth/login.php?locked=1'));exit;}
+                }catch(PDOException $ignored){}
+            }
+        }
+        $path=strtolower((string)(parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)??''));
+        $moduleRoutes=['/shop/'=>'shop_pos','/purchases/'=>'purchases','/store/'=>'store','/returns/'=>'returns','/services/'=>'services','/payroll/'=>'payroll','/salary/'=>'payroll','/commissions/'=>'commissions','/menu/'=>'restaurant_menu','/restaurant/'=>'restaurant_menu','/restaurant-stock/'=>'restaurant_menu','/inventory/serials'=>'serials','/serials/'=>'serials'];
+        foreach($moduleRoutes as $fragment=>$module){
+            if(strpos($path,$fragment)!==false&&!TenantFeatures::enabled($module)){http_response_code(404);exit('This feature is not enabled for this business.');}
+        }
+        if(!TenantFeatures::enabled('shop_pos')&&(preg_match('#/orders/?$#',$path)||strpos($path,'/orders/new.php')!==false||strpos($path,'/orders/held.php')!==false)){http_response_code(404);exit('Shop POS is not enabled for this business.');}
+        if((strpos($path,'/super/')!==false||strpos($path,'/staff/')!==false||strpos($path,'/clean_migrations')!==false)&&!TenantFeatures::pathEnabled($path)){http_response_code(404);exit('This page is not enabled for this business.');}
     }
 
     /** Kept as a no-op so any remaining callers are harmless in the single-tenant build. */
@@ -96,5 +123,11 @@ class PageGuard
     {
         header('Location: ' . self::LOGIN_URL . '?denied=1');
         exit;
+    }
+
+    private static function clearSession(): void
+    {
+        foreach(['logged_in','otp_verified','user_id','tenant_id','role','capabilities','username','must_reset'] as $key)unset($_SESSION[$key]);
+        TenantContext::reset();TenantFeatures::reset();
     }
 }

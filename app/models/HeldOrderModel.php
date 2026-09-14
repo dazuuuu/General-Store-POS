@@ -13,6 +13,7 @@ class HeldOrderModel extends Model
     {
         parent::__construct($db);
         $this->ensureSchema();
+        new BranchModel($this->db);
     }
 
     /** @param array $in customer_name, staff_id, items[{product_id,quantity}] */
@@ -28,20 +29,21 @@ class HeldOrderModel extends Model
             return ['ok' => false, 'errors' => ['_' => 'Add at least one item to hold this order.']];
         }
         $staffId = (int) ($in['staff_id'] ?? 0);
+        $context = ($in['context'] ?? '') === 'restaurant' ? 'restaurant' : 'shop';
         if ($staffId <= 0) {
             return ['ok' => false, 'errors' => ['_' => 'No staff in context.']];
         }
 
-        $db = $this->db;
+        $db = $this->db;$restaurant=new RestaurantInventoryModel($db);
         try {
             $db->beginTransaction();
-            $ins = $db->prepare('INSERT INTO held_orders (tenant_id, customer_name, staff_id) VALUES (?,?,?)');
-            $ins->execute([$tid, $customerName, $staffId]);
+            $ins = $db->prepare('INSERT INTO held_orders (tenant_id, branch_id, customer_name, staff_id, context) VALUES (?,?,?,?,?)');
+            $ins->execute([$tid, \BranchContext::id(), $customerName, $staffId,$context]);
             $heldId = (int) $db->lastInsertId();
 
             $sel = $db->prepare('SELECT id, name, selling_price, wholesale_price, retail_price, units_per_pack, pack_price, retail_pack_price FROM products WHERE id = ? AND tenant_id = ?');
             $insItem = $db->prepare(
-                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, product_name, unit_price, price_type, quantity) VALUES (?,?,?,?,?,?,?)'
+                'INSERT INTO held_order_items (tenant_id, held_order_id, product_id, menu_variant_id, product_name, unit_price, price_type, quantity, serials_json) VALUES (?,?,?,?,?,?,?,?,?)'
             );
             foreach ($items as $it) {
                 $pid = (int) $it['product_id'];
@@ -60,7 +62,9 @@ class HeldOrderModel extends Model
                 } else {
                     $price = (float) ($p['retail_price'] ?: $p['selling_price']);
                 }
-                $insItem->execute([$tid, $heldId, $pid, $p['name'], $price, $priceType, (float) $it['quantity']]);
+                if(($it['unit_price']??'')!==''&&(float)$it['unit_price']>=$price)$price=(float)$it['unit_price'];
+                $variantId=(int)($it['menu_variant_id']??0);$variant=$variantId?$restaurant->variant($variantId,$pid):null;if($variant){$price=(float)$variant['retail_price'];$p['name'].=' — '.$variant['label'];}
+                $insItem->execute([$tid, $heldId, $pid, $variantId?:null, $p['name'], $price, $priceType, (float) $it['quantity'],json_encode(array_values((array)($it['serial_numbers']??[])))]);
             }
 
             $db->commit();
@@ -72,7 +76,7 @@ class HeldOrderModel extends Model
     }
 
     /** Held orders for the tenant, newest first. */
-    public function listForTenant(): array
+    public function listForTenant(?string $context=null): array
     {
         $tid = \TenantContext::tenantId();
         $sql = "SELECT h.*, u.username AS staff_name,
@@ -80,17 +84,18 @@ class HeldOrderModel extends Model
                        (SELECT COALESCE(SUM(hi.unit_price * hi.quantity),0) FROM held_order_items hi WHERE hi.held_order_id = h.id) AS total
                   FROM held_orders h
              LEFT JOIN users u ON u.id = h.staff_id
-                 WHERE h.tenant_id = ?
-              ORDER BY h.created_at DESC, h.id DESC";
+                 WHERE h.tenant_id = ?";
+        $params=[$tid];if(in_array($context,['shop','restaurant'],true)){$sql.=' AND h.context = ?';$params[]=$context;}
+        $sql.=" ORDER BY h.created_at DESC, h.id DESC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([$tid]);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
 
     /** Held orders with preview item lists for tenant */
-    public function listWithItemsForTenant(): array
+    public function listWithItemsForTenant(?string $context=null): array
     {
-        $list = $this->listForTenant();
+        $list = $this->listForTenant($context);
         if (!$list) { return []; }
         $tid = \TenantContext::tenantId();
         $stmt = $this->db->prepare('SELECT held_order_id, product_name, quantity, unit_price, price_type FROM held_order_items WHERE tenant_id = ? ORDER BY id ASC');
@@ -144,6 +149,9 @@ class HeldOrderModel extends Model
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
         $this->ensureColumn('held_order_items', 'price_type', "ALTER TABLE held_order_items ADD COLUMN price_type VARCHAR(20) NOT NULL DEFAULT 'retail' AFTER unit_price");
+        $this->ensureColumn('held_order_items', 'serials_json', "ALTER TABLE held_order_items ADD COLUMN serials_json TEXT NULL AFTER quantity");
+        $this->ensureColumn('held_order_items', 'menu_variant_id', "ALTER TABLE held_order_items ADD COLUMN menu_variant_id INT NULL AFTER product_id");
+        $this->ensureColumn('held_orders', 'context', "ALTER TABLE held_orders ADD COLUMN context VARCHAR(20) NOT NULL DEFAULT 'shop' AFTER staff_id");
         $this->widenPriceTypeColumn('held_order_items');
     }
 

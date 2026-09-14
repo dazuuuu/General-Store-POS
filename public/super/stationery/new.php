@@ -10,6 +10,8 @@ $C   = new Models\CategoryModel($pdo);
 $BA  = new Models\BookAttributeModel($pdo);
 $SP  = new Models\StoreProductModel($pdo);
 $P   = new Models\ProductModel($pdo);
+$SER = new Models\ProductSerialModel($pdo);
+$BSTOCK = new BranchStockService($pdo);
 $units = Models\ProductModel::UNITS;
 $apiBase = public_url('api/inventory/');
 
@@ -130,19 +132,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $batchNotes = trim((string) ($_POST['notes'] ?? ''));
             $lineNotes = trim((string) ($_POST['remark'] ?? '')) ?: $batchNotes;
+            $serialText=trim((string)($_POST['serials']??''));
+            $serialRequested=!empty($_POST['serial_tracking'])||$serialText!=='';
+            $serialized=$serialRequested||!empty($existing['serial_tracking']);
+            $serialList=$serialized?Models\ProductSerialModel::parse($serialText):[];
+            if($serialized)$unit='piece';
 
-            if ($destination === 'shop') {
+            if($destination==='store'&&$serialRequested){
+                $error='Serialized products must be recorded directly to Shop Inventory so each serial can be tied to a sellable unit.';
+            } elseif($serialized&&!$serialList) {
+                $error='Enter one serial number or IMEI per product unit.';
+            } elseif($serialized&&!empty($existing['is_menu_item'])) {
+                $error='Serial numbers are only for inventory products, not restaurant menu items.';
+            } elseif ($destination === 'shop') {
+                $pdo->beginTransaction();
+                try {
+                $targetProductId=0;
                 if ($existing) {
-                    $newQty = (float) $existing['quantity'] + $qty;
-                    $P->edit((int) $existing['id'], array_merge($existing, [
+                    $newQty = (float) $existing['quantity'] + (($serialized||$BSTOCK->independent())?0:$qty);
+                    $editRes=$P->edit((int) $existing['id'], array_merge($existing, [
                         'quantity' => $newQty,
                         'buying_price' => $unitBuying > 0 ? $unitBuying : ($existing['buying_price'] ?? 0),
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : ($existing['package_buying_price'] ?? null),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : ($existing['retail_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : ($existing['wholesale_price'] ?? 0),
+                        'tax_rate' => ($_POST['tax_rate']??'')!==''?$_POST['tax_rate']:($existing['tax_rate']??null),
                     ]));
+                    if(!$editRes['ok'])throw new RuntimeException($editRes['errors']['_']??'Could not update product.');
+                    $targetProductId=(int)$existing['id'];
                 } else {
-                    $P->create([
+                    $createRes=$P->create([
                         'name' => $name,
                         'category_id' => !empty($_POST['category']) ? (int) $C->findOrCreate($_POST['category'], 'product') : null,
                         'brand_id' => !empty($_POST['brand']) ? (int) $BA->findOrCreate('brand', $_POST['brand']) : null,
@@ -154,21 +173,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'retail_pack_price' => $retailPackPrice > 0 ? $retailPackPrice : null,
                         'package_buying_price' => $buyingPrice > 0 ? $buyingPrice : null,
                         'units_per_pack' => $effectiveInside,
-                        'quantity' => $qty,
+                        'quantity' => ($serialized||$BSTOCK->independent())?0:$qty,
                         'faulty_quantity' => $faulty,
                         'buying_price' => $unitBuying,
                         'wholesale_price' => $unitWholesale,
                         'retail_price' => $sellingPrice,
+                        'tax_rate' => $_POST['tax_rate']??'',
                         'offer_price' => $_POST['offer_price'] ?? null,
                         'offer_starts_at' => $_POST['offer_starts_at'] ?? null,
                         'offer_ends_at' => $_POST['offer_ends_at'] ?? null,
                         'image_path' => $img['path'] ?? null,
                         'description' => $lineNotes ?: null,
                     ]);
+                    if(!$createRes['ok'])throw new RuntimeException($createRes['errors']['_']??'Could not create product.');
+                    $targetProductId=(int)$createRes['id'];
                 }
+                if($serialized){$serialRes=$SER->add($targetProductId,$serialText,true);if(!$serialRes['ok'])throw new RuntimeException($serialRes['error']);}
+                if($BSTOCK->independent()){$incoming=$serialized?count($serialList):$qty;if($serialized)$pdo->prepare('UPDATE products SET quantity=GREATEST(0,quantity-?) WHERE id=? AND tenant_id=?')->execute([$incoming,$targetProductId,TenantContext::tenantId()]);if(!$BSTOCK->adjust($targetProductId,$incoming))throw new RuntimeException('Could not add stock to the selected branch.');}
+                $pdo->commit();
                 $_SESSION['flash']['success'] = 'Product "' . htmlspecialchars($name) . '" saved directly to Shop (Inventory) and ready to sell.';
                 header('Location: ' . public_url('super/inventory/'));
                 exit;
+                }catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$error=$e->getMessage();}
             } else {
                 if ($existing) {
                     $items = [[
@@ -191,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'buying_price' => $unitBuying > 0 ? $unitBuying : (float) ($existing['buying_price'] ?? 0),
                         'retail_price' => $sellingPrice > 0 ? $sellingPrice : (float) ($existing['retail_price'] ?? $existing['selling_price'] ?? 0),
                         'wholesale_price' => $unitWholesale > 0 ? $unitWholesale : (float) ($existing['wholesale_price'] ?? 0),
+                        'tax_rate' => $_POST['tax_rate']??'',
                         'offer_price' => '',
                         'offer_starts_at' => '',
                         'offer_ends_at' => '',
@@ -218,6 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'buying_price' => $unitBuying,
                         'retail_price' => $sellingPrice,
                         'wholesale_price' => $unitWholesale,
+                        'tax_rate' => $_POST['tax_rate']??'',
                         'offer_price' => $_POST['offer_price'] ?? '',
                         'offer_starts_at' => $_POST['offer_starts_at'] ?? '',
                         'offer_ends_at' => $_POST['offer_ends_at'] ?? '',
@@ -348,6 +376,21 @@ ob_start();
         <label class="form-label fw-semibold">Faulty / broken items <span class="text-muted fw-normal small">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="faulty_quantity" class="form-control" value="<?php echo htmlspecialchars($_POST['faulty_quantity'] ?? '0'); ?>">
       </div>
+      <?php if(TenantFeatures::enabled('serials')):?>
+      <div class="col-12">
+        <div class="border rounded p-3 bg-light" id="serialStockBox">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="serial_tracking" value="1" id="serialTracking" <?php echo !empty($_POST['serial_tracking'])?'checked':'';?>>
+            <label class="form-check-label fw-semibold" for="serialTracking">This inventory product uses serial numbers / IMEI</label>
+          </div>
+          <div id="serialFields" class="mt-2">
+            <label class="form-label small">Serial numbers / IMEIs — one per unit</label>
+            <textarea name="serials" id="serialNumbers" class="form-control font-monospace" rows="5" placeholder="IMEI-001&#10;IMEI-002"><?php echo htmlspecialchars($_POST['serials']??'');?></textarea>
+            <div class="form-text"><span id="serialCount">0</span> sellable units. Quantity is derived from these serials to prevent stock mismatch. Available only when recording directly to Shop Inventory.</div>
+          </div>
+        </div>
+      </div>
+      <?php endif;?>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Supplier <span class="text-muted fw-normal small">(optional)</span></label>
         <div class="ta-wrap">
@@ -374,6 +417,10 @@ ob_start();
         <label class="form-label fw-semibold" id="retailLabel">Retail price (single item) <span class="text-muted fw-normal small">(optional)</span></label>
         <input type="number" step="0.01" min="0" name="selling_price" id="retailPrice" class="form-control" value="<?php echo htmlspecialchars($_POST['selling_price'] ?? ''); ?>" placeholder="0">
         <div class="form-text">Price when selling one item individually.</div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">VAT rate <span class="text-muted fw-normal small">(optional)</span></label>
+        <div class="input-group"><input type="number" step="0.01" min="0" max="100" name="tax_rate" class="form-control" value="<?php echo htmlspecialchars($_POST['tax_rate']??'');?>" placeholder="e.g. 16"><span class="input-group-text">%</span></div>
       </div>
       <div class="col-12">
         <div id="profitSummary" class="alert alert-light border small mb-0" style="display:none;"></div>
@@ -443,6 +490,16 @@ ob_start();
   var unitSelect = document.getElementById('unitSelect');
   var packageFields = document.getElementById('packageFields');
   var quantityInput = document.getElementById('quantityInput');
+  var serialTracking = document.getElementById('serialTracking');
+  var serialNumbers = document.getElementById('serialNumbers');
+  var serialFields = document.getElementById('serialFields');
+  function updateSerialQuantity() {
+    if(!serialTracking||!serialNumbers)return;
+    var serials=Array.from(new Set(serialNumbers.value.split(/[\r\n,]+/).map(function(v){return v.trim();}).filter(Boolean)));
+    document.getElementById('serialCount').textContent=serials.length;
+    if(serialTracking.checked){quantityInput.value=serials.length;quantityInput.readOnly=true;}
+    else quantityInput.readOnly=false;
+  }
   var packageQty = document.getElementById('packageQty');
   var unitsPerPackage = document.getElementById('unitsPerPackage');
   function money(n) { return 'KES ' + (Math.round(n * 100) / 100).toLocaleString(); }
@@ -457,6 +514,7 @@ ob_start();
     } else {
       total = parseFloat(quantityInput.value) || 0;
     }
+    if(serialTracking&&serialTracking.checked){updateSerialQuantity();total=parseFloat(quantityInput.value)||0;}
     var buy = parseFloat(document.getElementById('buyingPrice').value) || 0;
     var retail = parseFloat(document.getElementById('retailPrice').value) || 0;
     var wholesale = parseFloat(document.getElementById('wholesalePrice').value) || 0;
@@ -520,11 +578,13 @@ ob_start();
     } else {
       if (btnText) btnText.textContent = 'Save to Store warehouse';
     }
+    if(serialTracking){serialTracking.disabled=!isShop;if(!isShop)serialTracking.checked=false;serialFields.style.display=isShop?'block':'none';updateSerialQuantity();}
   }
   document.querySelectorAll('.dest-radio').forEach(function (r) {
     r.addEventListener('change', updateDestUI);
   });
   updateDestUI();
+  if(serialTracking){serialTracking.addEventListener('change',updateSerialQuantity);serialNumbers.addEventListener('input',function(){if(this.value.trim()){serialTracking.checked=true;document.getElementById('destShop').checked=true;updateDestUI();}updateSerialQuantity();});updateSerialQuantity();}
   if (offerToggle) {
     offerToggle.addEventListener('change', function () {
       offerFields.style.display = offerToggle.checked ? 'flex' : 'none';
@@ -582,6 +642,7 @@ ob_start();
     if (item.buying_price) document.getElementById('buyingPrice').value = item.buying_price;
     if (item.pack_price && document.getElementById('wholesalePrice')) document.getElementById('wholesalePrice').value = item.pack_price;
     if (item.retail_pack_price && document.getElementById('retailPackPrice')) document.getElementById('retailPackPrice').value = item.retail_pack_price;
+    if(item.serial_tracking&&serialTracking){document.getElementById('destShop').checked=true;updateDestUI();serialTracking.checked=true;serialFields.style.display='block';updateSerialQuantity();}
     var bits = [item.category_name || item.subject_name, item.brand_name || item.publisher_name, item.unit].filter(Boolean);
     note.style.display = 'block';
     note.innerHTML = '<i class="fas fa-circle-check me-1"></i>Already in stock' +

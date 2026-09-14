@@ -200,30 +200,32 @@ class ProductModel extends Model
     public function lowStock(int $limit = 100): array
     {
         $tid = \TenantContext::tenantId();
+        $independent=\BranchContext::isIndependent();
         $st = $this->db->prepare(
             "SELECT p.*, c.name AS category_name
                FROM products p
                LEFT JOIN categories c ON c.id = p.category_id
-              WHERE p.tenant_id = ? AND p.status IN ('active','archived')
-                AND p.quantity <= p.low_stock_threshold
+              WHERE p.tenant_id = ? AND COALESCE(p.is_menu_item,0)=0 AND p.status IN ('active','archived')
+                ".($independent?'':'AND p.quantity <= p.low_stock_threshold')."
               ORDER BY p.quantity ASC, p.name ASC
               LIMIT ?"
         );
         $st->bindValue(1, $tid, \PDO::PARAM_INT);
         $st->bindValue(2, max(1, $limit), \PDO::PARAM_INT);
         $st->execute();
-        return $st->fetchAll();
+        $rows=$st->fetchAll();if($independent){$rows=(new \BranchStockService($this->db))->overlay($rows);$rows=array_values(array_filter($rows,fn($r)=>(float)$r['quantity']<=(float)$r['low_stock_threshold']));}return array_slice($rows,0,$limit);
     }
 
     /** Sellable stock for the till — category/brand, colors, unit, faulty qty,
      *  and offer/archive flags. Archived items stay sellable from the Archive tab. */
-    public function sellable(): array
+    public function sellable(bool $includeMenuItems=false): array
     {
         $tid = \TenantContext::tenantId();
-        $sql = "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
+        $independent=\BranchContext::isIndependent();
+        $sql = "SELECT p.id, p.name, p.product_type, p.is_menu_item, p.selling_price, p.wholesale_price, p.retail_price,
                        p.offer_price, p.offer_starts_at, p.offer_ends_at, p.buying_price, p.package_buying_price,
                        p.quantity, p.faulty_quantity, p.unit, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
-                       p.credit_limit, p.status, p.barcode, p.colors, p.sizes,
+                       p.credit_limit, p.status, p.barcode, p.serial_tracking, p.colors, p.sizes,
                        p.image_path, p.size_value, p.size_unit,
                        p.category_id, c.name AS category_name,
                        p.publisher_id, pu.name AS publisher_name,
@@ -232,16 +234,16 @@ class ProductModel extends Model
              LEFT JOIN categories c ON c.id = p.category_id
              LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
              LEFT JOIN book_attributes br ON br.id = p.brand_id
-                 WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
+                 WHERE p.tenant_id = ? ".($includeMenuItems?'':'AND COALESCE(p.is_menu_item,0)=0')." AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
               ORDER BY p.name ASC";
         $stmt = $this->db->prepare($sql);
         try {
             $stmt->execute([$tid]);
         } catch (\PDOException $e) {
             $stmt = $this->db->prepare(
-                "SELECT p.id, p.name, p.product_type, p.selling_price, p.wholesale_price, p.retail_price,
+                "SELECT p.id, p.name, p.product_type, p.is_menu_item, p.selling_price, p.wholesale_price, p.retail_price,
                         p.offer_price, p.offer_starts_at, p.offer_ends_at,
-                        p.quantity, p.unit, p.status, p.barcode, p.colors, p.sizes,
+                        p.quantity, p.unit, p.status, p.barcode, p.serial_tracking, p.colors, p.sizes,
                         p.image_path, p.size_value, p.size_unit,
                         p.category_id, c.name AS category_name,
                         p.publisher_id, pu.name AS publisher_name,
@@ -250,12 +252,17 @@ class ProductModel extends Model
               LEFT JOIN categories c ON c.id = p.category_id
               LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
               LEFT JOIN book_attributes br ON br.id = p.brand_id
-                  WHERE p.tenant_id = ? AND p.status IN ('active','archived') AND p.quantity > 0
+                  WHERE p.tenant_id = ? ".($includeMenuItems?'':'AND COALESCE(p.is_menu_item,0)=0')." AND p.status IN ('active','archived') ".($independent?'':'AND p.quantity > 0')."
                ORDER BY p.name ASC"
             );
             $stmt->execute([$tid]);
         }
         $rows = $stmt->fetchAll();
+        if($independent){
+            $branchStock=new \BranchStockService($this->db);
+            if($includeMenuItems){$menuRows=array_values(array_filter($rows,fn($r)=>!empty($r['is_menu_item'])));$shopRows=$branchStock->overlay(array_values(array_filter($rows,fn($r)=>empty($r['is_menu_item']))),true);$rows=array_merge($shopRows,$menuRows);}
+            else{$rows=$branchStock->overlay($rows,true);}
+        }
         foreach ($rows as &$r) {
             $eff = self::effectivePrice($r);
             $r['regular_price']   = $eff['regular_price'];
@@ -268,6 +275,12 @@ class ProductModel extends Model
             $r['sizes']           = $r['sizes'] ? (json_decode($r['sizes'], true) ?: []) : [];
         }
         return $rows;
+    }
+
+    /** Active prepared-food/drink items used only by the restaurant order screen. */
+    public function sellableMenu(): array
+    {
+        return array_values(array_filter($this->sellable(true), static fn(array $row): bool => !empty($row['is_menu_item'])));
     }
 
     /** Product name type-ahead / restock lookup. */
@@ -288,14 +301,14 @@ class ProductModel extends Model
         $stmt = $this->db->prepare(
             "SELECT p.id, p.name, p.quantity, p.faulty_quantity, p.unit, p.colors, p.buying_price,
                     p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
-                    p.package_buying_price, p.image_path, p.barcode,
+                    p.package_buying_price, p.image_path, p.barcode, p.serial_tracking,
                     c.name AS category_name, c.name AS subject_name,
                     pu.name AS publisher_name, br.name AS brand_name
                FROM products p
           LEFT JOIN categories c ON c.id = p.category_id
           LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
           LEFT JOIN book_attributes br ON br.id = p.brand_id
-              WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
+              WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND COALESCE(p.is_menu_item,0)=0 AND p.status = ? AND p.name LIKE ?
            ORDER BY (p.name LIKE ?) DESC, p.name ASC
               LIMIT " . (int) $limit
         );
@@ -304,20 +317,20 @@ class ProductModel extends Model
             $stmt->execute($params);
         } catch (\PDOException $e) {
             $stmt = $this->db->prepare(
-                "SELECT p.id, p.name, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                "SELECT p.id, p.name, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode, p.serial_tracking,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
               LEFT JOIN categories c ON c.id = p.category_id
               LEFT JOIN book_attributes pu ON pu.id = p.publisher_id
               LEFT JOIN book_attributes br ON br.id = p.brand_id
-                  WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND p.status = ? AND p.name LIKE ?
+                  WHERE p.tenant_id = ? AND p.product_type IN ($placeholders) AND COALESCE(p.is_menu_item,0)=0 AND p.status = ? AND p.name LIKE ?
                ORDER BY (p.name LIKE ?) DESC, p.name ASC
                   LIMIT " . (int) $limit
             );
             $stmt->execute($params);
         }
-        return $stmt->fetchAll();
+        $rows=$stmt->fetchAll();return \BranchContext::isIndependent()?(new \BranchStockService($this->db))->overlay($rows):$rows;
     }
 
     /** Exact barcode match for scan-to-restock. */
@@ -332,7 +345,7 @@ class ProductModel extends Model
             $stmt = $this->db->prepare(
                 'SELECT p.id, p.name, p.product_type, p.quantity, p.faulty_quantity, p.unit, p.buying_price,
                         p.retail_price, p.wholesale_price, p.units_per_pack, p.pack_unit, p.pack_price, p.retail_pack_price,
-                        p.package_buying_price, p.image_path, p.barcode,
+                        p.package_buying_price, p.image_path, p.barcode, p.serial_tracking,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
@@ -345,7 +358,7 @@ class ProductModel extends Model
             $stmt->execute([$tid, $barcode, 'archived']);
         } catch (\PDOException $e) {
             $stmt = $this->db->prepare(
-                'SELECT p.id, p.name, p.product_type, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode,
+                'SELECT p.id, p.name, p.product_type, p.quantity, p.unit, p.buying_price, p.image_path, p.barcode, p.serial_tracking,
                         c.name AS category_name, c.name AS subject_name,
                         pu.name AS publisher_name, br.name AS brand_name
                    FROM products p
@@ -357,7 +370,7 @@ class ProductModel extends Model
             );
             $stmt->execute([$tid, $barcode, 'archived']);
         }
-        $row = $stmt->fetch();
+        $row = $stmt->fetch();if($row&&\BranchContext::isIndependent())$row=(new \BranchStockService($this->db))->overlay([$row])[0];
         return $row ?: null;
     }
 
@@ -401,7 +414,7 @@ class ProductModel extends Model
         $tid = \TenantContext::tenantId();
         $params = [$tid];
         $sql = 'SELECT ' . self::META_SELECT_SQL . self::META_JOIN_SQL . '
-              WHERE p.tenant_id = ?' . ($includeArchived ? '' : " AND p.status <> 'archived'");
+              WHERE p.tenant_id = ? AND COALESCE(p.is_menu_item,0)=0' . ($includeArchived ? '' : " AND p.status <> 'archived'");
         if ($productType !== null) {
             $sql .= ' AND p.product_type = ?';
             $params[] = $productType;
@@ -409,7 +422,7 @@ class ProductModel extends Model
         $sql .= ' ORDER BY p.name ASC';
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll();if(\BranchContext::isIndependent())$rows=(new \BranchStockService($this->db))->overlay($rows);
         foreach ($rows as &$r) {
             $r['retail_price'] = (float) ($r['retail_price'] ?? $r['selling_price'] ?? 0);
             $r['wholesale_price'] = (float) ($r['wholesale_price'] ?? $r['selling_price'] ?? 0);
@@ -423,7 +436,7 @@ class ProductModel extends Model
         $tid = \TenantContext::tenantId();
         $stmt = $this->db->prepare(
             'SELECT ' . self::META_SELECT_SQL . self::META_JOIN_SQL . "
-              WHERE p.tenant_id = ? AND p.status = 'archived'
+              WHERE p.tenant_id = ? AND COALESCE(p.is_menu_item,0)=0 AND p.status = 'archived'
            ORDER BY p.name ASC"
         );
         $stmt->execute([$tid]);
@@ -472,6 +485,8 @@ class ProductModel extends Model
             'package_buying_price' => "ALTER TABLE `products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `retail_pack_price`",
             'faulty_quantity' => "ALTER TABLE `products` ADD COLUMN `faulty_quantity` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `quantity`",
             'tax_rate' => "ALTER TABLE `products` ADD COLUMN `tax_rate` DECIMAL(5,2) NULL AFTER `retail_price`",
+            'is_menu_item' => "ALTER TABLE `products` ADD COLUMN `is_menu_item` TINYINT(1) NOT NULL DEFAULT 0 AFTER `product_type`",
+            'serial_tracking' => "ALTER TABLE `products` ADD COLUMN `serial_tracking` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_menu_item`",
         ];
 
         foreach ($checks as $column => $sql) {
@@ -571,6 +586,9 @@ class ProductModel extends Model
         if (isset($in['credit_limit']) && $in['credit_limit'] !== '' && (!is_numeric($in['credit_limit']) || (float) $in['credit_limit'] < 0)) {
             $errors['credit_limit'] = 'Enter a valid credit limit.';
         }
+        if (isset($in['tax_rate']) && $in['tax_rate'] !== '' && (!is_numeric($in['tax_rate']) || (float)$in['tax_rate']<0 || (float)$in['tax_rate']>100)) {
+            $errors['tax_rate'] = 'Enter a VAT rate between 0 and 100%.';
+        }
         if (isset($in['units_per_pack']) && $in['units_per_pack'] !== '' && (!is_numeric($in['units_per_pack']) || (float) $in['units_per_pack'] <= 0)) {
             $errors['units_per_pack'] = 'Enter a valid pack size.';
         }
@@ -646,6 +664,7 @@ class ProductModel extends Model
         $productTypeIn = $in['product_type'] ?? 'product';
         $productType = in_array($productTypeIn, self::PRODUCT_TYPES, true) ? $productTypeIn : 'product';
         $creditLimit = ($in['credit_limit'] ?? '') !== '' ? (float) $in['credit_limit'] : null;
+        $taxRate = ($in['tax_rate'] ?? '') !== '' ? min(100,max(0,(float)$in['tax_rate'])) : null;
         $unitsPerPack = max(0.01, (float) ($in['units_per_pack'] ?? 1));
         $packUnit = trim((string) ($in['pack_unit'] ?? '')) ?: null;
         $packPrice = ($in['pack_price'] ?? '') !== '' ? (float) $in['pack_price'] : null;
@@ -698,6 +717,7 @@ class ProductModel extends Model
             'image_path'          => ($in['image_path'] ?? '') !== '' ? $in['image_path'] : null,
             'low_stock_threshold' => (int) ($in['low_stock_threshold'] ?? 10),
             'credit_limit'        => $creditLimit,
+            'tax_rate'            => $taxRate,
             'status'              => $status,
         ];
     }

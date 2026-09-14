@@ -1,0 +1,24 @@
+<?php
+namespace Models;
+class BranchModel extends Model
+{
+    protected string $table='branches';
+    public function __construct(?\PDO $db=null){parent::__construct($db);$this->ensureSchema();$this->ensureDefault();}
+    public function list(): array {$st=$this->db->prepare('SELECT b.*,b.title name,(SELECT COUNT(*) FROM users u WHERE u.tenant_id=b.tenant_id AND u.branch_id=b.id) staff_count FROM branches b WHERE b.tenant_id=? ORDER BY b.is_default DESC,b.title');$st->execute([\TenantContext::tenantId()]);return$st->fetchAll();}
+    public function createBranch(array $in): array
+    {
+        $tid=\TenantContext::tenantId();$name=trim((string)($in['name']??''));$mode=($in['inventory_mode']??'shared')==='independent'?'independent':'shared';if(!$tid||$name==='')return['ok'=>false,'error'=>'Enter the branch name.'];
+        try{$this->db->beginTransaction();$this->db->prepare('INSERT INTO branches(tenant_id,title,location,inventory_mode) VALUES(?,?,?,?)')->execute([$tid,$name,trim((string)($in['location']??''))?:null,$mode]);$id=(int)$this->db->lastInsertId();if($mode==='independent'&&!empty($in['copy_inventory']))$this->db->prepare('INSERT INTO branch_stock(tenant_id,branch_id,product_id,quantity,faulty_quantity) SELECT tenant_id,?,id,quantity,faulty_quantity FROM products WHERE tenant_id=? ON DUPLICATE KEY UPDATE quantity=VALUES(quantity),faulty_quantity=VALUES(faulty_quantity)')->execute([$id,$tid]);$this->db->commit();return['ok'=>true,'id'=>$id,'error'=>null];}catch(\Throwable $e){if($this->db->inTransaction())$this->db->rollBack();return['ok'=>false,'error'=>$e->getMessage()];}
+    }
+    public function assignStaff(int $userId,int $branchId): bool {$st=$this->db->prepare('UPDATE users SET branch_id=? WHERE id=? AND tenant_id=?');$st->execute([$branchId?:null,$userId,\TenantContext::tenantId()]);return(bool)$st->rowCount();}
+    public function staff(): array {$st=$this->db->prepare("SELECT u.id,u.username,u.email,u.branch_id FROM users u JOIN roles r ON r.id=u.role_id WHERE u.tenant_id=? AND r.role_name='staff' ORDER BY u.username");$st->execute([\TenantContext::tenantId()]);return$st->fetchAll();}
+    public function setStock(int $branchId,int $productId,float $quantity): bool {$st=$this->db->prepare('INSERT INTO branch_stock(tenant_id,branch_id,product_id,quantity) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)');return$st->execute([\TenantContext::tenantId(),$branchId,$productId,max(0,$quantity)]);}
+    private function ensureDefault(): void {$tid=\TenantContext::tenantId();if(!$tid)return;$st=$this->db->prepare('SELECT id FROM branches WHERE tenant_id=? LIMIT 1');$st->execute([$tid]);if(!$st->fetchColumn())$this->db->prepare("INSERT INTO branches(tenant_id,title,inventory_mode,is_default) VALUES(?,'Main Branch','shared',1)")->execute([$tid]);}
+    private function ensureSchema(): void
+    {
+        $this->db->exec("CREATE TABLE IF NOT EXISTS branches(id INT AUTO_INCREMENT PRIMARY KEY,tenant_id INT NOT NULL,title VARCHAR(160) NOT NULL,location VARCHAR(255) NULL,inventory_mode ENUM('shared','independent') NOT NULL DEFAULT 'shared',is_default TINYINT(1) NOT NULL DEFAULT 0,is_active TINYINT(1) NOT NULL DEFAULT 1,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY uq_branch_title(tenant_id,title)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $this->db->exec("CREATE TABLE IF NOT EXISTS branch_stock(tenant_id INT NOT NULL,branch_id INT NOT NULL,product_id INT NOT NULL,quantity DECIMAL(14,4) NOT NULL DEFAULT 0,faulty_quantity DECIMAL(14,4) NOT NULL DEFAULT 0,updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,PRIMARY KEY(tenant_id,branch_id,product_id),KEY idx_branch_stock_product(tenant_id,product_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach(['users'=>['branch_id','ALTER TABLE users ADD COLUMN branch_id INT NULL AFTER tenant_id'],'orders'=>['branch_id','ALTER TABLE orders ADD COLUMN branch_id INT NULL AFTER tenant_id'],'held_orders'=>['branch_id','ALTER TABLE held_orders ADD COLUMN branch_id INT NULL AFTER tenant_id'],'stock_intakes'=>['branch_id','ALTER TABLE stock_intakes ADD COLUMN branch_id INT NULL AFTER tenant_id'],'sales'=>['branch_id','ALTER TABLE sales ADD COLUMN branch_id INT NULL AFTER tenant_id']] as $table=>$def){try{$this->db->query("SELECT `{$def[0]}` FROM `$table` LIMIT 1");}catch(\PDOException $e){try{$this->db->exec($def[1]);}catch(\PDOException $ignored){}}}
+        foreach(['inventory_mode'=>"ALTER TABLE branches ADD COLUMN inventory_mode ENUM('shared','independent') NOT NULL DEFAULT 'shared' AFTER location",'is_default'=>"ALTER TABLE branches ADD COLUMN is_default TINYINT(1) NOT NULL DEFAULT 0 AFTER inventory_mode"] as $column=>$sql){try{$this->db->query("SELECT `$column` FROM branches LIMIT 1");}catch(\PDOException $e){$this->db->exec($sql);}}
+    }
+}

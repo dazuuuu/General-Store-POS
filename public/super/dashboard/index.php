@@ -123,6 +123,119 @@ $lossBars = array_map(fn($v) => round(max(0, $v * 0.38), 2), $chartValues);
 $limitTarget = max(1, $weekSum['revenue'] + max($weekCogs, $damagedLoss, 1));
 $limitPct = min(100, round(($weekSum['revenue'] / $limitTarget) * 100));
 ob_start();
+?>
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+  <div>
+    <h1 class="h5 fw-bold mb-1"><?php echo htmlspecialchars($greeting . ', ' . $userName); ?></h1>
+    <p class="text-muted small mb-0"><?php echo htmlspecialchars($shop); ?> overview for today and the last 7 days.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-primary btn-sm" href="<?php echo public_url('super/inventory/'); ?>"><i class="fas fa-boxes-stacked me-1"></i>Inventory</a>
+    <a class="btn btn-outline-primary btn-sm" href="<?php echo public_url('super/reports/'); ?>"><i class="fas fa-table me-1"></i>Reports</a>
+    <a class="btn btn-primary btn-sm" href="<?php echo public_url('super/shop/'); ?>"><i class="fas fa-cart-shopping me-1"></i>Open POS</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <?php
+  $summaryCards = [
+      ['Today sales', (string) (int) ($todaySum['count'] ?? 0), ''],
+      ['Today revenue', $currency . ' ' . number_format((float) ($todaySum['revenue'] ?? 0), 0), 'text-primary'],
+      ['7-day revenue', $currency . ' ' . number_format((float) ($weekSum['revenue'] ?? 0), 0), 'text-primary'],
+      ['7-day net profit', $profitAvailable ? $currency . ' ' . number_format($profitAfterLoss, 0) : 'Unavailable', $profitAfterLoss < 0 ? 'text-danger' : 'text-success'],
+      ['Credit owed', $currency . ' ' . number_format($dashCreditOwed, 0), $dashCreditOwed > 0 ? 'text-warning' : ''],
+      ['Low stock', (string) count($lowStock), $lowStock ? 'text-danger' : 'text-success'],
+      ['Open invoices', (string) count($openTabs), ''],
+      ['Staff accounts', (string) count($staffList), ''],
+  ];
+  foreach ($summaryCards as [$label, $value, $valueClass]):
+  ?>
+    <div class="col-6 col-xl-3">
+      <div class="card border-0 shadow-sm h-100" style="border-radius:12px;">
+        <div class="card-body p-3">
+          <div class="text-muted small text-uppercase fw-semibold mb-2"><?php echo htmlspecialchars($label); ?></div>
+          <div class="h5 mb-0 fw-bold <?php echo $valueClass; ?>"><?php echo htmlspecialchars($value); ?></div>
+        </div>
+      </div>
+    </div>
+  <?php endforeach; ?>
+</div>
+
+<div class="card border-0 shadow-sm mb-4" style="border-radius:12px;">
+  <div class="card-header bg-white border-0 pt-3 px-3 d-flex justify-content-between align-items-center">
+    <div>
+      <h2 class="h6 fw-bold mb-1">Recent sales</h2>
+      <p class="text-muted small mb-0">Latest paid sales and customer orders.</p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="<?php echo public_url('super/sales/'); ?>">View all sales</a>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead><tr><th>Date</th><th>Receipt</th><th>Customer</th><th>Products</th><th>Payment</th><th class="text-end">Total</th><th></th></tr></thead>
+      <tbody>
+      <?php if (!$recent): ?>
+        <tr><td colspan="7" class="text-center text-muted py-4">No sales recorded yet.</td></tr>
+      <?php else: foreach ($recent as $sale):
+        $productNames = array_values(array_filter(array_map(fn($item) => $item['name'] ?? $item['product_name'] ?? '', $sale['items'] ?? [])));
+      ?>
+        <tr>
+          <td><span class="fw-semibold"><?php echo date('d M Y', strtotime($sale['created_at'])); ?></span><small class="d-block text-muted"><?php echo date('H:i', strtotime($sale['created_at'])); ?></small></td>
+          <td class="font-monospace"><?php echo htmlspecialchars($sale['receipt_number'] ?? ('#' . $sale['id'])); ?></td>
+          <td><?php echo htmlspecialchars($sale['customer_name'] ?? $sale['table_name'] ?? 'Walk-in'); ?></td>
+          <td><span class="text-truncate d-inline-block" style="max-width:240px;"><?php echo htmlspecialchars($productNames ? implode(', ', $productNames) : 'Sale items'); ?></span></td>
+          <td><?php echo htmlspecialchars(ucfirst((string) ($sale['payment_method'] ?? 'cash'))); ?></td>
+          <td class="text-end fw-semibold"><?php echo htmlspecialchars($currency); ?> <?php echo number_format((float) ($sale['total'] ?? 0), 2); ?></td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="<?php echo public_url($sale['receipt_url']); ?>">View</a></td>
+        </tr>
+      <?php endforeach; endif; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100" style="border-radius:12px;">
+      <div class="card-header bg-white border-0 pt-3 px-3 d-flex justify-content-between align-items-center">
+        <h2 class="h6 fw-bold mb-0">Low-stock products</h2>
+        <a class="btn btn-outline-secondary btn-sm" href="<?php echo public_url('super/inventory/low-stock.php'); ?>">Review stock</a>
+      </div>
+      <div class="list-group list-group-flush">
+        <?php if (!$lowStock): ?><div class="text-center text-muted small py-4">All stock levels are healthy.</div>
+        <?php else: foreach (array_slice($lowStock, 0, 6) as $product): ?>
+          <div class="list-group-item d-flex justify-content-between align-items-center px-3">
+            <span><?php echo htmlspecialchars($product['name']); ?><small class="d-block text-muted"><?php echo htmlspecialchars($product['category_name'] ?? 'Uncategorised'); ?></small></span>
+            <span class="badge bg-danger"><?php echo number_format((float) $product['quantity'], 2); ?> <?php echo htmlspecialchars($product['unit'] ?? ''); ?></span>
+          </div>
+        <?php endforeach; endif; ?>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100" style="border-radius:12px;">
+      <div class="card-header bg-white border-0 pt-3 px-3 d-flex justify-content-between align-items-center">
+        <h2 class="h6 fw-bold mb-0">Open customer invoices</h2>
+        <a class="btn btn-outline-secondary btn-sm" href="<?php echo public_url('super/invoices/'); ?>">View invoices</a>
+      </div>
+      <div class="list-group list-group-flush">
+        <?php if (!$openTabs): ?><div class="text-center text-muted small py-4">There are no unpaid invoices.</div>
+        <?php else: foreach (array_slice($openTabs, 0, 6) as $invoice):
+          $due = max(0, (float) ($invoice['total'] ?? 0) - (float) ($invoice['amount_paid'] ?? 0));
+        ?>
+          <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center px-3" href="<?php echo public_url('super/orders/view.php?id=' . (int) $invoice['id']); ?>">
+            <span><?php echo htmlspecialchars($invoice['table_name'] ?? 'Customer'); ?><small class="d-block text-muted"><?php echo htmlspecialchars($invoice['receipt_number'] ?? 'Open invoice'); ?></small></span>
+            <span class="fw-semibold text-warning"><?php echo htmlspecialchars($currency); ?> <?php echo number_format($due, 2); ?></span>
+          </a>
+        <?php endforeach; endif; ?>
+      </div>
+    </div>
+  </div>
+</div>
+<?php
+$content = ob_get_clean();
+include __DIR__ . '/../../templates/tenants/layout.php';
+return;
+
 $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 ?>
 <div class="fin-shell">
@@ -316,18 +429,15 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 </div>
 
 <style>
-.t-sidebar,.t-sidebar-toggle,.t-sidebar-overlay{display:none!important;}
-.t-main{margin-left:0!important;width:100%!important;max-width:none!important;padding:0!important;background:#e9e9ea;min-height:100vh;}
-.t-topbar{display:none;}
-.fin-shell{display:grid;grid-template-columns:72px minmax(0,1fr);gap:0;width:100%;max-width:none;min-height:100vh;margin:0;background:#f3f3f4;border:0;border-radius:0;padding:0;box-shadow:none;}
-.fin-rail{background:#fff;border-radius:0;border-right:1px solid #ece8ef;padding:16px 10px;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:100vh;position:sticky;top:0;}
+.fin-shell{display:block;width:100%;margin:0;}
+.fin-rail,.fin-head{display:none!important;}
 .rail-mark,.rail-pill{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#625b69;text-decoration:none;}
 .rail-mark{background:var(--pos-violet);color:#fff;}
 .rail-pill.active{background:#17151d;color:#fff;}
 .rail-pill:hover{background:var(--pos-violet-light);color:var(--pos-violet);}
 .rail-spacer{flex:1;}
 .nav-svg{display:block;flex-shrink:0;}
-.fin-board{min-width:0;padding:20px 24px 28px;width:100%;}
+.fin-board{min-width:0;padding:0;width:100%;}
 .fin-head{height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;}
 .fin-tabs{background:#fff;border-radius:20px;padding:7px;display:flex;gap:8px;align-items:center;}
 .tab{border-radius:16px;padding:9px 18px;color:#4f4856;text-decoration:none;font-size:.84rem;}
@@ -413,7 +523,7 @@ $icon = fn(string $n, int $s = 18) => NavIcons::svg($n, $s);
 .status{display:flex;align-items:center;gap:5px;}.status i{width:6px;height:6px;border-radius:50%;background:#36a67c;display:inline-block;}.status.pending i{background:#d8bd2d;}.dots{color:#8c8491;letter-spacing:2px;}
 .empty-state{text-align:center;color:#746d7a;padding:40px 0;}
 @media (max-width:1180px){.fin-grid{grid-template-columns:1fr 1fr;}.chart-panel,.activity-panel,.pnl-panel{grid-column:1 / -1;}.pnl-grid{grid-template-columns:repeat(3,minmax(0,1fr));}.activity-panel{grid-row:auto;}.limit-panel,.card-panel{grid-column:auto;}}
-@media (max-width:760px){.t-main{padding:0!important;}.fin-shell{grid-template-columns:1fr;}.fin-rail{display:none;}.fin-board{padding:12px;}.fin-head{height:auto;align-items:flex-start;}.fin-tabs{overflow:auto;max-width:100%;}.head-actions{display:none;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
+@media (max-width:760px){.fin-shell{grid-template-columns:1fr;}.fin-rail{display:none;}.fin-board{padding:0;}.fin-grid,.metric-grid,.pnl-grid{grid-template-columns:1fr;}.limit-panel,.card-panel,.activity-panel,.chart-panel,.pnl-panel{grid-column:auto;}.activity-head{display:none;}.activity-row{grid-template-columns:22px 1fr;}.activity-row span:nth-child(n+4){display:none;}.wallets{grid-template-columns:1fr;}.pnl-card strong{white-space:normal;}}
 </style>
 <?php
 $content = ob_get_clean();

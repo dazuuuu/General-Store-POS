@@ -31,6 +31,7 @@ class PayrollModel extends Model
             'phone'=>trim((string)($in['phone']??''))?:null,
             'salary_amount'=>max(0,(float)($in['salary_amount']??0)),
             'pay_day'=>min(31,max(1,(int)($in['pay_day']??1))),
+            'commission_rate'=>max(0,min(100,(float)($in['commission_rate']??0))),
             'user_id'=>(int)($in['user_id']??0)?:null,'is_active'=>1,
         ]);
         return ['ok'=>true,'id'=>$id,'error'=>null];
@@ -85,7 +86,8 @@ class PayrollModel extends Model
 
     private function ensureSchema(): void
     {
-        $this->db->exec("CREATE TABLE IF NOT EXISTS employees(id INT AUTO_INCREMENT PRIMARY KEY,tenant_id INT NOT NULL,user_id INT NULL,name VARCHAR(160) NOT NULL,job_title VARCHAR(100) NOT NULL DEFAULT 'Employee',phone VARCHAR(40) NULL,salary_amount DECIMAL(12,2) NOT NULL DEFAULT 0,pay_day TINYINT NOT NULL DEFAULT 1,is_active TINYINT(1) NOT NULL DEFAULT 1,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,KEY idx_employee_tenant(tenant_id,is_active),KEY idx_employee_user(tenant_id,user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $this->db->exec("CREATE TABLE IF NOT EXISTS employees(id INT AUTO_INCREMENT PRIMARY KEY,tenant_id INT NOT NULL,user_id INT NULL,name VARCHAR(160) NOT NULL,job_title VARCHAR(100) NOT NULL DEFAULT 'Employee',phone VARCHAR(40) NULL,salary_amount DECIMAL(12,2) NOT NULL DEFAULT 0,pay_day TINYINT NOT NULL DEFAULT 1,commission_rate DECIMAL(5,2) NOT NULL DEFAULT 0,is_active TINYINT(1) NOT NULL DEFAULT 1,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,KEY idx_employee_tenant(tenant_id,is_active),KEY idx_employee_user(tenant_id,user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        try{$this->db->query('SELECT commission_rate FROM employees LIMIT 1');}catch(\PDOException $e){$this->db->exec('ALTER TABLE employees ADD COLUMN commission_rate DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER pay_day');}
         $this->db->exec("CREATE TABLE IF NOT EXISTS payroll_payments(id INT AUTO_INCREMENT PRIMARY KEY,tenant_id INT NOT NULL,employee_id INT NOT NULL,pay_period VARCHAR(80) NOT NULL,salary_amount DECIMAL(12,2) NOT NULL DEFAULT 0,commission_amount DECIMAL(12,2) NOT NULL DEFAULT 0,total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,paid_on DATE NOT NULL,payment_method VARCHAR(30) NOT NULL DEFAULT 'cash',created_by INT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,KEY idx_payroll_tenant(tenant_id,paid_on),KEY idx_payroll_employee(tenant_id,employee_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     }
 }

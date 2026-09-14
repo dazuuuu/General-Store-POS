@@ -16,11 +16,15 @@ class OrderModel extends Model
 
     /** Run expensive one-time schema/balance sync at most once per request. */
     private static bool $paymentSchemaSynced = false;
+    private RestaurantInventoryModel $restaurantInventory;
+    private \BranchStockService $branchStock;
 
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensurePaymentSchema();
+        $this->restaurantInventory=new RestaurantInventoryModel($this->db);
+        $this->branchStock=new \BranchStockService($this->db);
     }
 
     /**
@@ -46,11 +50,12 @@ class OrderModel extends Model
             return ['ok' => false, 'errors' => ['_' => 'No staff in context.']];
         }
         $channelIn = $in['channel'] ?? 'tab';
-        $channel   = in_array($channelIn, ['walkin', 'tab'], true) ? $channelIn : 'tab';
+        $channel   = in_array($channelIn, ['walkin', 'tab', 'restaurant'], true) ? $channelIn : 'tab';
         $tableName = trim((string) ($in['table_name'] ?? ''));
         if ($tableName === '' && $channel === 'tab') {
             return ['ok' => false, 'errors' => ['table_name' => 'Enter the customer name.']];
         }
+        if($tableName===''&&$channel==='restaurant')$tableName='Walk-in';
         $items = array_values(array_filter($in['items'] ?? [], fn($i) => (int) ($i['product_id'] ?? 0) > 0 && (float) ($i['quantity'] ?? 0) > 0));
         if (!$items) {
             return ['ok' => false, 'errors' => ['_' => 'Add at least one item.']];
@@ -61,12 +66,13 @@ class OrderModel extends Model
             $db->beginTransaction();
 
             $ins = $db->prepare(
-                "INSERT INTO orders (tenant_id, table_name, channel, opened_by, receipt_number, status, subtotal, total)
-                 VALUES (?,?,?,?,'PENDING','open',0,0)"
+                "INSERT INTO orders (tenant_id, branch_id, table_name, channel, opened_by, client_uuid, receipt_number, status, subtotal, total)
+                 VALUES (?,?,?,?,?,?,'PENDING','open',0,0)"
             );
-            $ins->execute([$tid, $tableName, $channel, $openedBy]);
+            $clientUuid=trim((string)($in['client_uuid']??''))?:null;
+            $ins->execute([$tid, $this->branchStock->branchId(), $tableName, $channel, $openedBy,$clientUuid]);
             $orderId = (int) $db->lastInsertId();
-            $prefix  = $channel === 'walkin' ? 'RCP-' : 'ORD-';
+            $prefix  = $channel === 'walkin' ? 'RCP-' : ($channel === 'restaurant' ? 'RST-' : 'ORD-');
             $receipt = $prefix . str_pad((string) $orderId, 6, '0', STR_PAD_LEFT);
             $db->prepare('UPDATE orders SET receipt_number = ? WHERE id = ?')->execute([$receipt, $orderId]);
 
@@ -118,11 +124,11 @@ class OrderModel extends Model
                 $vals[] = $priced['additional_charges'];
                 $vals[] = $additionalNote !== '' ? $additionalNote : null;
             } catch (\PDOException $ignored) {}
-            if ($channel === 'tab') {
+            if ($channel === 'tab' || $channel === 'restaurant') {
                 $sets[] = 'payment_method = ?';
                 $sets[] = 'payment_status = ?';
-                $vals[] = 'credit';
-                $vals[] = 'credit';
+                $vals[] = $channel === 'restaurant' ? 'cash' : 'credit';
+                $vals[] = $channel === 'restaurant' ? 'unpaid' : 'credit';
             }
             if ($creditDays > 0) {
                 $sets[] = 'credit_duration_days = ?';
@@ -176,7 +182,7 @@ class OrderModel extends Model
         try {
             $db->beginTransaction();
 
-            $sel = $db->prepare("SELECT id, status, sale_type FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE");
+            $sel = $db->prepare("SELECT id, status, sale_type, channel FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE");
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -189,7 +195,7 @@ class OrderModel extends Model
             }
 
             $saleType = ($order['sale_type'] ?? 'retail') === 'wholesale' ? 'wholesale' : 'retail';
-            $added = $this->insertItems($db, $tid, $orderId, $items, $staffId, $saleType, true, max(0, round($creditOverride, 2)));
+            $added = $this->insertItems($db, $tid, $orderId, $items, $staffId, $saleType, ($order['channel']??'tab')==='tab', max(0, round($creditOverride, 2)));
             if (!$added['ok']) {
                 $db->rollBack();
                 return $added;
@@ -233,6 +239,7 @@ class OrderModel extends Model
                 $db->rollBack();
                 return ['ok' => false, 'errors' => ['_' => 'Only active or paid sales can be edited.']];
             }
+            $invoiceStock=$this->branchStock->forBranch((int)($order['branch_id']??0));
 
             $saleType = (($in['sale_type'] ?? $order['sale_type'] ?? 'retail') === 'wholesale') ? 'wholesale' : 'retail';
             $existingRows = [];
@@ -274,13 +281,12 @@ class OrderModel extends Model
                 }
                 $delta = round($newQty - $oldQty, 2);
                 if ($delta > 0) {
-                    $stockDec->execute([$delta, (int) $old['product_id'], $tid, $delta]);
-                    if ($stockDec->rowCount() !== 1) {
+                    if (!$invoiceStock->adjust((int)$old['product_id'],-$delta)) {
                         $db->rollBack();
                         return ['ok' => false, 'errors' => ['_' => 'Not enough stock to increase ' . $old['product_name'] . '.']];
                     }
                 } elseif ($delta < 0) {
-                    $stockAdd->execute([abs($delta), (int) $old['product_id'], $tid]);
+                    $invoiceStock->adjust((int)$old['product_id'],abs($delta));
                 }
                 if ($newQty <= 0.0001 && $returned <= 0.0001) {
                     $deleteItem->execute([$itemId, $orderId, $tid]);
@@ -300,7 +306,7 @@ class OrderModel extends Model
                 $returned = round((float) ($returns[$itemId]['returned'] ?? 0), 2);
                 $restore = max(0, round((float) $old['quantity'] - $returned, 2));
                 if ($restore > 0 && !empty($old['product_id'])) {
-                    $stockAdd->execute([$restore, (int) $old['product_id'], $tid]);
+                    $invoiceStock->adjust((int)$old['product_id'],$restore);
                 }
                 if ($returned <= 0.0001) {
                     $deleteItem->execute([$itemId, $orderId, $tid]);
@@ -322,8 +328,7 @@ class OrderModel extends Model
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => 'One selected product is no longer available.']];
                 }
-                $stockDec->execute([$qty, $pid, $tid, $qty]);
-                if ($stockDec->rowCount() !== 1) {
+                if (!$invoiceStock->adjust($pid,-$qty)) {
                     $db->rollBack();
                     return ['ok' => false, 'errors' => ['_' => 'Not enough stock for ' . $p['name'] . '.']];
                 }
@@ -396,7 +401,7 @@ class OrderModel extends Model
     private function insertItems(\PDO $db, int $tid, int $orderId, array $items, int $staffId, string $saleType = 'retail', bool $enforceCreditLimit = false, float $creditOverride = 0.0): array
     {
         $selSql = "SELECT id, name, selling_price, wholesale_price, retail_price, offer_price, offer_starts_at, offer_ends_at,
-                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price
+                          credit_limit, quantity, unit, units_per_pack, pack_unit, pack_price, retail_pack_price, serial_tracking, is_menu_item
                      FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE";
         try {
             $sel = $db->prepare($selSql);
@@ -404,17 +409,22 @@ class OrderModel extends Model
             $sel = $db->prepare("SELECT id, name, selling_price, retail_price, quantity, unit FROM products WHERE id = ? AND tenant_id = ? AND status IN ('active','archived') FOR UPDATE");
         }
         $insItem = $db->prepare(
-            'INSERT INTO order_items (tenant_id, order_id, product_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+            'INSERT INTO order_items (tenant_id, order_id, product_id, menu_variant_id, product_name, unit_price, base_unit_price, commission_amount, price_type, quantity, line_total, added_by)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $dec = $db->prepare('UPDATE products SET quantity = quantity - ? WHERE id = ? AND tenant_id = ? AND quantity >= ?');
         $commissionEnabled = false;
+        $agentRate = 0.0;
         try {
             $setting = $db->prepare('SELECT product_commission_enabled FROM tenants WHERE id = ? LIMIT 1');
             $setting->execute([$tid]);
             $commissionEnabled = (bool) $setting->fetchColumn();
         } catch (\Throwable $ignored) {
         }
+        try {
+            $rate=$db->prepare('SELECT MAX(commission_rate) FROM employees WHERE tenant_id=? AND user_id=? AND is_active=1');
+            $rate->execute([$tid,$staffId]);$agentRate=max(0,min(100,(float)$rate->fetchColumn()));
+        } catch (\Throwable $ignored) {}
 
         foreach ($items as $it) {
             $pid = (int) $it['product_id'];
@@ -424,8 +434,24 @@ class OrderModel extends Model
             if (!$p) {
                 return ['ok' => false, 'errors' => ['_' => 'One of the products is no longer available. Refresh and try again.']];
             }
-            if ($qty > (float) $p['quantity']) {
-                return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} — only " . rtrim(rtrim(number_format((float) $p['quantity'], 2), '0'), '.') . ' left.']];
+            $variantId=(int)($it['menu_variant_id']??0);$variant=null;$recipeBacked=false;
+            if(!empty($p['is_menu_item'])){
+                $availableVariants=$this->restaurantInventory->variantsForProduct($pid);
+                if($variantId)$variant=$this->restaurantInventory->variant($variantId,$pid);
+                if($availableVariants&&!$variant)return ['ok'=>false,'errors'=>['_'=>"Choose a valid portion or size for {$p['name']}."]];
+                if($variant)$recipeBacked=(bool)$this->restaurantInventory->recipe($variantId);
+            }
+            $available=$this->branchStock->available($pid,true);
+            if (!$recipeBacked&&$qty > $available) {
+                return ['ok' => false, 'errors' => ['_' => "Not enough stock for {$p['name']} at this branch — only " . rtrim(rtrim(number_format($available, 2), '0'), '.') . ' left.']];
+            }
+            $serials=array_values(array_unique(array_filter(array_map('trim',(array)($it['serial_numbers']??[])))));
+            if(!empty($p['serial_tracking'])){
+                if(abs($qty-round($qty))>.0001||count($serials)!==(int)round($qty))return ['ok'=>false,'errors'=>['_'=>"Confirm one serial number / IMEI for every {$p['name']} unit."]];
+                $serialIn=implode(',',array_fill(0,count($serials),'?'));
+                $serialSt=$db->prepare("SELECT serial_number FROM product_serials WHERE tenant_id=? AND product_id=? AND status='in_stock' AND serial_number IN ($serialIn) FOR UPDATE");
+                $serialSt->execute(array_merge([$tid,$pid],$serials));
+                if(count($serialSt->fetchAll())!==count($serials))return ['ok'=>false,'errors'=>['_'=>"One {$p['name']} serial is invalid or already sold."]];
             }
             // Offer-aware: charges the live offer price when one is running,
             // the regular price otherwise — same rule everywhere (ProductModel::effectivePrice).
@@ -436,7 +462,7 @@ class OrderModel extends Model
                 $offerRow['offer_ends_at'] = null;
             }
             $lineSaleType = $this->normalizePriceType($it['price_type'] ?? $saleType);
-            $lineTotal = \Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
+            $lineTotal = $variant?round((float)$variant['retail_price']*$qty,2):\Pricing::lineTotal($offerRow + $p, $qty, $lineSaleType);
             $baseUnitPrice = $qty > 0 ? round($lineTotal / $qty, 2) : 0.0;
             if ($baseUnitPrice <= 0) { $baseUnitPrice = (float) ($p['retail_price'] ?: $p['selling_price']); $lineTotal = round($baseUnitPrice * $qty, 2); }
             $unitPrice = $baseUnitPrice;
@@ -450,6 +476,7 @@ class OrderModel extends Model
                 $commission = round(($unitPrice - $baseUnitPrice) * $qty, 2);
                 $lineTotal = round($unitPrice * $qty, 2);
             }
+            if($agentRate>0)$commission=round($commission+($lineTotal*$agentRate/100),2);
             if ($enforceCreditLimit && isset($p['credit_limit']) && $p['credit_limit'] !== null && $p['credit_limit'] !== '') {
                 $limit = max((float) $p['credit_limit'], $creditOverride);
                 if ($limit > 0 && $lineTotal > $limit + 0.0001) {
@@ -457,9 +484,16 @@ class OrderModel extends Model
                 }
             }
 
-            $insItem->execute([$tid, $orderId, $pid, $p['name'], $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
-            $dec->execute([$qty, $pid, $tid, $qty]);
-            if ($dec->rowCount() !== 1) {
+            $lineName=$p['name'].($variant?' — '.$variant['label']:'');
+            $insItem->execute([$tid, $orderId, $pid, $variantId?:null, $lineName, $unitPrice, $baseUnitPrice, $commission, $lineSaleType, $qty, $lineTotal, $staffId]);
+            $orderItemId=(int)$db->lastInsertId();
+            if($recipeBacked){$used=$this->restaurantInventory->consume($variantId,$qty,$orderItemId);if(!$used['ok'])return['ok'=>false,'errors'=>['_'=>$used['error']]];$db->prepare('UPDATE order_items SET unit_cogs=?,cogs_total=? WHERE id=?')->execute([$qty>0?$used['cogs']/$qty:0,$used['cogs'],$orderItemId]);}
+            if($serials){
+                $markSerial=$db->prepare("UPDATE product_serials SET status='sold',order_item_id=?,sold_at=NOW() WHERE tenant_id=? AND product_id=? AND serial_number=? AND status='in_stock'");
+                foreach($serials as $serial)$markSerial->execute([$orderItemId,$tid,$pid,$serial]);
+            }
+            $stockAdjusted=$recipeBacked?true:$this->branchStock->adjust($pid,-$qty);
+            if (!$stockAdjusted) {
                 return ['ok' => false, 'errors' => ['_' => "Stock changed for {$p['name']} while saving. Please try again."]];
             }
         }
@@ -1169,7 +1203,11 @@ class OrderModel extends Model
         $this->ensureColumn('orders', 'credit_duration_days', "ALTER TABLE orders ADD COLUMN credit_duration_days INT NULL AFTER amount_due");
         $this->ensureColumn('orders', 'credit_due_at', "ALTER TABLE orders ADD COLUMN credit_due_at DATETIME NULL AFTER credit_duration_days");
         $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
+        $this->ensureColumn('products', 'serial_tracking', "ALTER TABLE `products` ADD COLUMN `serial_tracking` TINYINT(1) NOT NULL DEFAULT 0 AFTER `product_type`");
+        try{$this->db->exec("CREATE TABLE IF NOT EXISTS product_serials(id INT AUTO_INCREMENT PRIMARY KEY,tenant_id INT NOT NULL,product_id INT NOT NULL,serial_number VARCHAR(190) NOT NULL,status ENUM('in_stock','sold','returned') NOT NULL DEFAULT 'in_stock',order_item_id INT NULL,sold_at DATETIME NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE KEY uq_tenant_serial(tenant_id,serial_number),KEY idx_serial_product(tenant_id,product_id,status)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");}catch(\PDOException $ignored){}
         $this->ensureColumn('orders', 'thank_you_sent_at', "ALTER TABLE orders ADD COLUMN thank_you_sent_at DATETIME NULL AFTER delivery_note_sent_at");
+        $this->ensureColumn('orders', 'client_uuid', "ALTER TABLE orders ADD COLUMN client_uuid CHAR(36) NULL AFTER opened_by");
+        try{$idx=$this->db->query("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='orders' AND index_name='uq_orders_client_uuid'");if(!(int)$idx->fetchColumn())$this->db->exec('CREATE UNIQUE INDEX uq_orders_client_uuid ON orders(tenant_id,client_uuid)');}catch(\PDOException $ignored){}
         $this->ensureColumn('orders', 'remembrance_sent_at', "ALTER TABLE orders ADD COLUMN remembrance_sent_at DATETIME NULL AFTER thank_you_sent_at");
         $this->ensureColumn('orders', 'invoice_deleted_at', "ALTER TABLE orders ADD COLUMN invoice_deleted_at DATETIME NULL");
         $this->ensureColumn('orders', 'invoice_deleted_by', "ALTER TABLE orders ADD COLUMN invoice_deleted_by INT NULL");
@@ -1200,6 +1238,10 @@ class OrderModel extends Model
         } catch (\PDOException $ignored) {}
         if (!self::$paymentSchemaSynced) {
             self::$paymentSchemaSynced = true;
+            try {
+                $channelType=(string)$this->db->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='channel'")->fetchColumn();
+                if(stripos($channelType,"'restaurant'")===false)$this->db->exec("ALTER TABLE orders MODIFY COLUMN channel ENUM('walkin','tab','restaurant') NOT NULL DEFAULT 'tab'");
+            } catch (\PDOException $ignored) {}
             try {
                 $this->db->exec("ALTER TABLE orders MODIFY COLUMN payment_method VARCHAR(20) DEFAULT NULL");
             } catch (\PDOException $ignored) {}
@@ -1280,18 +1322,19 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id,branch_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) { $db->rollBack(); return ['ok' => false, 'error' => 'Tab not found.']; }
             if ($order['status'] !== 'open') { $db->rollBack(); return ['ok' => false, 'error' => 'Only an open tab can be voided.']; }
 
-            $items = $db->prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ? AND tenant_id = ?');
+            $branchStock=$this->branchStock->forBranch((int)($order['branch_id']??0));
+            $items = $db->prepare('SELECT id,product_id, quantity FROM order_items WHERE order_id = ? AND tenant_id = ?');
             $items->execute([$orderId, $tid]);
             $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
             foreach ($items->fetchAll() as $it) {
-                if ($it['product_id']) {
-                    $restore->execute([$it['quantity'], $it['product_id'], $tid]);
+                if (!$this->restaurantInventory->restoreOrderItem((int)$it['id'])&&$it['product_id']) {
+                    $branchStock->adjust((int)$it['product_id'],(float)$it['quantity']);
                 }
             }
 
@@ -1318,7 +1361,7 @@ class OrderModel extends Model
         $db = $this->db;
         try {
             $db->beginTransaction();
-            $sel = $db->prepare('SELECT id, status, customer_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
+            $sel = $db->prepare('SELECT id, status, customer_id,branch_id FROM orders WHERE id = ? AND tenant_id = ? FOR UPDATE');
             $sel->execute([$orderId, $tid]);
             $order = $sel->fetch();
             if (!$order) {
@@ -1330,6 +1373,7 @@ class OrderModel extends Model
                 return ['ok' => false, 'error' => 'This invoice is already deleted.'];
             }
 
+            $branchStock=$this->branchStock->forBranch((int)($order['branch_id']??0));
             $items = $db->prepare(
                 "SELECT oi.id, oi.product_id, oi.quantity, COALESCE(ret.returned_quantity,0) AS returned_quantity
                    FROM order_items oi
@@ -1345,8 +1389,9 @@ class OrderModel extends Model
             $restore = $db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?');
             foreach ($items->fetchAll() as $it) {
                 $qty = max(0, round((float) $it['quantity'] - (float) $it['returned_quantity'], 2));
+                if($qty>0&&$this->restaurantInventory->restoreOrderItem((int)$it['id']))continue;
                 if ($qty > 0 && !empty($it['product_id'])) {
-                    $restore->execute([$qty, (int) $it['product_id'], $tid]);
+                    $branchStock->adjust((int)$it['product_id'],$qty);
                 }
             }
 
@@ -1496,7 +1541,7 @@ class OrderModel extends Model
     }
 
     /** All open tabs for the tenant, oldest first (FIFO credit queue). */
-    public function openOrders(): array
+    public function openOrders(array $opts = []): array
     {
         $tid = \TenantContext::tenantId();
         $sql = "SELECT o.*, u.username AS opened_by_name,
@@ -1509,10 +1554,13 @@ class OrderModel extends Model
              LEFT JOIN customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
                  WHERE o.tenant_id = ? AND o.status = 'open'
                    AND o.invoice_deleted_at IS NULL
-                   AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001
-              ORDER BY o.created_at ASC, o.id ASC";
+                   AND GREATEST(COALESCE(o.total,0) - COALESCE(o.amount_paid,0), 0) > 0.0001";
+        $params=[$tid];
+        $channels=array_values(array_intersect(['walkin','tab','restaurant'],(array)($opts['channels']??[])));
+        if($channels){$sql.=' AND o.channel IN ('.implode(',',array_fill(0,count($channels),'?')).')';$params=array_merge($params,$channels);}
+        $sql.=" ORDER BY o.created_at ASC, o.id ASC";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([$tid]);
+        $stmt->execute($params);
         return $stmt->fetchAll();
     }
 
@@ -1543,6 +1591,8 @@ class OrderModel extends Model
                  WHERE o.tenant_id = ? AND o.status <> 'void'
                    AND o.invoice_deleted_at IS NULL";
         $params = [$tid];
+        $channels=array_values(array_intersect(['walkin','tab','restaurant'],(array)($opts['channels']??[])));
+        if($channels){$sql.=' AND o.channel IN ('.implode(',',array_fill(0,count($channels),'?')).')';$params=array_merge($params,$channels);}
 
         if ($openOnly) {
             $sql .= " AND o.status = 'open'
@@ -1804,6 +1854,7 @@ class OrderModel extends Model
                ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
               WHERE o.tenant_id = :tid
                 AND o.status IN ('paid', 'open')
+                AND (o.channel <> 'restaurant' OR o.status = 'paid')
                 AND COALESCE(o.total, 0) > 0
                 AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
                 {$activitySql} {$staffSql}
@@ -1899,6 +1950,7 @@ class OrderModel extends Model
                ) pa ON pa.order_id = o.id AND pa.tenant_id = o.tenant_id
               WHERE o.tenant_id = ?
                 AND o.status IN ('paid', 'open')
+                AND (o.channel <> 'restaurant' OR o.status = 'paid')
                 AND COALESCE(o.total, 0) > 0
                 AND (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) > 0
                 AND (DATE(o.created_at) = ? OR COALESCE(pa.period_paid, 0) > 0)
@@ -2004,6 +2056,7 @@ class OrderModel extends Model
                        SUM(oi.line_total * {$paidRatio}) AS revenue,
                        SUM(
                            CASE
+                               WHEN oi.cogs_total IS NOT NULL THEN oi.cogs_total * {$paidRatio}
                                WHEN oi.price_type = 'wholesale'
                                     AND COALESCE(p.units_per_pack, 1) > 1
                                     AND COALESCE(p.pack_unit, '') <> ''
@@ -2013,7 +2066,7 @@ class OrderModel extends Model
                            END
                        ) AS cost,
                        SUM(CASE WHEN oi.price_type = 'retail' THEN oi.line_total * {$paidRatio} ELSE 0 END)
-                       - SUM(CASE WHEN oi.price_type = 'retail' THEN GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} ELSE 0 END) AS retail_profit,
+                       - SUM(CASE WHEN oi.price_type = 'retail' THEN CASE WHEN oi.cogs_total IS NOT NULL THEN oi.cogs_total * {$paidRatio} ELSE GREATEST(oi.quantity - COALESCE(ret.returned_quantity,0), 0) * COALESCE(p.`{$costCol}`, 0) * {$paidRatio} END ELSE 0 END) AS retail_profit,
                        SUM(CASE WHEN oi.price_type = 'wholesale' THEN oi.line_total * {$paidRatio} ELSE 0 END)
                        - SUM(CASE WHEN oi.price_type = 'wholesale' THEN
                            CASE

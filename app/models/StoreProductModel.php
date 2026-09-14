@@ -4,11 +4,13 @@ namespace Models;
 class StoreProductModel extends Model
 {
     protected string $table = 'store_products';
+    private \BranchStockService $branchStock;
 
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensureSchema();
+        $this->branchStock=new \BranchStockService($this->db);
     }
 
     public function createMany(array $items, int $staffId): array
@@ -68,6 +70,7 @@ class StoreProductModel extends Model
                 'package_buying_price' => ($item['package_buying_price'] ?? '') !== '' ? max(0, (float) $item['package_buying_price']) : null,
                 'retail_price' => max(0, (float) ($item['retail_price'] ?? 0)),
                 'wholesale_price' => max(0, (float) ($item['wholesale_price'] ?? 0)),
+                'tax_rate' => ($item['tax_rate']??'')!==''?min(100,max(0,(float)$item['tax_rate'])):null,
                 'offer_price' => ($item['offer_price'] ?? '') !== '' ? max(0, (float) $item['offer_price']) : null,
                 'offer_starts_at' => $this->dateOrNull($item['offer_starts_at'] ?? null),
                 'offer_ends_at' => $this->dateOrNull($item['offer_ends_at'] ?? null),
@@ -303,7 +306,7 @@ class StoreProductModel extends Model
      * @param array $packageQuantities whole packages to move (cartons/bales)
      * @param array $transferQuantities continuous units (kg/L) to move by quantity
      */
-    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = [], array $transferQuantities = []): array
+    public function generateInvoice(array $ids, string $invoiceTo, string $notes, int $staffId, array $packageQuantities = [], array $transferQuantities = [],array $taxRates=[]): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         if (!$ids) {
@@ -353,6 +356,7 @@ class StoreProductModel extends Model
                     $copy['transfer_packages'] = $pkgs;
                     $copy['package_quantity'] = $pkgs;
                     $copy['faulty_quantity'] = 0;
+                    if(($taxRates[$sid]??'')!=='')$copy['tax_rate']=min(100,max(0,(float)$taxRates[$sid]));
                     $invoiceItems[] = $copy;
                     $unitBuy = (float) $it['buying_price'];
                     $subtotal += $qty * $unitBuy;
@@ -387,6 +391,7 @@ class StoreProductModel extends Model
                 $copy['package_quantity'] = $pkgs;
                 // Sealed packages only — do not move opened/faulty units from the warehouse.
                 $copy['faulty_quantity'] = 0;
+                if(($taxRates[$sid]??'')!=='')$copy['tax_rate']=min(100,max(0,(float)$taxRates[$sid]));
                 $invoiceItems[] = $copy;
                 $pkgBuy = ($it['package_buying_price'] ?? '') !== '' && (float) $it['package_buying_price'] > 0
                     ? (float) $it['package_buying_price']
@@ -765,12 +770,13 @@ class StoreProductModel extends Model
             'pack_price' => ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
             'retail_pack_price' => ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
             'colors' => $it['colors'] ? array_map('trim', explode(',', $it['colors'])) : [],
-            'quantity' => (float) $it['quantity'],
+            'quantity' => $this->branchStock->independent()?0:(float)$it['quantity'],
             'faulty_quantity' => (float) ($it['faulty_quantity'] ?? 0),
             'buying_price' => (float) $it['buying_price'],
             'package_buying_price' => $it['package_buying_price'] ?? null,
             'retail_price' => (float) $it['retail_price'],
             'wholesale_price' => (float) ($it['wholesale_price'] ?: $it['retail_price']),
+            'tax_rate' => ($it['tax_rate']??'')!==''?(float)$it['tax_rate']:null,
             'offer_price' => $it['offer_price'] ?? '',
             'offer_starts_at' => $it['offer_starts_at'] ?? '',
             'offer_ends_at' => $it['offer_ends_at'] ?? '',
@@ -781,6 +787,7 @@ class StoreProductModel extends Model
             throw new \RuntimeException('Could not create inventory product: ' . json_encode($res['errors']));
         }
         $productId = (int) $res['id'];
+        if($this->branchStock->independent()&&!$this->branchStock->adjust($productId,(float)$it['quantity']))throw new \RuntimeException('Could not add inventory to the selected branch.');
         $this->applyQuantityDiscountsFromNotes($productId, (string) ($it['notes'] ?? ''));
         return $productId;
     }
@@ -811,9 +818,11 @@ class StoreProductModel extends Model
     private function restockExistingInventoryProduct(int $productId, array $it): void
     {
         $tid = \TenantContext::tenantId();
-        $sets = [
+        $sets = $this->branchStock->independent()?[]:[
             'quantity = quantity + ?',
             'faulty_quantity = faulty_quantity + ?',
+        ];
+        $sets = array_merge($sets,[
             'buying_price = ?',
             'package_buying_price = ?',
             'retail_price = ?',
@@ -824,10 +833,11 @@ class StoreProductModel extends Model
             'pack_unit = ?',
             'pack_price = ?',
             'retail_pack_price = ?',
+        ]);
+        $params = $this->branchStock->independent()?[]:[
+            (float) $it['quantity'],max(0, (float) ($it['faulty_quantity'] ?? 0)),
         ];
-        $params = [
-            (float) $it['quantity'],
-            max(0, (float) ($it['faulty_quantity'] ?? 0)),
+        $params = array_merge($params,[
             (float) $it['buying_price'],
             ($it['package_buying_price'] ?? '') !== '' ? (float) $it['package_buying_price'] : null,
             (float) $it['retail_price'],
@@ -838,7 +848,7 @@ class StoreProductModel extends Model
             $it['package_unit'] ?? null,
             ($it['package_price'] ?? '') !== '' ? (float) $it['package_price'] : null,
             ($it['retail_pack_price'] ?? '') !== '' ? (float) $it['retail_pack_price'] : null,
-        ];
+        ]);
         foreach (['category_id', 'brand_id', 'supplier_id'] as $column) {
             if ((int) ($it[$column] ?? 0) > 0) {
                 $sets[] = $column . ' = ?';
@@ -862,9 +872,11 @@ class StoreProductModel extends Model
             $params[] = $it['offer_starts_at'] ?: null;
             $params[] = $it['offer_ends_at'] ?: null;
         }
+        if(($it['tax_rate']??'')!==''){$sets[]='tax_rate = ?';$params[]=min(100,max(0,(float)$it['tax_rate']));}
         $params[] = $productId;
         $params[] = $tid;
         $this->db->prepare('UPDATE products SET ' . implode(', ', $sets) . ' WHERE id = ? AND tenant_id = ?')->execute($params);
+        if($this->branchStock->independent()&&!$this->branchStock->adjust($productId,(float)$it['quantity']))throw new \RuntimeException('Could not add inventory to the selected branch.');
     }
 
     private function findExistingInventoryProduct(array $it): ?array
@@ -926,6 +938,7 @@ class StoreProductModel extends Model
                 package_buying_price DECIMAL(12,2) NULL,
                 retail_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
                 wholesale_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                tax_rate DECIMAL(5,2) NULL,
                 offer_price DECIMAL(12,2) NULL,
                 offer_starts_at DATETIME NULL,
                 offer_ends_at DATETIME NULL,
@@ -947,6 +960,7 @@ class StoreProductModel extends Model
         $this->ensureColumn('store_products', 'retail_pack_price', "ALTER TABLE `store_products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `package_price`");
         $this->ensureColumn('products', 'retail_pack_price', "ALTER TABLE `products` ADD COLUMN `retail_pack_price` DECIMAL(12,2) NULL AFTER `pack_price`");
         $this->ensureColumn('store_products', 'package_buying_price', "ALTER TABLE `store_products` ADD COLUMN `package_buying_price` DECIMAL(12,2) NULL AFTER `buying_price`");
+        $this->ensureColumn('store_products', 'tax_rate', "ALTER TABLE `store_products` ADD COLUMN `tax_rate` DECIMAL(5,2) NULL AFTER `wholesale_price`");
         $this->ensureColumn('store_products', 'offer_price', "ALTER TABLE `store_products` ADD COLUMN `offer_price` DECIMAL(12,2) NULL AFTER `wholesale_price`");
         $this->ensureColumn('store_products', 'offer_starts_at', "ALTER TABLE `store_products` ADD COLUMN `offer_starts_at` DATETIME NULL AFTER `offer_price`");
         $this->ensureColumn('store_products', 'offer_ends_at', "ALTER TABLE `store_products` ADD COLUMN `offer_ends_at` DATETIME NULL AFTER `offer_starts_at`");

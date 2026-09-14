@@ -1,6 +1,6 @@
 (function (global) {
     function buckets() {
-        return { retail: 0, retailPack: 0, wholesale: 0, customUnitPrice: null };
+        return { retail: 0, retailPack: 0, wholesale: 0, customUnitPrice: null, serialNumbers: [] };
     }
     function hasRetailPack(p) {
         return !!(p && p.packUnit && p.unitsPerPack > 1 && p.retailPackPrice > 0);
@@ -117,6 +117,7 @@
             if ((c.retail || 0) > 0) {
                 var retailLine = { product_id: parseInt(id, 10), quantity: c.retail, price_type: 'retail' };
                 if (parseFloat(c.customUnitPrice) > 0) retailLine.unit_price = parseFloat(c.customUnitPrice);
+                if (Array.isArray(c.serialNumbers) && c.serialNumbers.length) retailLine.serial_numbers = c.serialNumbers.slice();
                 out.push(retailLine);
             }
             if ((c.retailPack || 0) > 0 && hasRetailPack(p)) {
@@ -158,6 +159,9 @@
             cart[id].retailPack += qty;
         }
         else cart[id].retail += qty;
+        if (line.unit_price !== undefined && line.price_type === 'retail') cart[id].customUnitPrice = parseFloat(line.unit_price) || null;
+        if(line.serial_numbers)cart[id].serialNumbers=line.serial_numbers.slice();
+        else if(line.serials_json){try{cart[id].serialNumbers=JSON.parse(line.serials_json)||[];}catch(e){}}
     }
     function clampField(p, c, field, val) {
         val = Math.round((parseFloat(val) || 0) * 100) / 100;

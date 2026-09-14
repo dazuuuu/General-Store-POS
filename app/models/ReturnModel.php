@@ -4,11 +4,15 @@ namespace Models;
 class ReturnModel extends Model
 {
     protected string $table = 'product_returns';
+    private RestaurantInventoryModel $restaurantInventory;
+    private \BranchStockService $branchStock;
 
     public function __construct(?\PDO $db = null)
     {
         parent::__construct($db);
         $this->ensureSchema();
+        $this->restaurantInventory=new RestaurantInventoryModel($this->db);
+        $this->branchStock=new \BranchStockService($this->db);
     }
 
     public function findReceipt(string $receipt): ?array
@@ -176,7 +180,7 @@ class ReturnModel extends Model
             $this->db->beginTransaction();
 
             $st = $this->db->prepare(
-                "SELECT i.*, s.receipt_number
+                "SELECT i.*, s.receipt_number,s.branch_id source_branch_id
                    FROM {$itemTable} i
                    JOIN {$sourceTable} s ON s.id = i.{$sourceCol} AND s.tenant_id = i.tenant_id
                   WHERE i.id = ? AND i.{$sourceCol} = ? AND i.tenant_id = ? AND s.status <> ?
@@ -224,11 +228,16 @@ class ReturnModel extends Model
                 $staffId,
             ]);
 
-            if ($restocked > 0 && !empty($item['product_id'])) {
-                $this->db->prepare('UPDATE products SET quantity = quantity + ? WHERE id = ? AND tenant_id = ?')
-                    ->execute([$restocked, (int) $item['product_id'], $tid]);
+            $recipeRestored=$sourceType==='order'&&$restocked>0&&$this->restaurantInventory->restorePortions($itemId,$restocked,(float)$item['quantity']);
+            if($recipeRestored)$this->db->prepare('UPDATE order_items SET cogs_total=GREATEST(0,COALESCE(cogs_total,0)-(COALESCE(unit_cogs,0)*?)) WHERE id=? AND tenant_id=?')->execute([$restocked,$itemId,$tid]);
+            if ($restocked > 0 && !empty($item['product_id'])&&!$recipeRestored) {
+                $this->branchStock->forBranch((int)($item['source_branch_id']??0))->adjust((int)$item['product_id'],$restocked);
+                try {
+                    $limit=(int)floor($restocked);
+                    if($limit>0)$this->db->exec("UPDATE product_serials SET status='in_stock',order_item_id=NULL,sold_at=NULL WHERE tenant_id=".(int)$tid." AND order_item_id=".(int)$itemId." AND status='sold' LIMIT ".$limit);
+                } catch (\PDOException $ignored) {}
             }
-            if ($used > 0 && !empty($item['product_id'])) {
+            if ($used > 0 && !empty($item['product_id'])&&!$recipeRestored) {
                 try {
                     $this->db->prepare('UPDATE products SET faulty_quantity = COALESCE(faulty_quantity,0) + ? WHERE id = ? AND tenant_id = ?')
                         ->execute([$used, (int) $item['product_id'], $tid]);

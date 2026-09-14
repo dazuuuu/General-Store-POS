@@ -18,6 +18,7 @@ $shopName = $__tenant['name'] ?? 'My Shop';
     <title><?php echo htmlspecialchars($page_title ?? 'Dashboard'); ?> — <?php echo htmlspecialchars($shopName); ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <?php if(TenantFeatures::offlineEnabled()): include __DIR__.'/../../components/pwa_head.php';?><script defer src="<?php echo public_url('assets/js/offline-pos.js');?>"></script><?php endif;?>
     <style>
         :root{ --pos-violet:#4b006e; --pos-violet-dark:#32004b; --pos-violet-light:#f5ecff; --pos-green:var(--pos-violet); --pos-green-dark:var(--pos-violet-dark); --pos-green-light:var(--pos-violet-light); --pos-bg:#f7f7fb; --pos-ink:#1f2330; }
         *{box-sizing:border-box;} body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;background:var(--pos-bg);color:var(--pos-ink);}
@@ -72,6 +73,8 @@ $shopName = $__tenant['name'] ?? 'My Shop';
     </main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<?php if(TenantFeatures::offlineEnabled()):?><script>window.addEventListener('load',function(){window.OfflinePOS&&OfflinePOS.provision(<?php echo json_encode(['tenant_id'=>TenantContext::tenantId(),'user_id'=>TenantContext::userId(),'username'=>$_SESSION['username']??'Staff','role'=>TenantContext::role(),'dashboard_url'=>public_url('staff/dashboard/'),'catalog_url'=>public_url('api/sync/catalog.php'),'sync_url'=>public_url('api/sync/push.php')]);?>);});</script><?php endif;?>
+<script>window.TenantSettingsSyncConfig=<?php echo json_encode(['url'=>public_url('api/tenant/settings.php'),'loginUrl'=>public_url('auth/login.php?locked=1'),'revision'=>TenantFeatures::revision()]);?>;</script><script src="<?php echo public_url('assets/js/tenant-settings-sync.js');?>"></script>
 <?php echo $extra_js ?? ''; ?>
 </body>
 </html>

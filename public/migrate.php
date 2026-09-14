@@ -1,8 +1,10 @@
 <?php
 // public/migrate.php — guarded web migration runner for environments where
-// command-line access is inconvenient. Only the primary tenant owner can run it.
+// command-line access is inconvenient. Migration execution now lives only in
+// the authenticated developer support portal.
 require_once __DIR__ . '/../app/app.php';
-PageGuard::primaryOwner();
+header('Location: '.public_url('domain/support/migrations.php'));
+exit;
 
 $page_title = 'Run migrations';
 $result = null;

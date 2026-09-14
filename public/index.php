@@ -2,10 +2,14 @@
 // public/index.php — the staff terminal. Type your PIN, then Login, Clock In
 // or Clock Out. Owners go to /admin instead.
 require_once __DIR__ . '/../app/app.php';
+$requestPath=strtolower((string)(parse_url($_SERVER['REQUEST_URI']??'/',PHP_URL_PATH)??'/'));
+if(preg_match('#(?:^|/)devs(?:/|$)#',$requestPath)){http_response_code(404);exit('Not found.');}
 
 // Already fully logged in? Skip straight to the dashboard.
 if (!empty($_SESSION['logged_in']) && !empty($_SESSION['otp_verified'])) {
-    $dest = ($_SESSION['role'] ?? '') === 'staff' ? public_url('staff/dashboard/') : public_url('super/dashboard/');
+    $dest = ($_SESSION['role'] ?? '') === 'staff'
+        ? public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/')
+        : public_url('super/dashboard/');
     header('Location: ' . $dest);
     exit;
 }
@@ -26,7 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $stmt = $pdo->prepare(
         "SELECT u.*, r.role_name FROM users u JOIN roles r ON r.id = u.role_id
-          WHERE r.role_name = 'staff' AND u.is_active = 1 AND u.pin_hash IS NOT NULL"
+           JOIN tenants t ON t.id=u.tenant_id AND t.status='active'
+      LEFT JOIN branches b ON b.id=u.branch_id AND b.tenant_id=u.tenant_id
+          WHERE r.role_name = 'staff' AND u.is_active = 1 AND u.pin_hash IS NOT NULL
+            AND (u.branch_id IS NULL OR b.is_active=1)"
     );
     $stmt->execute();
     $user = null;
@@ -56,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['logged_in']    = true;
         $_SESSION['otp_verified'] = true;
         $_SESSION['must_reset']   = false;
-        header('Location: ' . public_url('staff/dashboard/'));
+        header('Location: ' . public_url(!TenantFeatures::enabled('shop_pos')&&TenantFeatures::enabled('restaurant_menu')?'staff/restaurant/new.php':'staff/dashboard/'));
         exit;
     }
 }
@@ -67,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title><?php echo htmlspecialchars($shopName); ?> — Staff terminal</title>
-<?php include __DIR__ . '/components/pwa_head.php'; ?>
+<?php if(!empty($shop['offline_enabled'])):include __DIR__ . '/components/pwa_head.php';?><script defer src="<?php echo public_url('assets/js/offline-pos.js');?>"></script><?php endif;?>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <style>
   *{box-sizing:border-box;}
@@ -189,6 +196,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       pinValue.value = pin;
       actionValue.value = btn.dataset.action;
     });
+  });
+  form.addEventListener('submit',function(e){
+    if(actionValue.value!=='login'||!window.OfflinePOS)return;
+    if(!navigator.onLine){
+      e.preventDefault();OfflinePOS.offlineLogin(pin).then(function(user){location.href=user.dashboard_url;}).catch(function(err){alert(err.message);});return;
+    }
+    e.preventDefault();OfflinePOS.rememberCandidate(pin).finally(function(){form.submit();});
   });
 })();
 </script>
